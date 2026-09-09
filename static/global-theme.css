@@ -1,0 +1,373 @@
+/* Единая очередь 3.3.86 — глобальное визуальное обновление.
+   Только внешний CSS: совместимо с CSP style-src 'self'. */
+
+:root {
+  --ui-radius-xs: 8px;
+  --ui-radius-sm: 11px;
+  --ui-radius-md: 16px;
+  --ui-radius-lg: 22px;
+  --ui-radius-xl: 28px;
+  --ui-glow: rgba(8,127,91,.18);
+  --ui-glow-strong: rgba(8,127,91,.28);
+  --ui-glass: rgba(255,255,255,.78);
+  --ui-card-highlight: rgba(255,255,255,.72);
+  --ui-ease: cubic-bezier(.2,.8,.2,1);
+  --shadow: 0 12px 34px rgba(28,55,48,.09), 0 2px 8px rgba(28,55,48,.04);
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b100f;
+  --panel: #131b19;
+  --surface-subtle: #101715;
+  --surface-hover: #192521;
+  --field-bg: #0e1513;
+  --field-border: #30433d;
+  --line: #263731;
+  --message-bg: #0e1513;
+  --green-soft: #10382a;
+  --ui-glow: rgba(55,211,154,.16);
+  --ui-glow-strong: rgba(55,211,154,.26);
+  --ui-glass: rgba(19,27,25,.82);
+  --ui-card-highlight: rgba(255,255,255,.045);
+  --shadow: 0 18px 48px rgba(0,0,0,.28), 0 3px 10px rgba(0,0,0,.22);
+}
+
+html { scroll-behavior: smooth; }
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% 0%, var(--ui-glow) 0, transparent 27rem),
+    radial-gradient(circle at 92% 12%, rgba(55,211,154,.07) 0, transparent 31rem),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .42;
+  background-image:
+    linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 72%);
+}
+
+/* Верхняя панель */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 1200;
+  min-height: 72px;
+  padding-inline: max(24px, 3.2vw);
+  border-bottom: 1px solid rgba(99,223,177,.15);
+  background: rgba(10,31,25,.91);
+  box-shadow: 0 12px 34px rgba(0,0,0,.18);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+.brand {
+  position: relative;
+  letter-spacing: -.01em;
+  transition: transform .22s var(--ui-ease), filter .22s var(--ui-ease);
+}
+.brand:hover { transform: translateY(-1px); filter: brightness(1.08); }
+.brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(145deg,#65e6b8,#25b881);
+  box-shadow: 0 7px 22px rgba(55,211,154,.27), inset 0 1px 0 rgba(255,255,255,.45);
+  transition: transform .28s var(--ui-ease), box-shadow .28s var(--ui-ease);
+}
+.brand:hover .brand-mark { transform: rotate(-4deg) scale(1.05); box-shadow: 0 10px 28px rgba(55,211,154,.38); }
+nav { gap: 6px; }
+.nav-link {
+  height: auto;
+  min-height: 40px;
+  padding: 9px 13px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #b9cdc6;
+  transition: color .18s ease, background .18s ease, border-color .18s ease, transform .18s ease;
+}
+.nav-link:hover {
+  border-bottom-color: transparent;
+  border-color: rgba(99,223,177,.15);
+  background: rgba(99,223,177,.08);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.nav-link.active {
+  border-bottom-color: transparent;
+  border-color: rgba(99,223,177,.2);
+  background: linear-gradient(180deg,rgba(55,211,154,.18),rgba(55,211,154,.09));
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.025), 0 6px 18px rgba(0,0,0,.12);
+}
+.shift-form select, .theme-toggle, .notification-button {
+  border-color: rgba(111,178,156,.34) !important;
+  background: rgba(18,59,49,.76) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+}
+.theme-toggle, .notification-button { transition: transform .18s ease, background .18s ease, border-color .18s ease; }
+.theme-toggle:hover, .notification-button:hover { transform: translateY(-1px); background: rgba(28,82,67,.9) !important; }
+
+/* Общая геометрия и появление страницы */
+.page {
+  width: min(1540px, 95vw);
+  margin-top: 28px;
+  animation: queue-page-enter .34s var(--ui-ease) both;
+}
+@keyframes queue-page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.page-heading, .ticket-header { margin-bottom: 22px; }
+h1 { letter-spacing: -.035em; }
+h2 { letter-spacing: -.015em; }
+.eyebrow { letter-spacing: .15em; }
+
+/* Универсальные карточки */
+.panel, .metric, .search-card, .chat-sidebar, .chat-main, .toast-card, .notification-popover {
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+.panel {
+  border-radius: var(--ui-radius-md);
+  background:
+    linear-gradient(145deg,var(--ui-card-highlight),transparent 35%),
+    var(--panel);
+}
+.admin-card, .metric, .search-card, .ticket-media-card, .system-card, .handoff-item, .outbox-card {
+  transition: transform .22s var(--ui-ease), box-shadow .22s var(--ui-ease), border-color .22s ease, background .22s ease;
+}
+.admin-card:hover, .metric:hover, .search-card:hover, .ticket-media-card:hover, .system-card:hover, .handoff-item:hover, .outbox-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--green) 50%, var(--line));
+  box-shadow: 0 18px 44px var(--ui-glow), var(--shadow);
+}
+
+/* Кнопки */
+.button, .icon-button, .status-action, .whatsapp-button, .composer-send, .attachment-remove,
+.player-button, .voice-transcribe-button, .media-zoom-button, .pagination-link {
+  transition: transform .16s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease, color .2s ease, filter .2s ease;
+}
+.button {
+  min-height: 42px;
+  border-radius: 11px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.045);
+}
+.button:hover:not(:disabled), .icon-button:hover:not(:disabled), .status-action:hover:not(:disabled),
+.whatsapp-button:hover:not(:disabled), .composer-send:hover:not(:disabled), .pagination-link:hover:not(.disabled) {
+  transform: translateY(-1px);
+}
+.button:active:not(:disabled), .icon-button:active:not(:disabled), .composer-send:active:not(:disabled) { transform: translateY(0) scale(.985); }
+.button.primary, .composer-send, .whatsapp-button {
+  background: linear-gradient(145deg,var(--green),var(--green-dark));
+  border-color: color-mix(in srgb,var(--green) 78%, #fff 22%);
+  box-shadow: 0 8px 22px var(--ui-glow), inset 0 1px 0 rgba(255,255,255,.18);
+}
+.button.primary:hover, .composer-send:hover, .whatsapp-button:hover { filter: brightness(1.06); box-shadow: 0 11px 28px var(--ui-glow-strong); }
+.button.ghost { backdrop-filter: blur(8px); }
+
+/* Поля */
+input, select, textarea {
+  border-radius: 11px;
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+  box-shadow: inset 0 1px 1px rgba(0,0,0,.025);
+}
+input:hover, select:hover, textarea:hover { border-color: color-mix(in srgb,var(--green) 32%,var(--field-border)); }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 4px var(--ui-glow), inset 0 1px 1px rgba(0,0,0,.02);
+}
+
+/* Метрики */
+.metrics { gap: 14px; }
+.metric {
+  position: relative;
+  overflow: hidden;
+  min-height: 88px;
+  border-radius: 16px;
+}
+.metric::after {
+  content: "";
+  position: absolute;
+  inset: auto -30px -45px auto;
+  width: 95px;
+  height: 95px;
+  border-radius: 50%;
+  background: var(--ui-glow);
+  filter: blur(4px);
+  pointer-events: none;
+}
+.metric strong { position: relative; z-index: 1; font-size: 30px; letter-spacing: -.04em; }
+
+/* Фильтры, табы, таблицы */
+.filters-panel { padding: 16px; border-radius: 16px; }
+.admin-tabs {
+  padding: 7px;
+  border-radius: 15px;
+  background: color-mix(in srgb,var(--panel) 92%,transparent);
+  backdrop-filter: blur(10px);
+}
+.admin-tab { border-radius: 10px; transition: transform .17s ease, background .17s ease, color .17s ease; }
+.admin-tab:hover { transform: translateY(-1px); }
+.admin-tab.active { box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--green) 20%,transparent); }
+.table-panel { border-radius: 17px; }
+th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  backdrop-filter: blur(10px);
+  background: color-mix(in srgb,var(--surface-subtle) 94%,transparent);
+}
+tbody tr { transition: background .14s ease, box-shadow .14s ease; }
+tbody tr:hover { box-shadow: inset 3px 0 0 var(--green); }
+.status, .priority, .sla-badge, .duplicate-badge, .handoff-badge, .connection-badge {
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.035);
+}
+
+/* Заявки */
+.ticket-main { border-radius: 20px; }
+.ticket-layout aside .panel { border-radius: 17px; }
+.detail-grid > div {
+  border-radius: 13px;
+  background: linear-gradient(145deg,var(--surface-subtle),transparent);
+  transition: border-color .18s ease, transform .18s ease;
+}
+.detail-grid > div:hover { border-color: color-mix(in srgb,var(--green) 40%,var(--line)); transform: translateY(-1px); }
+.message { border-radius: 13px; }
+
+/* WhatsApp и группы */
+.chat-shell { gap: 16px; }
+.chat-sidebar, .chat-main { border-radius: 19px; overflow: hidden; }
+.chat-sidebar-head, .chat-header {
+  background: color-mix(in srgb,var(--panel) 92%,transparent);
+  backdrop-filter: blur(12px);
+}
+.chat-list-item {
+  margin: 4px 7px;
+  border-radius: 13px;
+  border: 1px solid transparent;
+  transition: transform .17s ease, background .17s ease, border-color .17s ease;
+}
+.chat-list-item:hover {
+  transform: translateX(2px);
+  border-color: color-mix(in srgb,var(--green) 22%,transparent);
+  background: var(--surface-hover);
+}
+.chat-list-item.active, .chat-list-item.selected {
+  border-color: color-mix(in srgb,var(--green) 30%,transparent);
+  background: linear-gradient(90deg,var(--green-soft),color-mix(in srgb,var(--green-soft) 26%,transparent));
+  box-shadow: inset 3px 0 0 var(--green);
+}
+.chat-messages {
+  background:
+    radial-gradient(circle at 85% 4%, var(--ui-glow) 0, transparent 20rem),
+    var(--message-bg);
+}
+.chat-bubble {
+  border-radius: 15px;
+  box-shadow: 0 5px 18px rgba(0,0,0,.055);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.chat-message-row:hover .chat-bubble { box-shadow: 0 8px 24px rgba(0,0,0,.09); }
+.outgoing .chat-bubble { background: color-mix(in srgb,var(--green-soft) 82%,var(--panel)); }
+.chat-quote { border-radius: 10px; }
+.chat-composer {
+  background: color-mix(in srgb,var(--panel) 94%,transparent);
+  backdrop-filter: blur(12px);
+}
+.composer-field .composer-message-input { border-radius: 14px; }
+.composer-field .composer-tool { transition: transform .15s ease, background .15s ease, color .15s ease; }
+.composer-field .composer-tool:hover { transform: translateY(-1px) scale(1.04); color: var(--green); }
+.chat-media-image, .queue-player, .chat-media-file-box { border-radius: 14px; }
+.chat-unread, .chat-wait { box-shadow: 0 5px 15px rgba(0,0,0,.13); }
+
+/* Поиск */
+.search-heading { margin-top: 18px; }
+.search-card { border-radius: 17px; }
+.search-card:hover { background: linear-gradient(145deg,var(--surface-hover),var(--panel)); }
+mark { border-radius: 5px; }
+
+/* Уведомления */
+.notification-popover {
+  border-radius: 16px;
+  background: color-mix(in srgb,var(--panel) 94%,transparent);
+  backdrop-filter: blur(16px);
+}
+.toast-card {
+  overflow: hidden;
+  border-radius: 16px;
+  animation: queue-toast-enter .28s var(--ui-ease);
+}
+@keyframes queue-toast-enter {
+  from { opacity: 0; transform: translateX(18px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+.notice { border-radius: 14px; }
+
+/* Админка */
+.admin-card-grid { gap: 18px; }
+.admin-card { border-radius: 17px; }
+.system-status-grid, .system-metrics { gap: 14px; }
+.system-card { border-radius: 16px; }
+.qr-display-card { border-radius: 18px; }
+.qr-display { border-radius: 15px; }
+.menu-editor-row { border-radius: 16px; }
+.menu-editor-number { border-radius: 11px; }
+
+/* Инструкция получает ту же оболочку, но её собственная раскладка остаётся главной. */
+.instruction-shell { animation: queue-page-enter .34s var(--ui-ease) both; }
+.instruction-search-wrap { box-shadow: 0 16px 38px rgba(0,0,0,.08); }
+
+footer { opacity: .82; }
+
+/* Небольшая адаптация */
+@media (max-width: 1050px) {
+  .topbar { gap: 12px; padding-inline: 16px; }
+  .nav-link { padding-inline: 10px; }
+}
+@media (max-width: 760px) {
+  .page { width: min(96vw,1540px); margin-top: 18px; }
+  .panel, .chat-sidebar, .chat-main { border-radius: 14px; }
+  .chat-list-item { margin-inline: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .page, .instruction-shell, .toast-card { animation: none !important; }
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
+
+/* 3.3.88: keep the group participants popover above chat messages.
+   backdrop-filter on .chat-header creates a stacking context, so the header
+   itself must be lifted above .chat-messages; a child z-index alone cannot
+   escape the parent's stacking context. */
+.chat-header {
+  position: relative;
+  z-index: 80;
+  overflow: visible;
+}
+.chat-header-actions {
+  position: relative;
+  z-index: 81;
+}
+.participants-details {
+  position: relative;
+  z-index: 82;
+}
+.participants-details[open] {
+  z-index: 2000;
+}
+.participants-list {
+  z-index: 2100 !important;
+}
+.chat-messages {
+  position: relative;
+  z-index: 1;
+}

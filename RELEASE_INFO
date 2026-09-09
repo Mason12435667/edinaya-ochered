@@ -1,0 +1,6 @@
+PRODUCT_VERSION=1.00.1
+RELEASE_CHANNEL=stable
+BASE_STABLE=1.00
+ALPHA_BUILD=3.3.118-alpha
+RELEASE_LINE=1.x
+CHANGE=deleted-message-preview-sync

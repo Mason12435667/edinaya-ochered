@@ -1,0 +1,21 @@
+[Unit]
+Description=Edinaya Ochered WhatsApp QR connector
+After=network-online.target edinaya-ochered.service
+Wants=network-online.target
+Requires=edinaya-ochered.service
+
+[Service]
+Type=simple
+User=queueapp
+Group=queueapp
+WorkingDirectory=/opt/edinaya-ochered
+EnvironmentFile=/etc/edinaya-ochered/queue.env
+ExecStart=/usr/bin/node /opt/edinaya-ochered/whatsapp_qr_connector.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

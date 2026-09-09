@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node.js
+node_modules/
+
+# Runtime/application data
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+chat-media/
+outbound-media/
+uploads/
+
+# WhatsApp runtime/session
+.wwebjs_auth/
+.wwebjs_cache/
+.connector_token
+
+# Local caches/config
+.cache/
+.local/
+.config/
+
+# Secrets
+.env
+.env.*
+!.env.example
+secrets.env
+secret.env
+credentials*.json
+service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Backups / release artifacts
+*.bak
+*.old
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,140 @@
+/* 3.3.104: notification center visual isolation / actionable warnings. */
+.notification-popover[data-notification-popover]{
+  z-index:100000 !important;
+  isolation:isolate !important;
+  opacity:1 !important;
+  -webkit-backdrop-filter:none !important;
+  backdrop-filter:none !important;
+  box-shadow:0 22px 64px rgba(0,0,0,.48),0 0 0 1px rgba(76,220,170,.08) !important;
+  overflow:hidden !important;
+}
+html[data-theme="dark"] .notification-popover[data-notification-popover]{
+  background:#101c19 !important;
+  background-color:#101c19 !important;
+  border-color:#29463d !important;
+}
+html[data-theme="light"] .notification-popover[data-notification-popover]{
+  background:#f7fbf9 !important;
+  background-color:#f7fbf9 !important;
+  border-color:#c7ddd5 !important;
+  box-shadow:0 22px 58px rgba(16,48,39,.20),0 0 0 1px rgba(24,130,96,.08) !important;
+}
+.notification-popover[data-notification-popover] > strong,
+.notification-popover[data-notification-popover] [data-notification-items]{
+  position:relative !important;
+  z-index:2 !important;
+}
+.notification-popover[data-notification-popover] [data-notification-items] > *{
+  position:relative !important;
+  z-index:2 !important;
+}
+/* Old theme rules used translucent cards. Make every row opaque so page text can
+   never shine through the notification center. */
+html[data-theme="dark"] .notification-popover[data-notification-popover] [data-notification-items] > *{
+  background-color:#12231f !important;
+}
+html[data-theme="light"] .notification-popover[data-notification-popover] [data-notification-items] > *{
+  background-color:#ffffff !important;
+}
+.notification-button[data-notification-center],
+.notification-popover[data-notification-popover]{
+  transform:translateZ(0);
+}
+
+
+/* 3.3.103: visible details for active system/SLA warnings. */
+.notification-system-events{
+  display:grid;
+  gap:6px;
+  margin-top:8px;
+  padding-top:8px;
+  border-top:1px solid var(--line,#29463d);
+}
+.notification-system-events-title{
+  padding:2px 8px 4px;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--muted,#9ab0a9);
+}
+.notification-popover[data-notification-popover] .notification-system-event{
+  display:grid !important;
+  grid-template-columns:18px minmax(0,1fr);
+  gap:8px;
+  align-items:start;
+  padding:9px 10px !important;
+  margin:0 !important;
+  border:1px solid rgba(255,190,92,.18) !important;
+  border-radius:10px;
+  color:var(--text,#e8f1ee) !important;
+  text-decoration:none;
+  transition:border-color .16s ease,transform .16s ease,background-color .16s ease;
+}
+.notification-popover[data-notification-popover] .notification-system-event:hover{
+  transform:translateY(-1px);
+  border-color:rgba(81,221,171,.45) !important;
+}
+.notification-popover[data-notification-popover] .notification-system-event.critical{
+  border-color:rgba(255,105,105,.35) !important;
+}
+.notification-system-event-icon{
+  display:grid;
+  place-items:center;
+  width:18px;
+  height:18px;
+  margin-top:1px;
+  border-radius:50%;
+  background:rgba(245,184,76,.14);
+  color:#f5b84c;
+  font-size:12px;
+  font-weight:900;
+}
+.notification-system-event.critical .notification-system-event-icon{
+  background:rgba(255,100,100,.14);
+  color:#ff7676;
+}
+.notification-system-event-body{
+  display:grid;
+  min-width:0;
+  gap:3px;
+}
+.notification-system-event-body strong,
+.notification-system-event-body span,
+.notification-system-event-body small{
+  display:block;
+  min-width:0;
+  overflow-wrap:anywhere;
+}
+.notification-system-event-body strong{font-size:12px;line-height:1.3;}
+.notification-system-event-body span{font-size:11px;line-height:1.35;color:var(--muted,#a6b7b1);font-weight:500;}
+.notification-system-event-body small{font-size:10px;color:var(--muted,#81968f);font-weight:600;}
+.notification-system-more{
+  display:block;
+  padding:6px 8px;
+  text-align:center;
+  font-size:11px;
+  font-weight:700;
+  color:var(--green,#45d6a5);
+}
+html[data-theme="light"] .notification-popover[data-notification-popover] .notification-system-event{
+  background:#fff !important;
+  color:#17342c !important;
+}
+html[data-theme="dark"] .notification-popover[data-notification-popover] .notification-system-event{
+  background:#12231f !important;
+}
+
+
+/* 3.3.104: warning actions */
+.notification-system-events-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 4px 4px;}
+.notification-system-events-heading .notification-system-events-title{padding:2px 4px 4px;}
+.notification-system-heading-actions,.notification-system-event-actions{display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
+.notification-system-mini-action,.notification-system-action{appearance:none;border:1px solid var(--line,#315047);border-radius:7px;background:rgba(68,209,160,.08);color:var(--text,#e8f1ee);font:inherit;font-size:10px;font-weight:800;line-height:1;padding:6px 7px;text-decoration:none;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,transform .15s ease;}
+.notification-system-mini-action:hover,.notification-system-action:hover{border-color:rgba(74,222,170,.65);background:rgba(68,209,160,.15);transform:translateY(-1px);}
+.notification-system-mini-action.danger,.notification-system-action.danger{border-color:rgba(255,112,112,.28);color:#ffabab;background:rgba(255,90,90,.06);}
+.notification-system-mini-action:disabled,.notification-system-action:disabled{opacity:.55;cursor:wait;transform:none;}
+.notification-popover[data-notification-popover] .notification-system-event{grid-template-columns:18px minmax(0,1fr) !important;}
+.notification-system-event-actions{grid-column:2;margin-top:4px;}
+html[data-theme="light"] .notification-system-mini-action,html[data-theme="light"] .notification-system-action{color:#17342c;background:#f4fbf8;border-color:#c8ded6;}
+html[data-theme="light"] .notification-system-mini-action.danger,html[data-theme="light"] .notification-system-action.danger{color:#a23f3f;background:#fff7f7;border-color:#ebcaca;}
