@@ -686,18 +686,21 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
 .chat-bubble { position: relative; }
 .chat-message-body { white-space: pre-wrap; }
 .chat-inline-mention {
-  display: inline;
-  padding: 1px 4px 2px;
+  display: inline-block;
+  padding: 1px 5px 2px;
+  border: 1px solid color-mix(in srgb, var(--blue) 42%, transparent);
   border-radius: 5px;
-  background: rgba(36, 99, 171, .12);
+  background: var(--blue-soft);
   color: var(--blue);
   font-weight: 800;
+  line-height: 1.25;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 .chat-inline-mention.mention-highlighted {
-  background: rgba(83, 189, 235, .18);
+  background: var(--blue-soft);
   color: var(--blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 18%, transparent);
 }
 .chat-reactions { display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-top:2px; }
 .chat-reaction-chip {
@@ -941,3 +944,14 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
 .chat-favorite-toggle.active{color:var(--green);text-shadow:0 0 10px color-mix(in srgb,var(--green) 35%,transparent)}
 .chat-inline-link{color:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px;font-weight:650;overflow-wrap:anywhere;word-break:break-word}
 .chat-inline-link:hover{text-decoration-thickness:2px}
+
+
+/* 1.00.3: right-click/context-menu horizontal overflow guard. */
+.chat-shell,
+.chat-main,
+.chat-messages { min-width: 0; max-width: 100%; }
+.chat-messages { overflow-x: hidden; }
+.message-context-menu {
+  box-sizing: border-box;
+  max-width: min(260px, calc(100vw - 16px));
+}

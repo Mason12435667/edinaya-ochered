@@ -241,16 +241,15 @@ def notification_counts(store, base: dict[str, int]) -> dict[str, int]:
     with store.connection() as db:
         contacts = db.execute(
             """SELECT c.chat_id,c.unread_count FROM whatsapp_chats c
-               INNER JOIN whatsapp_contacts p ON p.chat_id=c.chat_id
                WHERE c.chat_id NOT LIKE '%@g.us' AND c.chat_id NOT LIKE '%@broadcast' AND c.chat_id NOT LIKE '%@newsletter'"""
         ).fetchall()
         groups = db.execute(
-            """SELECT c.chat_id,c.mention_unread_count,COALESCE(g.muted,0) AS legacy_muted
+            """SELECT c.chat_id,c.unread_count,COALESCE(g.muted,0) AS legacy_muted
                FROM whatsapp_chats c INNER JOIN whatsapp_groups g ON g.chat_id=c.chat_id
                WHERE g.added_by_admin=1"""
         ).fetchall()
     counts["contacts"] = sum(int(r["unread_count"] or 0) for r in contacts if str(r["chat_id"]) not in muted)
-    counts["groups"] = sum(int(r["mention_unread_count"] or 0) for r in groups if not r["legacy_muted"] and str(r["chat_id"]) not in muted)
+    counts["groups"] = sum(int(r["unread_count"] or 0) for r in groups if not r["legacy_muted"] and str(r["chat_id"]) not in muted)
     return counts
 
 
@@ -265,12 +264,12 @@ def first_unmuted_chat(store, group: bool) -> str:
         if group:
             rows = db.execute(
                 """SELECT c.chat_id FROM whatsapp_chats c INNER JOIN whatsapp_groups g ON g.chat_id=c.chat_id
-                   WHERE g.added_by_admin=1 AND COALESCE(g.muted,0)=0 AND c.mention_unread_count>0
+                   WHERE g.added_by_admin=1 AND COALESCE(g.muted,0)=0 AND c.unread_count>0
                    ORDER BY c.last_timestamp DESC,c.updated_at DESC LIMIT 50"""
             ).fetchall()
         else:
             rows = db.execute(
-                """SELECT c.chat_id FROM whatsapp_chats c INNER JOIN whatsapp_contacts p ON p.chat_id=c.chat_id
+                """SELECT c.chat_id FROM whatsapp_chats c
                    WHERE c.unread_count>0 AND c.chat_id NOT LIKE '%@g.us' AND c.chat_id NOT LIKE '%@broadcast' AND c.chat_id NOT LIKE '%@newsletter'
                    ORDER BY c.last_timestamp DESC,c.updated_at DESC LIMIT 50"""
             ).fetchall()

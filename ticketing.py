@@ -2592,11 +2592,11 @@ class TicketStore:
                     should_increment = (not from_me and not exists)
                     mention_increment = bool(should_increment and notify)
                 elif not from_me and not exists:
-                    manual_row = connection.execute(
-                        "SELECT 1 FROM whatsapp_contacts WHERE chat_id = ? LIMIT 1",
-                        (chat_id,),
-                    ).fetchone()
-                    should_increment = manual_row is not None
+                    # 1.00.2: every real personal WhatsApp message is unread until
+                    # an employee opens the chat. Earlier builds counted only
+                    # contacts manually added in Admin, so ordinary chats could
+                    # arrive silently even though the message was saved.
+                    should_increment = True
                 if should_increment:
                     connection.execute(
                         "UPDATE whatsapp_chats SET unread_count = unread_count + 1 WHERE chat_id = ?",
@@ -3205,7 +3205,7 @@ class TicketStore:
             ).fetchone()
             groups = connection.execute(
                 """
-                SELECT COALESCE(SUM(c.mention_unread_count), 0) AS amount
+                SELECT COALESCE(SUM(c.unread_count), 0) AS amount
                 FROM whatsapp_chats AS c
                 INNER JOIN whatsapp_groups AS g ON g.chat_id = c.chat_id
                 WHERE g.added_by_admin = 1 AND COALESCE(g.muted, 0) = 0
@@ -3215,7 +3215,6 @@ class TicketStore:
                 """
                 SELECT COALESCE(SUM(c.unread_count), 0) AS amount
                 FROM whatsapp_chats AS c
-                INNER JOIN whatsapp_contacts AS m ON m.chat_id = c.chat_id
                 WHERE c.chat_id NOT LIKE '%@g.us'
                   AND c.chat_id NOT LIKE '%@broadcast'
                   AND c.chat_id NOT LIKE '%@newsletter'
@@ -3248,9 +3247,11 @@ class TicketStore:
                     "timestamp": epoch_from_iso(str(row["created_at"] or "")),
                 })
             contacts = connection.execute(
-                """SELECT c.chat_id, m.name, w.body AS last_message, w.message_timestamp AS last_timestamp, m.phone, w.message_key
+                """SELECT c.chat_id, COALESCE(NULLIF(m.name,''), c.name, '') AS name,
+                          w.body AS last_message, w.message_timestamp AS last_timestamp,
+                          COALESCE(m.phone,'') AS phone, w.message_key
                    FROM whatsapp_chats AS c
-                   INNER JOIN whatsapp_contacts AS m ON m.chat_id = c.chat_id
+                   LEFT JOIN whatsapp_contacts AS m ON m.chat_id = c.chat_id
                    JOIN whatsapp_chat_messages w ON w.id=(SELECT id FROM whatsapp_chat_messages WHERE chat_id=c.chat_id AND from_me=0 AND deleted=0 ORDER BY message_timestamp DESC,id DESC LIMIT 1)
                    WHERE c.unread_count > 0
                      AND c.chat_id NOT LIKE '%@g.us'
@@ -3276,26 +3277,29 @@ class TicketStore:
                     "timestamp": int(row["last_timestamp"] or 0),
                 })
             groups = connection.execute(
-                """SELECT c.chat_id, g.name, w.body AS last_message, w.message_timestamp AS last_timestamp, w.message_key
+                """SELECT c.chat_id, g.name, w.body AS last_message, w.message_timestamp AS last_timestamp,
+                          w.message_key, w.notify
                    FROM whatsapp_chats AS c
                    INNER JOIN whatsapp_groups AS g ON g.chat_id = c.chat_id
                    JOIN whatsapp_chat_messages w ON w.id=(
                        SELECT id FROM whatsapp_chat_messages
-                       WHERE chat_id=c.chat_id AND from_me=0 AND deleted=0 AND notify=1
+                       WHERE chat_id=c.chat_id AND from_me=0 AND deleted=0
                        ORDER BY message_timestamp DESC,id DESC LIMIT 1
                    )
                    WHERE g.added_by_admin = 1
                      AND COALESCE(g.muted, 0) = 0
-                     AND c.mention_unread_count > 0
+                     AND c.unread_count > 0
                    ORDER BY w.message_timestamp DESC LIMIT 6"""
             ).fetchall()
             for row in groups:
+                mentioned = bool(row["notify"])
                 events.append({
                     "id": f"group:{row['chat_id']}:{row['message_key']}",
                     "chat_id": row["chat_id"], "message_key": row["message_key"],
                     "kind": "group",
-                    "title": "Упоминание в группе",
-                    "detail": str(row["last_message"] or "Вас упомянули"),
+                    "mentioned": mentioned,
+                    "title": "Упоминание в группе" if mentioned else "Новое сообщение в группе",
+                    "detail": str(row["last_message"] or ("Вас упомянули" if mentioned else "Новое сообщение")),
                     "source": str(row["name"] or "Группа WhatsApp"),
                     "href": f"/groups?chat_id={row['chat_id']}",
                     "timestamp": int(row["last_timestamp"] or 0),

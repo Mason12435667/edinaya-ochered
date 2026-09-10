@@ -2243,7 +2243,7 @@ def layout(
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png?v=3.3.79">
   <link rel="apple-touch-icon" href="/static/favicon.png?v=3.3.79">
   <script>document.documentElement.dataset.theme = localStorage.getItem("queue-theme") || "light";</script>
-  <link rel="stylesheet" href="/static/style.css?v=3.3.79">
+  <link rel="stylesheet" href="/static/style.css?v=1.00.3">
   <link rel="stylesheet" href="/static/ui.css?v=3.3.79">
   <link rel="stylesheet" href="/static/instruction.css?v=3.3.85">
   <link rel="stylesheet" href="/static/global-theme.css?v=3.3.88">
@@ -2276,11 +2276,11 @@ def layout(
   <main class="page">{content}</main>
   <footer>Единая очередь · рабочая система обработки заявок</footer>
   <script src="/static/ui.js?v=3.3.79" defer></script>
-  <script src="/static/app.js?v=3.3.104" defer></script>
+  <script src="/static/app.js?v=1.00.3" defer></script>
   <script src="/static/productivity.js?v=3.3.90" defer></script>
   <script src="/static/workflow.js?v=3.3.111" defer></script>
   <script src="/static/reliability.js?v=3.3.99" defer></script>
-  <script src="/static/interface105.js?v=3.3.106" defer></script>
+  <script src="/static/interface105.js?v=1.00.3" defer></script>
   <script src="/static/performance107.js?v=3.3.107" defer></script>
 </body>
 </html>"""

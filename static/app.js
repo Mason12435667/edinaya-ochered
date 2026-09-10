@@ -423,12 +423,24 @@ window.QueueVoice = (() => {
 
     // QUEUE_LINKIFY_3_3_79: render http(s), www and plain-domain links as safe clickable anchors.
     function appendMessageText(container, text, message) {
-      const value = String(text || "");
+      // 1.00.2: WhatsApp may persist the body with an @lid/@c.us numeric token
+      // even though the message already carries a resolved participant name.
+      // Convert every known technical token locally as a final presentation
+      // fallback so an @mention can never become visually "invisible".
+      let value = String(text || "");
       const exactMentions = [];
       (Array.isArray(message && message.mentions) ? message.mentions : []).forEach((mention) => {
         if (!mention || typeof mention !== "object") return;
         const name = String(mention.name || "").trim();
-        if (name) exactMentions.push(`@${name}`);
+        if (!name) return;
+        exactMentions.push(`@${name}`);
+        [mention.id, mention.resolved_id].forEach((rawId) => {
+          const raw = String(rawId || "").trim();
+          const technical = raw.split("@")[0].replace(/^@+/, "");
+          if (!technical) return;
+          const escaped = technical.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          value = value.replace(new RegExp(`@${escaped}(?!\\d)`, "g"), `@${name}`);
+        });
       });
       exactMentions.sort((a, b) => b.length - a.length);
       const escapedMentions = exactMentions.map((item) => item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -538,6 +550,42 @@ window.QueueVoice = (() => {
       const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
       panel.style.left = `${Math.min(Math.max(margin, left), maxLeft)}px`;
       panel.style.top = `${Math.min(Math.max(margin, top), maxTop)}px`;
+    }
+
+    // 1.00.3: context-menu-specific placement. Unlike the generic picker
+    // helper above, this never exposes the menu at an unsafe coordinate first.
+    // That prevents CSS interface zoom from creating horizontal document
+    // overflow and moving the whole conversation after a right-click.
+    function placeMessageContextMenu(panel, clientX, clientY, margin = 8) {
+      if (!(panel instanceof HTMLElement)) return;
+      const viewport = window.visualViewport;
+      const viewportLeft = Number(viewport?.offsetLeft || 0);
+      const viewportTop = Number(viewport?.offsetTop || 0);
+      const viewportWidth = Number(viewport?.width || document.documentElement.clientWidth || window.innerWidth);
+      const viewportHeight = Number(viewport?.height || document.documentElement.clientHeight || window.innerHeight);
+
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+      const previousVisibility = panel.style.visibility;
+      panel.style.visibility = "hidden";
+      panel.style.left = "0px";
+      panel.style.top = "0px";
+
+      const rect = panel.getBoundingClientRect();
+      const scaleX = panel.offsetWidth > 0 && rect.width > 0 ? rect.width / panel.offsetWidth : 1;
+      const scaleY = panel.offsetHeight > 0 && rect.height > 0 ? rect.height / panel.offsetHeight : scaleX;
+      const safeScaleX = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1;
+      const safeScaleY = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : 1;
+      const minLeft = viewportLeft + margin;
+      const minTop = viewportTop + margin;
+      const maxLeft = Math.max(minLeft, viewportLeft + viewportWidth - rect.width - margin);
+      const maxTop = Math.max(minTop, viewportTop + viewportHeight - rect.height - margin);
+      const wantedLeft = Math.min(Math.max(minLeft, Number(clientX) + 2 || minLeft), maxLeft);
+      const wantedTop = Math.min(Math.max(minTop, Number(clientY) + 2 || minTop), maxTop);
+
+      panel.style.left = `${wantedLeft / safeScaleX}px`;
+      panel.style.top = `${wantedTop / safeScaleY}px`;
+      panel.style.visibility = previousVisibility;
     }
 
     function openReactionPicker(message, bubble, button, pointer = null) {
@@ -670,9 +718,11 @@ window.QueueVoice = (() => {
         addItem("Удалить", "⌫", () => { closeMessageContextMenu(); queueMessageAction(message, "delete"); }, true);
       }
 
+      const pageScrollX = window.scrollX;
       document.body.append(menu);
-      clampFloatingPanel(menu, event.clientX + 2, event.clientY + 2, 8);
+      placeMessageContextMenu(menu, event.clientX, event.clientY, 8);
       menu.querySelector("button")?.focus({preventScroll: true});
+      if (window.scrollX !== pageScrollX) window.scrollTo(pageScrollX, window.scrollY);
 
       window.setTimeout(() => {
         const close = (clickEvent) => {
@@ -2498,7 +2548,7 @@ window.QueueVoice = (() => {
       source.textContent = String(item.source || "Единая очередь");
       const badge = document.createElement("b");
       badge.className = "toast-kind-badge";
-      badge.textContent = kind === "group" || kind === "groups" ? "Упоминание" : kind === "contact" || kind === "contacts" ? "Сообщение" : kind === "ticket" || kind === "tickets" ? "Заявка" : kind === "support" ? "Поддержка" : kind === "sla" ? "SLA" : kind === "system" ? "Система" : "Событие";
+      badge.textContent = kind === "group" || kind === "groups" ? (item.mentioned ? "Упоминание" : "Группа") : kind === "contact" || kind === "contacts" ? "Сообщение" : kind === "ticket" || kind === "tickets" ? "Заявка" : kind === "support" ? "Поддержка" : kind === "sla" ? "SLA" : kind === "system" ? "Система" : "Событие";
       meta.append(source, badge);
       const title = document.createElement("strong");
       title.textContent = String(item.title || "Новое событие");
@@ -2593,7 +2643,7 @@ window.QueueVoice = (() => {
         const rows = [
           ["Новые заявки", Number(counts.tickets || 0), "/"],
           ["Новые сообщения WhatsApp", Number(counts.contacts || 0), contactHref],
-          ["@ Упоминания в группах", Number(counts.groups || 0), groupHref],
+          ["Новые сообщения групп", Number(counts.groups || 0), groupHref],
           ["Вопросы в поддержку", Number(counts.support || 0), "/?category=support&status=new"],
           ["Напоминания", Number(counts.reminders || 0), "/reminders"],
           ["Системные предупреждения", Number(counts.system || 0), "/admin/system"],

@@ -243,6 +243,11 @@ const groupIdentityRepairAt = new Map();
 let profileSyncBusy = false;
 const lidToPhone = new Map();
 const reconciledInboundIds = new Map();
+// 1.00.2: separate "currently being handled" from "successfully handled".
+// Previously an incoming ID was marked reconciled before the async group path
+// finished; one transient WhatsApp/Puppeteer error could therefore suppress all
+// recovery attempts until the user opened the Groups page.
+const inboundProcessingIds = new Map();
 const participantDisplayById = new Map();
 const ownMentionIds = new Set();
 const knownChats = new Map();
@@ -1850,7 +1855,7 @@ async function reconcileRecentInbound() {
     for (const row of (Array.isArray(candidates) ? candidates.slice(-40) : [])) {
       const mid = String(row.id || '');
       const from = String(row.from || row.remote || '');
-      if (!mid || reconciledInboundIds.has(mid) || from === 'status@broadcast' || from.endsWith('@newsletter')) continue;
+      if (!mid || reconciledInboundIds.has(mid) || inboundProcessingIds.has(mid) || from === 'status@broadcast' || from.endsWith('@newsletter')) continue;
       if (!USER_MESSAGE_TYPES.has(String(row.type || ''))) continue;
       const isGroupMessage = from.endsWith('@g.us');
       let message = null;
@@ -1859,7 +1864,6 @@ async function reconcileRecentInbound() {
         if (message) rememberMessageObject(message, from);
       } catch (_) {}
       if (message && !message.fromMe && isLiveInboundMessage(message)) {
-        reconciledInboundIds.set(mid, now);
         recovered += 1;
         // И личные, и групповые сообщения повторно подаются в единый обработчик.
         // Это важно: на текущем WhatsApp Web событие message иногда пропадает
@@ -1881,6 +1885,7 @@ async function reconcileRecentInbound() {
     }
     if (recovered) console.log(`Резервная синхронизация восстановила входящих: ${recovered}`);
     for (const [id, t] of reconciledInboundIds) if (now - t > 3600000) reconciledInboundIds.delete(id);
+    for (const [id, t] of inboundProcessingIds) if (now - t > 60000) inboundProcessingIds.delete(id);
   } catch (error) {
     console.warn('Резервная синхронизация входящих:', error && error.stack ? error.stack.split('\n')[0] : (error.message || error));
   } finally {
@@ -4466,10 +4471,16 @@ client.on('message_create', async (message) => {
 client.on('message', async (message) => {
   let templateErrorId = 0;
   let stage = 'проверка сообщения';
+  const incomingEventId = serializedId(message && message.id);
+  let handledSuccessfully = false;
+  if (incomingEventId) {
+    if (reconciledInboundIds.has(incomingEventId)) return;
+    const startedAt = Number(inboundProcessingIds.get(incomingEventId) || 0);
+    if (startedAt && Date.now() - startedAt < 60000) return;
+    inboundProcessingIds.set(incomingEventId, Date.now());
+  }
   try {
     const from = String(message.from || '');
-    const incomingEventId = serializedId(message && message.id);
-    if (incomingEventId) reconciledInboundIds.set(incomingEventId, Date.now());
     if (from.endsWith('@g.us')) {
       if (
         message.fromMe ||
@@ -4484,8 +4495,9 @@ client.on('message', async (message) => {
       const groupSender = groupSenderInfo.name || fallbackSender || 'Участник группы';
       const mentionedUs = await mentionsConnectedAccount(message);
       // В группах система НИКОГДА не запускает обработчик заявок и не отправляет
-      // автоответы. Сообщение сохраняется в переписку, а уведомление создаётся
-      // только если участник явно упомянул подключённый рабочий WhatsApp через @.
+      // автоответы. Сообщение сохраняется в переписку. Начиная с 1.00.2 глобальный
+      // центр уведомлений показывает все непрочитанные сообщения незаглушённых
+      // групп, а реальное @упоминание дополнительно помечается как упоминание.
       await publishLiveMessage(
         from,
         groupSender,
@@ -4497,6 +4509,7 @@ client.on('message', async (message) => {
         groupSenderInfo.phone || '',
         groupSenderInfo.id || groupSenderInfo.resolved_id || ''
       );
+      handledSuccessfully = true;
       if (mentionedUs) {
         console.log(`Упоминание рабочего WhatsApp в группе: ${from} | ${groupSender}`);
       }
@@ -4586,6 +4599,7 @@ client.on('message', async (message) => {
       message_timestamp: Number(message.timestamp || Math.floor(Date.now() / 1000)),
       message_type: String(message.type || 'chat'),
     });
+    handledSuccessfully = true;
 
     if (result.duplicate) {
       return;
@@ -4665,6 +4679,11 @@ client.on('message', async (message) => {
       } catch (ackError) {
         console.error('Не удалось сохранить ошибку отправки:', ackError.message || ackError);
       }
+    }
+  } finally {
+    if (incomingEventId) {
+      inboundProcessingIds.delete(incomingEventId);
+      if (handledSuccessfully) reconciledInboundIds.set(incomingEventId, Date.now());
     }
   }
 });

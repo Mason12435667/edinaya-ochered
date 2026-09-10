@@ -59,54 +59,14 @@
   }
   installScaleControl();
 
-  // 3.3.106: keep context menus next to the real pointer even when the
-  // interface scale is not 100%. We adjust from the menu's actual rendered
-  // rectangle, so this also works for legacy absolute-positioned menus.
-  function visibleContextMenu() {
-    const explicit = [...document.querySelectorAll(
-      ".message-context-menu,.chat-message-menu,.message-action-menu,.context-menu,[data-context-menu],[data-message-menu],[data-message-context-menu]"
-    )].find((node) => {
-      if (!(node instanceof HTMLElement) || node.hidden) return false;
-      const style = getComputedStyle(node);
-      return style.display !== "none" && style.visibility !== "hidden" && node.getBoundingClientRect().width > 0;
-    });
-    if (explicit) return explicit;
-    return [...document.querySelectorAll("[class*=menu],[role=menu],body > div,.chat-main > div")].find((node) => {
-      if (!(node instanceof HTMLElement) || node.hidden) return false;
-      const style = getComputedStyle(node);
-      if (style.display === "none" || style.visibility === "hidden") return false;
-      const text = String(node.textContent || "");
-      return text.includes("Реакция") && text.includes("Ответить") && text.includes("Переслать") && node.getBoundingClientRect().width > 0;
-    }) || null;
-  }
-
-  function placeContextMenuAtPointer(clientX, clientY) {
-    const menu = visibleContextMenu();
-    if (!menu) return;
-    menu.style.right = "auto";
-    menu.style.bottom = "auto";
-    const moveTo = (x, y) => {
-      const rect = menu.getBoundingClientRect();
-      const scaleX = rect.width > 0 && menu.offsetWidth > 0 ? rect.width / menu.offsetWidth : 1;
-      const scaleY = rect.height > 0 && menu.offsetHeight > 0 ? rect.height / menu.offsetHeight : scaleX;
-      const currentLeft = Number.parseFloat(menu.style.left || getComputedStyle(menu).left) || 0;
-      const currentTop = Number.parseFloat(menu.style.top || getComputedStyle(menu).top) || 0;
-      menu.style.left = `${currentLeft + (x - rect.left) / (scaleX || 1)}px`;
-      menu.style.top = `${currentTop + (y - rect.top) / (scaleY || 1)}px`;
-    };
-    moveTo(clientX + 4, clientY + 4);
-    requestAnimationFrame(() => {
-      const rect = menu.getBoundingClientRect();
-      const x = Math.max(8, Math.min(clientX + 4, window.innerWidth - rect.width - 8));
-      const y = Math.max(8, Math.min(clientY + 4, window.innerHeight - rect.height - 8));
-      moveTo(x, y);
-    });
-  }
-
+  // 1.00.3: app.js is the only owner of chat context-menu positioning.
+  // The old secondary repositioner could briefly place a fixed menu beyond the
+  // viewport (especially with UI scale/zoom), which expanded the document and
+  // made the conversation jump horizontally. We only suppress the browser's
+  // native menu here and let the row handler in app.js place our menu safely.
   document.addEventListener("contextmenu", (event) => {
-    const x = event.clientX, y = event.clientY;
-    setTimeout(() => placeContextMenuAtPointer(x, y), 0);
-    requestAnimationFrame(() => requestAnimationFrame(() => placeContextMenuAtPointer(x, y)));
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".chat-message-row[data-message-id]")) event.preventDefault();
   }, true);
 
   const conversationPage = document.querySelector("[data-conversation-page]");
