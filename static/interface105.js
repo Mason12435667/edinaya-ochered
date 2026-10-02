@@ -59,15 +59,52 @@
   }
   installScaleControl();
 
-  // 1.00.3: app.js is the only owner of chat context-menu positioning.
-  // The old secondary repositioner could briefly place a fixed menu beyond the
-  // viewport (especially with UI scale/zoom), which expanded the document and
-  // made the conversation jump horizontally. We only suppress the browser's
-  // native menu here and let the row handler in app.js place our menu safely.
-  document.addEventListener("contextmenu", (event) => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest(".chat-message-row[data-message-id]")) event.preventDefault();
-  }, true);
+  // 3.3.106: keep context menus next to the real pointer even when the
+  // interface scale is not 100%. We adjust from the menu's actual rendered
+  // rectangle, so this also works for legacy absolute-positioned menus.
+  function visibleContextMenu() {
+    const explicit = [...document.querySelectorAll(
+      ".message-context-menu,.chat-message-menu,.message-action-menu,.context-menu,[data-context-menu],[data-message-menu],[data-message-context-menu]"
+    )].find((node) => {
+      if (!(node instanceof HTMLElement) || node.hidden) return false;
+      const style = getComputedStyle(node);
+      return style.display !== "none" && style.visibility !== "hidden" && node.getBoundingClientRect().width > 0;
+    });
+    if (explicit) return explicit;
+    return [...document.querySelectorAll("[class*=menu],[role=menu],body > div,.chat-main > div")].find((node) => {
+      if (!(node instanceof HTMLElement) || node.hidden) return false;
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden") return false;
+      const text = String(node.textContent || "");
+      return text.includes("Реакция") && text.includes("Ответить") && text.includes("Переслать") && node.getBoundingClientRect().width > 0;
+    }) || null;
+  }
+
+  function placeContextMenuAtPointer(clientX, clientY) {
+    const menu = visibleContextMenu();
+    if (!menu) return;
+    menu.style.right = "auto";
+    menu.style.bottom = "auto";
+    const moveTo = (x, y) => {
+      const rect = menu.getBoundingClientRect();
+      const scaleX = rect.width > 0 && menu.offsetWidth > 0 ? rect.width / menu.offsetWidth : 1;
+      const scaleY = rect.height > 0 && menu.offsetHeight > 0 ? rect.height / menu.offsetHeight : scaleX;
+      const currentLeft = Number.parseFloat(menu.style.left || getComputedStyle(menu).left) || 0;
+      const currentTop = Number.parseFloat(menu.style.top || getComputedStyle(menu).top) || 0;
+      menu.style.left = `${currentLeft + (x - rect.left) / (scaleX || 1)}px`;
+      menu.style.top = `${currentTop + (y - rect.top) / (scaleY || 1)}px`;
+    };
+    moveTo(clientX + 4, clientY + 4);
+    requestAnimationFrame(() => {
+      const rect = menu.getBoundingClientRect();
+      const x = Math.max(8, Math.min(clientX + 4, window.innerWidth - rect.width - 8));
+      const y = Math.max(8, Math.min(clientY + 4, window.innerHeight - rect.height - 8));
+      moveTo(x, y);
+    });
+  }
+
+  // 1.00.6.34: context menus are positioned by app.js only. A second global
+  // capture-phase mover caused the chat workspace to jump/break on right click.
 
   const conversationPage = document.querySelector("[data-conversation-page]");
   if (!conversationPage) return;
@@ -159,22 +196,15 @@
   // Chat tabs. Personal/group navigation stays explicit; the rest are safe DOM filters.
   const tabs = document.createElement("div");
   tabs.className = "uq-chat-tabs";
+  // 1.00.6.31 fix4: keep only the categories used by the current UI.
   const tabDefs = [
-    ["all", "Все"], ["private", "Личные"], ["groups", "Группы"], ["unread", "Непрочитанные"], ["needs", "Нужен ответ"], ["favorite", "Закреплённые"],
+    ["private", "Личные"], ["groups", "Группы"], ["unread", "Непрочитанные"],
   ];
-  let activeTab = String(pageSettings.tab || "all");
+  let activeTab = String(pageSettings.tab || (isGroups ? "groups" : "private"));
+  if (!["private", "groups", "unread"].includes(activeTab)) activeTab = isGroups ? "groups" : "private";
   const needsButton = sidebar.querySelector(".reply-queue-toggle");
-  // Keep the existing live counter, but move it into normal document flow.
-  // This prevents it from covering the first chat after the new tabs were added.
-  if (needsButton) {
-    needsButton.classList.add("uq-needs-flow");
-    tabs.after(needsButton);
-  }
-  function setNeedsQueue(wanted) {
-    if (!needsButton || isGroups) return;
-    const current = needsButton.getAttribute("aria-pressed") === "true";
-    if (current !== wanted) needsButton.click();
-  }
+  if (needsButton) needsButton.remove();
+  function setNeedsQueue(_wanted) { /* obsolete queue removed */ }
   function applyListFilter() {
     const rows = [...list.querySelectorAll(".chat-list-item")];
     rows.forEach((row) => {
@@ -188,10 +218,8 @@
   function chooseTab(tab) {
     if (tab === "private" && isGroups) { location.href = "/whatsapp"; return; }
     if (tab === "groups" && !isGroups) { location.href = "/groups"; return; }
-    if (tab === "needs" && isGroups) { location.href = "/whatsapp"; return; }
-    activeTab = tab === "private" || tab === "groups" ? "all" : tab;
+    activeTab = tab;
     pageSettings.tab = activeTab; save();
-    setNeedsQueue(activeTab === "needs");
     requestAnimationFrame(applyListFilter);
   }
   tabDefs.forEach(([id,label]) => {
@@ -200,7 +228,6 @@
     button.addEventListener("click", () => chooseTab(id)); tabs.append(button);
   });
   (search || head).after(tabs);
-  if (activeTab === "needs") setNeedsQueue(true);
   const listObserver = new MutationObserver(() => requestAnimationFrame(applyListFilter));
   listObserver.observe(list, {childList:true, subtree:true, attributes:true, attributeFilter:["class"]});
   applyListFilter();
@@ -289,7 +316,7 @@
     const context = latestState.ui_context || {};
     const active = Array.isArray(context.active_tickets) ? context.active_tickets : [];
     const title = String(document.querySelector("[data-chat-title]")?.textContent || profile.name || "Чат");
-    const signature = JSON.stringify([latestState.selected_chat_id, title, profile.name, profile.phone, context.phone, active]);
+    const signature = JSON.stringify([latestState.selected_chat_id, title, profile.name, profile.phone, context.phone, active, latestState.dialog_review]);
     if (signature === lastContextSignature) return;
     lastContextSignature = signature;
     const body = infoPanel.querySelector("[data-uq-info-body]");
@@ -298,6 +325,12 @@
     const h = document.createElement("strong"); h.textContent = title;
     const p = document.createElement("small"); p.textContent = prettyPhone(profile.phone || context.phone, latestState.selected_chat_id);
     profileCard.append(h,p); body.append(profileCard);
+    if (latestState.dialog_review && latestState.dialog_review.reason) {
+      const review = document.createElement("section"); review.className = "uq-info-card";
+      const heading = document.createElement("strong"); heading.textContent = "Нужен разбор сотрудника";
+      const reason = document.createElement("p"); reason.textContent = latestState.dialog_review.reason;
+      review.append(heading, reason); body.prepend(review);
+    }
     const quick = document.createElement("div"); quick.className = "uq-info-actions";
     [
       ["Медиа", "[data-media-browser-toggle],button", "медиа"],

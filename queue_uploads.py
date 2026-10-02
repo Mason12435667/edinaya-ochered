@@ -8,8 +8,23 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
+import queue_realtime
+
 MAX_FILE = 512 * 1024 * 1024
 CHUNK = 512 * 1024
+
+
+def _media_log(message: str) -> None:
+    """Best-effort local diagnostics without logging message/file contents."""
+    try:
+        data_dir = Path(os.environ.get('QUEUE_DATA_DIR', '') or '.').resolve()
+        log_dir = Path(os.environ.get('QUEUE_LOG_DIR', '') or (data_dir / 'logs'))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        with (log_dir / 'media-upload.log').open('a', encoding='utf-8') as handle:
+            handle.write(f'[{stamp}] {message}\n')
+    except Exception:
+        pass
 
 
 class Uploads:
@@ -19,7 +34,7 @@ class Uploads:
         self.lock = threading.Lock()
         self.sessions = {}
 
-    def start(self, payload, actor):
+    def start(self, payload, actor, owner=""):
         size = int(payload.get('size',0))
         if size <= 0 or size > MAX_FILE:
             raise ValueError('Размер файла должен быть от 1 байта до 512 МБ')
@@ -49,8 +64,16 @@ class Uploads:
                 'request_id':str(payload.get('request_id',''))[:120],
                 'chat':chat,'name':filename,'mime':safe_mime(payload.get('mimetype','')),
                 'body':str(payload.get('message',''))[:1000],'reply':str(payload.get('reply_to',''))[:160],
-                'mentions':payload.get('mentions',[]) if isinstance(payload.get('mentions',[]),list) else [],'actor':actor}
+                'mentions':payload.get('mentions',[]) if isinstance(payload.get('mentions',[]),list) else [],'actor':actor,'owner':owner}
+        _media_log(f"start chat={chat} name={filename!r} mime={self.sessions[token]['mime']} size={size} upload={token[:8]}")
         return {'upload_id':token,'chunk_size':CHUNK}
+
+    def authorized_chat(self, token, owner):
+        with self.lock:
+            state = self.sessions.get(token)
+            if not state or not owner or state.get('owner') != owner:
+                raise PermissionError('Загрузка принадлежит другому аккаунту или истекла')
+            return state['chat']
 
     def append(self, token, offset, data):
         with self.lock:
@@ -79,6 +102,12 @@ class Uploads:
                 row=db.execute('SELECT media_path FROM outbound_messages WHERE id=?',(queued,)).fetchone()
             if row and row['media_path'] != str(s['path']): s['path'].unlink(missing_ok=True)
             s['queued']=queued
+            # Realtime fast path: chunk uploads must wake the WhatsApp connector
+            # exactly like text sends do. Without this the connector can remain
+            # inside /api/outbound/claim long-poll until its ~18 s timeout.
+            queue_realtime.notify_outbound()
+            queue_realtime.notify('outbound_media')
+            _media_log(f"queued id={queued} chat={s['chat']} name={s['name']!r} mime={s['mime']} size={s['size']}")
             return {'queued':True,'message_id':queued}
 
     def cancel(self, token):
@@ -100,13 +129,17 @@ def post(handler, app):
     if not secrets.compare_digest(handler.headers.get('X-CSRF-Token',''),app.ADMIN_FORM_TOKEN):
         handler.json_response({'error':'Обновите страницу перед загрузкой'},403)
         return True
+    user = handler.effective_user() or {}
+    owner = str(user.get('id') or ('legacy:' + str(user.get('username') or '')))
     try:
         if parsed.path == '/upload/start':
             payload=handler.read_json_body(20000)
             if payload is None: return True
-            result=app.UPLOADS.start(payload,app.active_employee())
+            if not handler.claim_conversation_write(str(payload.get('chat_id', ''))): return True
+            result=app.UPLOADS.start(payload,app.work_actor(),owner=owner)
         elif parsed.path == '/upload/chunk':
             q=parse_qs(parsed.query)
+            app.UPLOADS.authorized_chat(q.get('id',[''])[0],owner)
             length=int(handler.headers.get('Content-Length','0'))
             if length<=0 or length>CHUNK: raise ValueError('Недопустимый размер части')
             data=handler.rfile.read(length)
@@ -116,13 +149,18 @@ def post(handler, app):
             payload=handler.read_json_body(2000)
             if payload is None: return True
             token=str(payload.get('upload_id',''))
+            chat = app.UPLOADS.authorized_chat(token,owner)
+            if parsed.path.endswith('/finish') and not handler.claim_conversation_write(chat): return True
             if parsed.path.endswith('/cancel'):
                 app.UPLOADS.cancel(token); result={'cancelled':True}
             else: result=app.UPLOADS.finish(token)
         else:
             handler.json_response({'error':'Неизвестная операция'},404); return True
         handler.json_response(result)
+    except PermissionError as exc:
+        handler.json_response({'error':str(exc)},403)
     except (ValueError,TypeError,OSError) as exc:
+        _media_log(f"error route={parsed.path} reason={str(exc)[:180]!r}")
         handler.json_response({'error':str(exc)[:180]},400)
     return True
 

@@ -1,8 +1,0 @@
-[Unit]
-Description=Backup Edinaya Ochered SQLite database
-
-[Service]
-Type=oneshot
-User=queueapp
-Group=queueapp
-ExecStart=/opt/edinaya-ochered/server/backup_sqlite.sh

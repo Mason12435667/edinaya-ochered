@@ -1,0 +1,223 @@
+/* 1.00.6.37 — персональная Pink / Pick Me тема.
+   Активируется только при data-theme="pink" у конкретной учётной записи. */
+
+:root[data-theme="pink"] {
+  --bg: #fff2f8;
+  --panel: #fffafd;
+  --text: #56243d;
+  --muted: #9b6480;
+  --line: #f2c9dc;
+  --green: #ef6fa9;
+  --green-dark: #d64d8a;
+  --green-soft: #ffe3f0;
+  --yellow: #d99a28;
+  --yellow-soft: #fff3cf;
+  --blue: #a76ad9;
+  --blue-soft: #f2e6ff;
+  --red: #dc6684;
+  --red-soft: #ffe7ee;
+  --surface-subtle: #fff5fa;
+  --surface-hover: #ffeaf4;
+  --field-bg: #fffafd;
+  --field-border: #eebbd3;
+  --code-bg: #fbe7f1;
+  --message-bg: #fff7fb;
+  --shadow: 0 14px 34px rgba(204, 87, 142, .12);
+  --scrollbar-track: #f9dcea;
+  --scrollbar-thumb: #e582b1;
+  --scrollbar-thumb-hover: #d65b97;
+  --ui-glow: rgba(238, 111, 169, .22);
+  --ui-glow-strong: rgba(224, 77, 143, .28);
+  --ui-glass: rgba(255, 247, 251, .86);
+  --ui-card-highlight: rgba(255,255,255,.86);
+}
+
+:root[data-theme="pink"] body {
+  background:
+    radial-gradient(circle at 8% 2%, rgba(255, 188, 220, .72) 0, transparent 25rem),
+    radial-gradient(circle at 92% 12%, rgba(222, 190, 255, .44) 0, transparent 31rem),
+    linear-gradient(150deg, #fff4f9 0%, #fdebf5 52%, #fff8fc 100%);
+  color: var(--text);
+}
+
+:root[data-theme="pink"] body::before {
+  opacity: .30;
+  background-image:
+    radial-gradient(circle, rgba(224, 102, 159, .16) 1px, transparent 1.5px),
+    radial-gradient(circle, rgba(179, 120, 214, .12) 1px, transparent 1.5px);
+  background-size: 28px 28px, 42px 42px;
+  background-position: 0 0, 14px 12px;
+}
+
+:root[data-theme="pink"] body::after {
+  content: "✿  ♡  ✿";
+  position: fixed;
+  right: 28px;
+  bottom: 18px;
+  z-index: 0;
+  pointer-events: none;
+  color: rgba(214, 77, 138, .17);
+  font-size: 24px;
+  letter-spacing: 9px;
+  transform: rotate(-7deg);
+}
+
+:root[data-theme="pink"] .topbar {
+  border-bottom-color: rgba(255,255,255,.48);
+  background: linear-gradient(100deg, rgba(214,77,138,.95), rgba(239,111,169,.94) 55%, rgba(183,117,218,.88));
+  box-shadow: 0 12px 34px rgba(190, 68, 126, .24);
+}
+
+:root[data-theme="pink"] .brand-mark {
+  color: #7a234d;
+  background: linear-gradient(145deg,#fff0f7,#ffb8d7);
+  box-shadow: 0 7px 22px rgba(129, 32, 78, .18), inset 0 1px 0 rgba(255,255,255,.8);
+}
+
+:root[data-theme="pink"] .brand-mark::after {
+  content: "✿";
+  position: absolute;
+  margin: -26px 0 0 26px;
+  color: #fff8fc;
+  font-size: 12px;
+  text-shadow: 0 1px 5px rgba(121, 30, 74, .25);
+}
+
+:root[data-theme="pink"] .nav-link { color: #fff0f7; }
+:root[data-theme="pink"] .nav-link:hover,
+:root[data-theme="pink"] .nav-link.active {
+  color: #fff;
+  border-color: rgba(255,255,255,.42);
+  background: rgba(255,255,255,.17);
+}
+
+:root[data-theme="pink"] .theme-toggle,
+:root[data-theme="pink"] .notification-button,
+:root[data-theme="pink"] .shift-form select {
+  color: #fff !important;
+  border-color: rgba(255,255,255,.45) !important;
+  background: rgba(116,32,75,.18) !important;
+}
+:root[data-theme="pink"] .theme-toggle:hover,
+:root[data-theme="pink"] .notification-button:hover {
+  background: rgba(255,255,255,.18) !important;
+}
+
+:root[data-theme="pink"] .panel,
+:root[data-theme="pink"] .metric,
+:root[data-theme="pink"] .search-card,
+:root[data-theme="pink"] .chat-sidebar,
+:root[data-theme="pink"] .chat-main,
+:root[data-theme="pink"] .notification-popover,
+:root[data-theme="pink"] .auth-card {
+  border-color: var(--line);
+  background: linear-gradient(145deg, rgba(255,255,255,.82), rgba(255,245,250,.54) 38%), var(--panel);
+  box-shadow: 0 16px 42px rgba(205, 89, 143, .13), 0 2px 8px rgba(205,89,143,.05);
+}
+
+:root[data-theme="pink"] .button.primary,
+:root[data-theme="pink"] .composer-send,
+:root[data-theme="pink"] .whatsapp-button,
+:root[data-theme="pink"] .auth-primary {
+  border-color: #ef76ad;
+  background: linear-gradient(145deg,#f58aba,#df5b98);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(222,83,147,.22), inset 0 1px 0 rgba(255,255,255,.24);
+}
+:root[data-theme="pink"] .button.primary:hover,
+:root[data-theme="pink"] .composer-send:hover,
+:root[data-theme="pink"] .whatsapp-button:hover,
+:root[data-theme="pink"] .auth-primary:hover {
+  background: linear-gradient(145deg,#f79bc5,#d94b8d);
+}
+
+:root[data-theme="pink"] input,
+:root[data-theme="pink"] select,
+:root[data-theme="pink"] textarea {
+  color: var(--text);
+  border-color: var(--field-border);
+  background: rgba(255,250,253,.96);
+}
+:root[data-theme="pink"] input:focus,
+:root[data-theme="pink"] select:focus,
+:root[data-theme="pink"] textarea:focus {
+  border-color: #e66ca5;
+  box-shadow: 0 0 0 3px rgba(238,111,169,.16);
+}
+
+:root[data-theme="pink"] .admin-tabs,
+:root[data-theme="pink"] .auth-profile-popover,
+:root[data-theme="pink"] .queue-dialog,
+:root[data-theme="pink"] .productivity-modal {
+  border-color: var(--line);
+  background: rgba(255,250,253,.97);
+}
+:root[data-theme="pink"] .admin-tab:hover,
+:root[data-theme="pink"] .admin-tab.active {
+  color: #b63f78;
+  background: #ffe1ee;
+}
+
+:root[data-theme="pink"] .auth-role-admin { background:#f3e4ff; color:#8550ae; }
+:root[data-theme="pink"] .auth-role-employee { background:#ffe0ed; color:#b13e74; }
+:root[data-theme="pink"] .auth-state.is-on { background:#e9f7ee; color:#39754d; }
+
+:root[data-theme="pink"] .notice,
+:root[data-theme="pink"] .queue-inline-notice {
+  border-left-color: #e95f9f;
+  background: #ffe5f1;
+  color: #a83b6f;
+}
+
+:root[data-theme="pink"] .chat-message,
+:root[data-theme="pink"] .message-bubble,
+:root[data-theme="pink"] [data-message-row] {
+  --message-bg: #fff7fb;
+}
+
+:root[data-theme="pink"] ::selection {
+  color: #6a2146;
+  background: #ffc9e0;
+}
+
+/* Цветочный курсор. На полях ввода оставляем I-beam, чтобы не ухудшать набор текста. */
+:root[data-theme="pink"],
+:root[data-theme="pink"] body,
+:root[data-theme="pink"] .page,
+:root[data-theme="pink"] .panel {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cg transform='translate(2 2)'%3E%3Ccircle cx='12' cy='4.8' r='4.3' fill='%23ff9bc5'/%3E%3Ccircle cx='19.2' cy='9' r='4.3' fill='%23ffb6d4'/%3E%3Ccircle cx='19.2' cy='17' r='4.3' fill='%23f38ab8'/%3E%3Ccircle cx='12' cy='21.2' r='4.3' fill='%23ffb6d4'/%3E%3Ccircle cx='4.8' cy='17' r='4.3' fill='%23f38ab8'/%3E%3Ccircle cx='4.8' cy='9' r='4.3' fill='%23ff9bc5'/%3E%3Ccircle cx='12' cy='13' r='4.1' fill='%23ffe27a' stroke='%23b64a7a' stroke-width='1'/%3E%3C/g%3E%3C/svg%3E") 14 14, auto;
+}
+:root[data-theme="pink"] a,
+:root[data-theme="pink"] button,
+:root[data-theme="pink"] summary,
+:root[data-theme="pink"] [role="button"],
+:root[data-theme="pink"] label[for],
+:root[data-theme="pink"] select {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cg transform='translate(2 2)'%3E%3Ccircle cx='12' cy='4.8' r='4.3' fill='%23ff9bc5'/%3E%3Ccircle cx='19.2' cy='9' r='4.3' fill='%23ffb6d4'/%3E%3Ccircle cx='19.2' cy='17' r='4.3' fill='%23f38ab8'/%3E%3Ccircle cx='12' cy='21.2' r='4.3' fill='%23ffb6d4'/%3E%3Ccircle cx='4.8' cy='17' r='4.3' fill='%23f38ab8'/%3E%3Ccircle cx='4.8' cy='9' r='4.3' fill='%23ff9bc5'/%3E%3Ccircle cx='12' cy='13' r='4.1' fill='%23ffe27a' stroke='%23b64a7a' stroke-width='1'/%3E%3C/g%3E%3C/svg%3E") 14 14, pointer;
+}
+:root[data-theme="pink"] input,
+:root[data-theme="pink"] textarea { cursor: text; }
+
+/* Авторизация после выхода тоже сохраняет персональный розовый вид в localStorage. */
+html[data-theme="pink"] .auth-page {
+  background:
+    radial-gradient(circle at 15% 5%, rgba(255,188,220,.62), transparent 27rem),
+    radial-gradient(circle at 90% 20%, rgba(221,190,255,.38), transparent 30rem),
+    #fff2f8;
+  color: #56243d;
+}
+html[data-theme="pink"] .auth-card { border-color:#efc4d8; color:#56243d; }
+html[data-theme="pink"] .auth-card p,
+html[data-theme="pink"] .auth-foot,
+html[data-theme="pink"] .auth-brand small { color:#97647d; }
+html[data-theme="pink"] .auth-form label { color:#6e3150; }
+html[data-theme="pink"] .auth-theme-toggle {
+  color:#9d3e6c;
+  border-color:#e8aaca;
+  background:#fff1f7;
+}
+html[data-theme="pink"] .auth-brand-mark { background:linear-gradient(145deg,#ffadd0,#ef78ad); color:#7a234d; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="pink"] * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

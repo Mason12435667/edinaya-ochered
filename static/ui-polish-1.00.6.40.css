@@ -1,0 +1,517 @@
+/* Единая очередь 1.00.6.40 — UI polish.
+   Последний слой оформления: улучшает общую геометрию, светлую и Pink / Pick Me темы.
+   Бизнес-логика не меняется. */
+
+:root {
+  --ui40-radius: 16px;
+  --ui40-radius-lg: 20px;
+  --ui40-shadow-soft: 0 8px 26px rgba(21, 55, 45, .08), 0 1px 3px rgba(21, 55, 45, .04);
+  --ui40-shadow-float: 0 18px 48px rgba(21, 55, 45, .12), 0 4px 12px rgba(21, 55, 45, .05);
+  --ui40-focus: rgba(8, 143, 103, .18);
+  color-scheme: light;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="pink"] { color-scheme: light; }
+
+html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+body { letter-spacing: -.006em; }
+button, input, select, textarea { letter-spacing: inherit; }
+
+/* Базовая аккуратность для всех тем */
+.page { width: min(1580px, calc(100vw - 36px)); }
+.panel, .metric, .search-card, .chat-sidebar, .chat-main, .notification-popover,
+.auth-profile-popover, .queue-dialog, .productivity-modal {
+  border-radius: var(--ui40-radius);
+}
+.panel, .metric, .search-card { box-shadow: var(--ui40-shadow-soft); }
+.button, .icon-button, .theme-toggle, .notification-button, input, select, textarea {
+  border-radius: 12px;
+}
+.button { min-height: 40px; padding-inline: 15px; }
+.button.compact { min-height: 34px; padding-inline: 11px; }
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 4px var(--ui40-focus) !important;
+}
+
+.table-scroll { scrollbar-gutter: stable; }
+tbody tr { transition: background .15s ease, box-shadow .15s ease; }
+.notification-popover, .auth-profile-popover, .queue-dialog, .productivity-modal {
+  box-shadow: var(--ui40-shadow-float);
+}
+
+/* Более спокойные анимации */
+.panel, .metric, .admin-card, .search-card, .transit-card {
+  transition: border-color .18s ease, box-shadow .2s ease, transform .18s ease, background .18s ease;
+}
+.admin-card:hover, .metric:hover, .search-card:hover, .transit-card:hover {
+  transform: translateY(-1px);
+}
+
+/* ===================== СВЕТЛАЯ ТЕМА ===================== */
+:root[data-theme="light"] {
+  --bg: #f4f7f6;
+  --panel: #ffffff;
+  --text: #17241f;
+  --muted: #66756f;
+  --line: #dbe6e2;
+  --green: #0a8f68;
+  --green-dark: #087655;
+  --green-soft: #e9f7f1;
+  --surface-subtle: #f7faf9;
+  --surface-hover: #f0f7f4;
+  --field-bg: #ffffff;
+  --field-border: #cbdad5;
+  --message-bg: #f8fbfa;
+  --scrollbar-track: #edf3f1;
+  --scrollbar-thumb: #9abbb0;
+  --scrollbar-thumb-hover: #6f9f90;
+  --ui-glow: rgba(10,143,104,.12);
+  --ui-glow-strong: rgba(10,143,104,.18);
+  --ui-card-highlight: rgba(255,255,255,.92);
+  --shadow: var(--ui40-shadow-soft);
+  --ui40-focus: rgba(10,143,104,.17);
+}
+
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(circle at 8% -2%, rgba(72, 190, 149, .11) 0, transparent 28rem),
+    radial-gradient(circle at 96% 16%, rgba(113, 167, 235, .07) 0, transparent 30rem),
+    linear-gradient(180deg, #f8fbfa 0%, #f3f7f5 48%, #f6f8f7 100%);
+}
+:root[data-theme="light"] body::before {
+  opacity: .22;
+  background-image:
+    linear-gradient(rgba(20,100,76,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20,100,76,.025) 1px, transparent 1px);
+  background-size: 38px 38px;
+}
+
+/* Белая шапка вместо тяжёлой тёмной полосы */
+:root[data-theme="light"] .topbar {
+  color: #17362c;
+  border-bottom: 1px solid rgba(109,145,133,.22);
+  background: rgba(255,255,255,.91);
+  box-shadow: 0 8px 30px rgba(26,68,54,.09);
+  backdrop-filter: blur(18px) saturate(145%);
+}
+:root[data-theme="light"] .brand { color: #163a2f; }
+:root[data-theme="light"] .brand-mark {
+  color: #fff;
+  background: linear-gradient(145deg,#17a878,#087655);
+  box-shadow: 0 8px 22px rgba(10,143,104,.22), inset 0 1px 0 rgba(255,255,255,.25);
+}
+:root[data-theme="light"] .nav-link {
+  color: #60736d;
+  border-color: transparent;
+}
+:root[data-theme="light"] .nav-link:hover {
+  color: #165f49;
+  border-color: #dcebe6;
+  background: #f2f8f6;
+}
+:root[data-theme="light"] .nav-link.active {
+  color: #087655;
+  border-color: #cae5db;
+  background: linear-gradient(180deg,#eef9f5,#e8f5f0);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.7);
+}
+:root[data-theme="light"] .theme-toggle,
+:root[data-theme="light"] .notification-button,
+:root[data-theme="light"] .shift-form select,
+:root[data-theme="light"] .auth-user-chip {
+  color: #28463d !important;
+  border-color: #d1e1dc !important;
+  background: rgba(248,252,250,.94) !important;
+  box-shadow: 0 2px 8px rgba(25,74,60,.05) !important;
+}
+:root[data-theme="light"] .theme-toggle:hover,
+:root[data-theme="light"] .notification-button:hover,
+:root[data-theme="light"] .auth-user-chip:hover {
+  color: #087655 !important;
+  border-color: #b9d8cd !important;
+  background: #f0f8f5 !important;
+}
+:root[data-theme="light"] .shift-form { color: #70817b; }
+
+:root[data-theme="light"] .panel,
+:root[data-theme="light"] .metric,
+:root[data-theme="light"] .search-card,
+:root[data-theme="light"] .chat-sidebar,
+:root[data-theme="light"] .chat-main,
+:root[data-theme="light"] .notification-popover,
+:root[data-theme="light"] .auth-profile-popover {
+  border-color: #dde7e3;
+  background: rgba(255,255,255,.94);
+  box-shadow: var(--ui40-shadow-soft);
+}
+:root[data-theme="light"] .panel:hover,
+:root[data-theme="light"] .metric:hover,
+:root[data-theme="light"] .admin-card:hover,
+:root[data-theme="light"] .search-card:hover {
+  border-color: #c7ded5;
+  box-shadow: 0 12px 34px rgba(31,84,66,.10);
+}
+
+:root[data-theme="light"] input,
+:root[data-theme="light"] select,
+:root[data-theme="light"] textarea {
+  color: #19352c;
+  border-color: #ccdcd6;
+  background: #fbfdfc;
+  box-shadow: inset 0 1px 2px rgba(22,56,45,.025);
+}
+:root[data-theme="light"] input::placeholder,
+:root[data-theme="light"] textarea::placeholder { color: #93a49e; }
+:root[data-theme="light"] input:hover,
+:root[data-theme="light"] select:hover,
+:root[data-theme="light"] textarea:hover { border-color: #a9c9be; }
+:root[data-theme="light"] input:focus,
+:root[data-theme="light"] select:focus,
+:root[data-theme="light"] textarea:focus {
+  border-color: #39a984;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(10,143,104,.11);
+}
+
+:root[data-theme="light"] .button:not(.primary) {
+  border-color: #d0dfda;
+  background: #fff;
+  color: #29463d;
+  box-shadow: 0 2px 7px rgba(22,63,50,.04);
+}
+:root[data-theme="light"] .button:not(.primary):hover {
+  border-color: #b8d2c9;
+  background: #f5faf8;
+  color: #087655;
+}
+:root[data-theme="light"] .button.primary,
+:root[data-theme="light"] .composer-send,
+:root[data-theme="light"] .whatsapp-button {
+  border-color: #0a8f68;
+  background: linear-gradient(145deg,#11a679,#087655);
+  color: #fff;
+  box-shadow: 0 7px 18px rgba(10,143,104,.18), inset 0 1px 0 rgba(255,255,255,.18);
+}
+
+:root[data-theme="light"] th {
+  color: #60736c;
+  border-bottom: 1px solid #dfe9e5;
+  background: rgba(247,250,249,.96);
+}
+:root[data-theme="light"] td { border-top-color: #e7eeeb; }
+:root[data-theme="light"] tbody tr:hover { background: #f4f9f7; }
+:root[data-theme="light"] .admin-tabs,
+:root[data-theme="light"] .instruction-subtabs {
+  border-color: #dce7e3;
+  background: rgba(255,255,255,.9);
+  box-shadow: 0 5px 18px rgba(27,69,55,.06);
+}
+:root[data-theme="light"] .admin-tab.active,
+:root[data-theme="light"] .instruction-subtab[aria-selected="true"],
+:root[data-theme="light"] .instruction-subtab.is-active {
+  color: #087655;
+  background: #eaf7f2;
+}
+
+/* WhatsApp в светлой теме */
+:root[data-theme="light"] .chat-sidebar-head,
+:root[data-theme="light"] .chat-header,
+:root[data-theme="light"] .chat-composer {
+  border-color: #dde8e4;
+  background: rgba(252,254,253,.95);
+}
+:root[data-theme="light"] .chat-list-item:hover { background: #f2f8f5; }
+:root[data-theme="light"] .chat-list-item.is-active,
+:root[data-theme="light"] .chat-list-item.active {
+  border-color: #c8e2d9;
+  background: #eaf7f2;
+}
+
+/* Авторизация: белая, чистая и читаемая */
+html[data-theme="light"] .auth-page {
+  background:
+    radial-gradient(circle at 18% 7%, rgba(58,175,134,.18) 0, transparent 25rem),
+    radial-gradient(circle at 87% 20%, rgba(101,148,220,.10) 0, transparent 27rem),
+    #f5f8f7;
+}
+html[data-theme="light"] .auth-card {
+  border-color: #d9e7e2;
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 24px 70px rgba(25,68,54,.13);
+}
+html[data-theme="light"] .auth-theme-toggle {
+  color: #2d5a4b;
+  border-color: #cfe0da;
+  background: #f7fbf9;
+}
+
+/* ===================== PINK / PICK ME ===================== */
+:root[data-theme="pink"] {
+  --bg: #fff5fa;
+  --panel: #fffafd;
+  --text: #55233d;
+  --muted: #94657d;
+  --line: #f0d1df;
+  --green: #e85f9f;
+  --green-dark: #c9417e;
+  --green-soft: #ffe8f2;
+  --surface-subtle: #fff5fa;
+  --surface-hover: #ffedf5;
+  --field-bg: #fffafd;
+  --field-border: #edbfd4;
+  --message-bg: #fff8fb;
+  --scrollbar-track: #fbe4ef;
+  --scrollbar-thumb: #e99abc;
+  --scrollbar-thumb-hover: #d86f9e;
+  --ui-glow: rgba(232,95,159,.16);
+  --ui-glow-strong: rgba(201,65,126,.23);
+  --ui-card-highlight: rgba(255,255,255,.92);
+  --ui40-focus: rgba(232,95,159,.18);
+}
+
+:root[data-theme="pink"] body {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255,181,215,.48) 0, transparent 26rem),
+    radial-gradient(circle at 93% 14%, rgba(219,190,255,.34) 0, transparent 30rem),
+    radial-gradient(circle at 52% 102%, rgba(255,215,235,.28) 0, transparent 28rem),
+    linear-gradient(160deg,#fff8fb 0%,#fff1f7 55%,#fff9fc 100%);
+}
+:root[data-theme="pink"] body::before {
+  opacity: .24;
+  background-image:
+    radial-gradient(circle, rgba(204,75,135,.14) 1px, transparent 1.5px),
+    radial-gradient(circle, rgba(171,112,210,.10) 1px, transparent 1.5px);
+  background-size: 32px 32px, 46px 46px;
+  background-position: 0 0, 14px 17px;
+}
+:root[data-theme="pink"] body::after {
+  content: "✿   ♡   ✦";
+  right: 26px;
+  bottom: 16px;
+  color: rgba(199,64,125,.14);
+  font-size: 22px;
+  letter-spacing: 8px;
+}
+
+/* Pink-шапка теперь светлая и не давит на интерфейс */
+:root[data-theme="pink"] .topbar {
+  color: #6a2849;
+  border-bottom: 1px solid rgba(222,136,176,.34);
+  background: rgba(255,244,249,.92);
+  box-shadow: 0 10px 34px rgba(178,72,122,.13);
+  backdrop-filter: blur(19px) saturate(150%);
+}
+:root[data-theme="pink"] .brand { color: #6e294c; }
+:root[data-theme="pink"] .brand-mark {
+  color: #fff;
+  background: linear-gradient(145deg,#f58aba,#cf4b88);
+  box-shadow: 0 8px 22px rgba(207,75,136,.22), inset 0 1px 0 rgba(255,255,255,.25);
+}
+:root[data-theme="pink"] .brand-mark::after { color: #ef74aa; text-shadow: none; }
+:root[data-theme="pink"] .nav-link { color: #98617d; }
+:root[data-theme="pink"] .nav-link:hover {
+  color: #b83e77;
+  border-color: #f0cada;
+  background: #fff0f6;
+}
+:root[data-theme="pink"] .nav-link.active {
+  color: #b43872;
+  border-color: #efbfd3;
+  background: linear-gradient(180deg,#ffe9f3,#ffe2ef);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.75);
+}
+:root[data-theme="pink"] .theme-toggle,
+:root[data-theme="pink"] .notification-button,
+:root[data-theme="pink"] .shift-form select,
+:root[data-theme="pink"] .auth-user-chip {
+  color: #8c4166 !important;
+  border-color: #ecc4d7 !important;
+  background: rgba(255,250,253,.94) !important;
+  box-shadow: 0 2px 8px rgba(185,63,120,.06) !important;
+}
+:root[data-theme="pink"] .theme-toggle:hover,
+:root[data-theme="pink"] .notification-button:hover,
+:root[data-theme="pink"] .auth-user-chip:hover {
+  color: #b43a75 !important;
+  border-color: #e9a9c7 !important;
+  background: #fff0f6 !important;
+}
+:root[data-theme="pink"] .shift-form { color: #a36b86; }
+
+:root[data-theme="pink"] .panel,
+:root[data-theme="pink"] .metric,
+:root[data-theme="pink"] .search-card,
+:root[data-theme="pink"] .chat-sidebar,
+:root[data-theme="pink"] .chat-main,
+:root[data-theme="pink"] .notification-popover,
+:root[data-theme="pink"] .auth-profile-popover,
+:root[data-theme="pink"] .auth-card {
+  border-color: #efd0de;
+  background:
+    linear-gradient(145deg,rgba(255,255,255,.90),rgba(255,246,251,.76) 46%),
+    #fffafd;
+  box-shadow: 0 12px 38px rgba(195,72,129,.10), 0 2px 8px rgba(195,72,129,.04);
+}
+:root[data-theme="pink"] .panel:hover,
+:root[data-theme="pink"] .metric:hover,
+:root[data-theme="pink"] .admin-card:hover,
+:root[data-theme="pink"] .search-card:hover,
+:root[data-theme="pink"] .transit-card:hover {
+  border-color: #e8b4cc;
+  box-shadow: 0 15px 40px rgba(195,72,129,.13);
+}
+
+:root[data-theme="pink"] .button:not(.primary) {
+  color: #7d3d5d;
+  border-color: #edcad9;
+  background: rgba(255,252,254,.94);
+  box-shadow: 0 2px 7px rgba(185,63,120,.04);
+}
+:root[data-theme="pink"] .button:not(.primary):hover {
+  color: #b43872;
+  border-color: #e8adc7;
+  background: #fff0f6;
+}
+:root[data-theme="pink"] .button.primary,
+:root[data-theme="pink"] .composer-send,
+:root[data-theme="pink"] .whatsapp-button,
+:root[data-theme="pink"] .auth-primary {
+  border-color: #df5795;
+  background: linear-gradient(145deg,#f47eaf,#d84b89);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(216,75,137,.20), inset 0 1px 0 rgba(255,255,255,.25);
+}
+:root[data-theme="pink"] .button.primary:hover,
+:root[data-theme="pink"] .composer-send:hover,
+:root[data-theme="pink"] .whatsapp-button:hover,
+:root[data-theme="pink"] .auth-primary:hover {
+  background: linear-gradient(145deg,#f68fba,#cc3f7c);
+  box-shadow: 0 11px 26px rgba(204,63,124,.24);
+}
+
+:root[data-theme="pink"] input,
+:root[data-theme="pink"] select,
+:root[data-theme="pink"] textarea {
+  color: #5b2942;
+  border-color: #edc5d7;
+  background: rgba(255,252,254,.97);
+}
+:root[data-theme="pink"] input::placeholder,
+:root[data-theme="pink"] textarea::placeholder { color: #b98aa1; }
+:root[data-theme="pink"] input:hover,
+:root[data-theme="pink"] select:hover,
+:root[data-theme="pink"] textarea:hover { border-color: #e7a8c4; }
+:root[data-theme="pink"] input:focus,
+:root[data-theme="pink"] select:focus,
+:root[data-theme="pink"] textarea:focus {
+  border-color: #df649d;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(232,95,159,.12);
+}
+
+:root[data-theme="pink"] th {
+  color: #98647d;
+  border-bottom-color: #efd6e1;
+  background: rgba(255,247,251,.95);
+}
+:root[data-theme="pink"] td { border-top-color: #f3dfe8; }
+:root[data-theme="pink"] tbody tr:hover { background: #fff3f8; }
+:root[data-theme="pink"] .admin-tabs,
+:root[data-theme="pink"] .instruction-subtabs {
+  border-color: #efd1df;
+  background: rgba(255,250,253,.91);
+  box-shadow: 0 5px 18px rgba(185,63,120,.06);
+}
+:root[data-theme="pink"] .admin-tab:hover,
+:root[data-theme="pink"] .admin-tab.active,
+:root[data-theme="pink"] .instruction-subtab:hover,
+:root[data-theme="pink"] .instruction-subtab[aria-selected="true"],
+:root[data-theme="pink"] .instruction-subtab.is-active {
+  color: #b43872;
+  background: #ffe8f2;
+}
+
+/* WhatsApp в Pink */
+:root[data-theme="pink"] .chat-sidebar-head,
+:root[data-theme="pink"] .chat-header,
+:root[data-theme="pink"] .chat-composer {
+  border-color: #efd4e1;
+  background: rgba(255,250,253,.95);
+}
+:root[data-theme="pink"] .chat-list-item:hover { background: #fff0f6; }
+:root[data-theme="pink"] .chat-list-item.is-active,
+:root[data-theme="pink"] .chat-list-item.active {
+  border-color: #ebbad0;
+  background: #ffe7f1;
+}
+:root[data-theme="pink"] .conversation-lock-banner {
+  border-color: #e9b8cf;
+  background: rgba(255,232,242,.70);
+}
+
+/* Журнал НП тоже принимает тему */
+:root[data-theme="light"] .transit-hero,
+:root[data-theme="light"] .transit-card,
+:root[data-theme="light"] .transit-browser,
+:root[data-theme="light"] .transit-guide > *,
+:root[data-theme="light"] .transit-editor {
+  border-color: #dce7e3;
+  box-shadow: 0 8px 24px rgba(25,68,54,.06);
+}
+:root[data-theme="pink"] .transit-hero,
+:root[data-theme="pink"] .transit-card,
+:root[data-theme="pink"] .transit-browser,
+:root[data-theme="pink"] .transit-guide > *,
+:root[data-theme="pink"] .transit-editor {
+  border-color: #efd1df;
+  background-color: rgba(255,250,253,.86);
+  box-shadow: 0 8px 24px rgba(185,63,120,.07);
+}
+:root[data-theme="pink"] .transit-filter.is-active {
+  color: #fff;
+  border-color: #d84b89;
+  background: #d84b89;
+}
+:root[data-theme="pink"] .transit-status { color: #b43872 !important; }
+
+/* Pink авторизация */
+html[data-theme="pink"] .auth-page {
+  background:
+    radial-gradient(circle at 16% 7%, rgba(255,178,213,.42), transparent 25rem),
+    radial-gradient(circle at 87% 22%, rgba(217,186,250,.28), transparent 28rem),
+    linear-gradient(150deg,#fff7fb,#fff0f7 55%,#fff9fc);
+}
+html[data-theme="pink"] .auth-card {
+  border-color: #edccda;
+  background: rgba(255,251,253,.96);
+  box-shadow: 0 24px 70px rgba(184,64,120,.14);
+}
+html[data-theme="pink"] .auth-theme-toggle {
+  color: #9b456d;
+  border-color: #eabbd0;
+  background: #fff4f9;
+}
+
+/* Мелкие визуальные улучшения */
+:root[data-theme="light"] .notice,
+:root[data-theme="pink"] .notice { box-shadow: none; }
+:root[data-theme="light"] .notification-popover,
+:root[data-theme="pink"] .notification-popover { backdrop-filter: blur(16px); }
+:root[data-theme="pink"] ::selection { color:#6c2848; background:#ffd1e4; }
+:root[data-theme="light"] ::selection { color:#0b4636; background:#cdeee2; }
+
+@media (max-width: 1180px) {
+  .topbar { gap: 12px; padding-inline: 18px; }
+  .nav-link { padding-inline: 10px; }
+  .page { width: min(100% - 24px, 1580px); }
+}
+@media (max-width: 760px) {
+  .page { width: min(100% - 16px, 1580px); margin-top: 16px; }
+  .panel { border-radius: 14px; }
+  .topbar { padding-inline: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

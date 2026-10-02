@@ -8,8 +8,19 @@ const path = require('path');
 const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const queueLogDir = String(process.env.QUEUE_LOG_DIR || '').trim();
+function mediaDebug(message) {
+  const line = `[${new Date().toISOString()}] ${String(message || '')}`;
+  try {
+    if (queueLogDir) { fs.mkdirSync(queueLogDir, {recursive:true}); fs.appendFileSync(path.join(queueLogDir, 'whatsapp-media.log'), line + "\n", 'utf8'); }
+  } catch (_) {}
+  console.log('[MEDIA]', String(message || ''));
+}
 
 const ROOT = __dirname;
+const {InboundSpool} = require('./queue_inbound_spool');
+const inboundSpool = new InboundSpool(path.join(process.env.QUEUE_DATA_DIR || (process.platform === 'win32' ? path.join(process.env.LOCALAPPDATA || ROOT,'QueueLocal') : '/var/lib/edinaya-ochered'), 'inbound-spool'));
+
 const API_URL = process.env.TICKET_API_URL || 'http://127.0.0.1:8000';
 const WEBHOOK_TOKEN = String(process.env.WEBHOOK_TOKEN || '').trim();
 if (WEBHOOK_TOKEN.length < 32) {
@@ -32,58 +43,65 @@ const USER_MESSAGE_TYPES = new Set([
 ]);
 
 const MENU_ROWS = [
-  { id: 'topic_seal', title: '1. Навигационная пломба' },
-  { id: 'topic_transport', title: '2. Перевозка' },
+  { id: 'topic_seal', title: '1. Проблема с навигационной пломбой (НП)' },
+  { id: 'topic_transport', title: '2. Проблема с оформлением перевозки' },
   { id: 'topic_bin', title: '3. Корректировка БИН' },
-  { id: 'topic_keden', title: '4. Keden' },
-  { id: 'topic_package', title: '5. Пакеты' },
-  { id: 'topic_database', title: '6. База данных' },
-  { id: 'topic_mobile', title: '7. Мобилка' },
-  { id: 'topic_general', title: '8. Другая проблема' },
-  { id: 'topic_support', title: '9. Вопрос в поддержку' },
+  { id: 'topic_keden', title: '4. Проблемы с КЕДЕН' },
+  { id: 'topic_database', title: '5. Доступ к ИС TRANSIT' },
+  { id: 'topic_mobile', title: '6. Мобильное приложение TRANSIT' },
+  { id: 'topic_general', title: '7. Другая проблема / вопрос / ошибка' },
+  { id: 'active_tickets', title: '8. Мои активные заявки' },
 ];
 
+// Keep old WhatsApp list/button row ids compatible with the v3 numbering. If a
+// user taps an old list message after the update, removed topics are folded into
+// the new generic item instead of selecting an unrelated category.
 const MENU_CHOICE_NUMBERS = {
   topic_seal: '1',
   topic_transport: '2',
   topic_bin: '3',
   topic_keden: '4',
-  topic_package: '5',
-  topic_database: '6',
-  topic_mobile: '7',
-  topic_general: '8',
-  topic_support: '9',
-  support_text: '1',
+  topic_database: '5',
+  topic_mobile: '6',
+  topic_general: '7',
+  topic_support: '7',
+  topic_package: '7',
+  support_text: '7',
+  active_tickets: '8',
 };
 
 const SUPPORT_ROWS = [
-  { id: 'support_text', title: '1. Написать вопрос' },
+  { id: 'topic_general', title: '7. Другая проблема / вопрос / ошибка' },
 ];
 
-const START_MENU_TEXT = `Это автоматическая система регистрации заявок.
+const LANGUAGE_SELECTION_TEXT = `Здравствуйте! / Сәлеметсіз бе!
+Выберите язык обслуживания / Қызмет көрсету тілін таңдаңыз (1-2):
+1️⃣ — Русский
+2️⃣ — Қазақша`;
 
-Чтобы открыть меню заявок и выбрать нужную проблему, отправьте цифру 1.
-
-Пока вы не отправите 1, меню заявок не появится и описание заявки система не обработает.`;
-
-const MAIN_MENU_TEXT = `Меню заявок
-
-1. Навигационная пломба / НП
-2. Перевозка
-3. Корректировка БИН
-4. Keden
-5. Пакеты
-6. База данных
-7. Мобилка
-8. Другая проблема
-9. Задать вопрос в поддержку
-
-Отправьте только номер нужного пункта, например 1, 2 или 3.
-После выбора система покажет понятный шаблон и подскажет, как правильно заполнить заявку.
-
-Чтобы вернуться к этому меню позже, отправьте 0 или слово «меню».`;
+// Тексты меню формирует Python-сервис с учётом сохранённого языка пользователя.
+// Эта константа оставлена только как безопасный резерв для редких ошибок коннектора.
+const MAIN_MENU_TEXT = LANGUAGE_SELECTION_TEXT;
 
 async function postJson(endpoint, payload) {
+  if(endpoint==='/api/whatsapp' && payload && payload.external_id)
+    return inboundSpool.submit(payload, data=>postJsonWithRetry(endpoint,data));
+  return postJsonWithRetry(endpoint,payload);
+}
+
+async function postJsonWithRetry(endpoint, payload) {
+  const retryInbound = endpoint === '/api/whatsapp' && Boolean(payload && payload.external_id);
+  for (let attempt = 0; ; attempt++) {
+    try { return await postJsonOnce(endpoint, payload); }
+    catch (error) {
+      const status = Number(error && error.httpStatus || 0);
+      if (!retryInbound || attempt >= 3 || (status && status < 500)) throw error;
+      await new Promise(resolve => setTimeout(resolve, [500, 1500, 4000][attempt]));
+    }
+  }
+}
+
+async function postJsonOnce(endpoint, payload) {
   if (endpoint === '/api/chat-messages-sync' && Array.isArray(payload.messages)) {
     for (const item of payload.messages) {
       if (!item.media_base64 || item.media_base64.length <= 1024*1024) continue;
@@ -102,7 +120,7 @@ async function postJson(endpoint, payload) {
         item.media_receipt=receipt; item.media_pending=false; delete item.media_base64;
       } catch(error) {
         delete item.media_base64; item.media_pending=true;
-        pendingMediaMessages.set(String(item.id), {chat_id:payload.chat_id,sender:item.sender || '',sender_phone:item.sender_phone || '',sender_id:item.sender_id || '',from_me:!!item.from_me,body:item.body || '',type:item.type,timestamp:item.timestamp,attempts:0,next_at:Date.now()+10000});
+        pendingMediaMessages.set(String(item.id), {chat_id:payload.chat_id,sender:item.sender || '',sender_phone:item.sender_phone || '',sender_id:item.sender_id || '',from_me:!!item.from_me,body:item.body || '',type:item.type,timestamp:item.timestamp,attempts:0,next_at:Date.now()+7000});
         console.warn('Вложение будет загружено повторно:',error.message || error);
       }
     }
@@ -118,7 +136,9 @@ async function postJson(endpoint, payload) {
   });
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error || `HTTP ${response.status}`);
+    const error = new Error(data.error || `HTTP ${response.status}`);
+    error.httpStatus = response.status;
+    throw error;
   }
   if (endpoint === '/api/chat-messages-sync' && Array.isArray(data.local_media_recovered)) {
     const until = Date.now() + 60 * 60 * 1000;
@@ -170,7 +190,7 @@ async function resolveDirectPhoneId(value) {
   if (lidToPhone.has(directId)) return lidToPhone.get(directId);
   if (directId.endsWith('@lid') && typeof client.getContactLidAndPhone === 'function') {
     try {
-      const matches = await Promise.race([client.getContactLidAndPhone([directId]), new Promise((resolve)=>setTimeout(()=>resolve([]),2500))]);
+      const matches = await Promise.race([client.getContactLidAndPhone([directId]), new Promise((resolve)=>setTimeout(()=>resolve([]),900))]);
       const row = matches && matches[0];
       const resolved = row ? serializedId(row.pn) : '';
       if (resolved.endsWith('@c.us')) { lidToPhone.set(directId, resolved); return resolved; }
@@ -193,17 +213,54 @@ async function resolvePhoneId(message, from) {
   return await resolveDirectPhoneId(from);
 }
 
+function resolveBrowserExecutable() {
+  const explicit = String(process.env.QUEUE_CHROME_PATH || '').trim();
+  if (explicit && fs.existsSync(explicit)) return explicit;
+
+  if (process.platform !== 'win32') return '';
+
+  const candidates = [];
+  const programFiles = String(process.env.ProgramFiles || '').trim();
+  const programFilesX86 = String(process.env['ProgramFiles(x86)'] || '').trim();
+  const localAppData = String(process.env.LOCALAPPDATA || '').trim();
+  if (programFiles) {
+    candidates.push(path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
+    candidates.push(path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+  }
+  if (programFilesX86) {
+    candidates.push(path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'));
+    candidates.push(path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+  }
+  if (localAppData) {
+    candidates.push(path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    candidates.push(path.join(localAppData, 'Yandex', 'YandexBrowser', 'Application', 'browser.exe'));
+  }
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || '';
+}
+
+const browserExecutablePath = resolveBrowserExecutable();
+const puppeteerOptions = {
+  headless: true,
+  protocolTimeout: 30000,
+  args: ['--no-sandbox', '--disable-setuid-sandbox'],
+};
+if (browserExecutablePath) {
+  puppeteerOptions.executablePath = browserExecutablePath;
+  console.log(`Browser for WhatsApp Web: ${browserExecutablePath}`);
+}
+
 const client = new Client({
   authStrategy: new LocalAuth({
-    clientId: 'ticket-prototype',
+    clientId: String(process.env.QUEUE_WHATSAPP_CLIENT_ID || 'ticket-prototype').trim() || 'ticket-prototype',
     dataPath: process.env.QUEUE_WHATSAPP_AUTH_DIR || '/var/lib/edinaya-ochered/whatsapp-auth',
   }),
   authTimeoutMs: 180000,
-  puppeteer: {
-    headless: true,
-    protocolTimeout: 180000,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  },
+  // EO_WWEBJS_NATIVE_UA_V28_20261002
+  // whatsapp-web.js otherwise forces its old default Chrome UA. Let the real
+  // bundled Chromium advertise its own current UA so WhatsApp Web does not
+  // classify this Chrome 146 session as an obsolete Chrome build.
+  userAgent: false,
+  puppeteer: puppeteerOptions,
 });
 
 let outboundTimer = null;
@@ -212,8 +269,8 @@ let heartbeatTimer = null;
 let groupSyncTimer = null;
 let performanceTimer = null;
 let highMemorySamples = 0;
-const PERF_CONTACT_COOLDOWN_MS = Math.max(15000, Number(process.env.QUEUE_CONTACT_SYNC_COOLDOWN_MS || 60000));
-const PERF_RECOVERY_INTERVAL_MS = Math.max(900, Number(process.env.QUEUE_RECOVERY_INTERVAL_MS || 1500));
+const PERF_CONTACT_COOLDOWN_MS = Math.max(60000, Number(process.env.QUEUE_CONTACT_SYNC_COOLDOWN_MS || 300000));
+const PERF_RECOVERY_INTERVAL_MS = Math.max(2000, Number(process.env.QUEUE_RECOVERY_INTERVAL_MS || 2000));
 const PERF_RAM_RESTART_MB = Math.max(0, Number(process.env.QUEUE_CONNECTOR_RAM_RESTART_MB || 0));
 let readyFallbackTimer = null;
 let readyFallbackStartedAt = 0;
@@ -234,6 +291,9 @@ let presenceSyncBusy = false;
 let fastInboundTimer = null;
 let contactDiscoveryBusy = false;
 let recentPollBusy = false;
+// Recover recent inbound media that was missed while the WhatsApp connector was offline.
+let startupInboundRecoveryUntil = 0;
+let startupInboundRecoveryStartedAt = 0;
 let recentOutgoingBusy = false;
 let pendingMediaBusy = false;
 let fastSyncBusy = false;
@@ -241,13 +301,86 @@ let participantSyncBusy = false;
 let groupIdentityRepairBusy = false;
 const groupIdentityRepairAt = new Map();
 let profileSyncBusy = false;
+
+// EO_FAST_REPLY_V5_20260930
+// EO_REALTIME_CONNECTOR_V7_20260930
+// Fresh inbound/category traffic always wins over cosmetic/background work.
+const HOT_INBOUND_GRACE_MS = 10000;
+const GROUP_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
+const ACTIVE_AVATAR_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
+// EO_MEDIA_FAST_RETRY_V20_20261001
+const BACKGROUND_MEDIA_INTERVAL_MS = 15000;
+const BACKGROUND_OUTGOING_INTERVAL_MS = 10000;
+const STARTUP_LIVE_ONLY_MS = 12000;
+const STARTUP_BACKFILL_LOOKBACK_SECONDS = 30 * 60;
+const STARTUP_BACKFILL_MODEL_LIMIT = 600;
+const STARTUP_BACKFILL_BATCH = 12;
+const STARTUP_AUTOMATION_MAX_AGE_SECONDS = 120;
+let hotInboundUntil = 0;
+let browserPressureUntil = 0;
+let startupLiveOnlyUntil = 0;
+let groupSyncBusy = false;
+let lastGroupSyncAt = 0;
+let groupSyncDeferredTimer = null;
+let lastActiveAvatarSignature = '';
+let lastActiveAvatarSyncAt = 0;
+let lastMediaRecoveryAt = 0;
+let lastOutgoingRecoveryAt = 0;
+
+function noteHotInboundPriority() {
+  hotInboundUntil = Math.max(hotInboundUntil, Date.now() + HOT_INBOUND_GRACE_MS);
+}
+
+function isHotInboundPriority() {
+  return Date.now() < hotInboundUntil;
+}
+
+function isBridgePressureError(error) {
+  const text = String(error && (error.message || error.stack) || error || '');
+  return /Runtime\.callFunctionOn.*timed out|Protocol error|detached Frame|Execution context was destroyed|Target closed/i.test(text);
+}
+
+function noteBrowserPressure(error, source = 'background') {
+  if (!isBridgePressureError(error)) return false;
+  browserPressureUntil = Math.max(browserPressureUntil, Date.now() + 60000);
+  console.warn(`Фоновая нагрузка WhatsApp приостановлена на 60 сек: ${source}.`);
+  return true;
+}
+
+function backgroundWorkAllowed() {
+  return Date.now() >= startupLiveOnlyUntil &&
+    !isHotInboundPriority() &&
+    Date.now() >= browserPressureUntil;
+}
+
+function syncActiveAvatar(requestedChatId = '', requestedGroupId = '') {
+  // Cosmetic avatars are disabled by default. They can be explicitly enabled
+  // later without touching the message path.
+  if (String(process.env.QUEUE_ENABLE_WHATSAPP_AVATARS || '') !== '1') return;
+  if (!backgroundWorkAllowed()) return;
+  const ids = [...new Set([requestedChatId, requestedGroupId].map((v) => String(v || '').trim()).filter(Boolean))];
+  if (!ids.length) return;
+  const signature = ids.join('|');
+  const now = Date.now();
+  if (signature === lastActiveAvatarSignature && now - lastActiveAvatarSyncAt < ACTIVE_AVATAR_SYNC_COOLDOWN_MS) return;
+  lastActiveAvatarSignature = signature;
+  lastActiveAvatarSyncAt = now;
+  avatarSync.sync(client, postJson, ids).catch((error) => noteBrowserPressure(error, 'avatar'));
+}
+
+// QUEUE_CONNECTOR_STABILITY_20260930
+// WhatsApp Web can reload its execution context while getState() still says
+// CONNECTED. In that state the old code kept reporting "connected" although
+// window.WWebJS/WAWebCollections were gone, so inbound messages and auto-replies
+// could silently stop. Track the actual injected bridge and re-arm recovery.
+let bridgeWatchdogTimer = null;
+let bridgeWatchdogBusy = false;
+let bridgeFailureCount = 0;
+let bridgeRecoveryStartedAt = 0;
+let authRecoveryBusy = false;
+let lastAuthenticatedLogAt = 0;
 const lidToPhone = new Map();
 const reconciledInboundIds = new Map();
-// 1.00.2: separate "currently being handled" from "successfully handled".
-// Previously an incoming ID was marked reconciled before the async group path
-// finished; one transient WhatsApp/Puppeteer error could therefore suppress all
-// recovery attempts until the user opened the Groups page.
-const inboundProcessingIds = new Map();
 const participantDisplayById = new Map();
 const ownMentionIds = new Set();
 const knownChats = new Map();
@@ -305,6 +438,66 @@ function rememberChatAlias(canonicalChatId, rawChatId) {
   reverse.add(raw);
   reverse.add(canonical);
   chatIdAliases.set(raw, reverse);
+}
+
+// EO_NEW_USER_CHAT_DEDUPE_V21_20261001
+// WhatsApp may expose the first message of a brand-new contact as @lid and the
+// bot reply a moment later as @c.us. Merge those transport aliases immediately
+// so one person can never become two cards in the left chat list.
+function mergeKnownDirectChatAlias138(canonicalChatId, rawChatId) {
+  let canonical = String(canonicalChatId || '').trim();
+  const raw = String(rawChatId || '').trim();
+  if (!canonical || !raw || canonical.endsWith('@g.us') || raw.endsWith('@g.us')) return canonical || raw;
+
+  // Prefer a phone-based @c.us whenever either side already knows it.
+  if (!canonical.endsWith('@c.us') && raw.endsWith('@c.us')) canonical = raw;
+  const aliases = new Set([canonical, raw]);
+  const remembered = chatIdAliases.get(canonical);
+  if (remembered) for (const value of remembered) aliases.add(String(value || '').trim());
+  const rawRemembered = chatIdAliases.get(raw);
+  if (rawRemembered) for (const value of rawRemembered) aliases.add(String(value || '').trim());
+
+  for (const alias of aliases) {
+    if (alias) rememberChatAlias(canonical, alias);
+  }
+
+  let merged = null;
+  for (const alias of aliases) {
+    if (!alias) continue;
+    const row = knownChats.get(alias);
+    if (!row) continue;
+    if (!merged) {
+      merged = {...row};
+      continue;
+    }
+    const mergedTs = Number(merged.timestamp || 0);
+    const rowTs = Number(row.timestamp || 0);
+    const newer = rowTs >= mergedTs ? row : merged;
+    const older = rowTs >= mergedTs ? merged : row;
+    const newerName = cleanContactDisplayName(newer.name);
+    const olderName = cleanContactDisplayName(older.name);
+    merged = {
+      ...older,
+      ...newer,
+      id: canonical,
+      name: newerName || olderName || 'Пользователь WhatsApp',
+      unread_count: Math.max(Number(older.unread_count || 0), Number(newer.unread_count || 0)),
+    };
+  }
+
+  // Carry the useful contact display name to the canonical key as well.
+  for (const alias of aliases) {
+    const display = cleanContactDisplayName(contactDisplayById.get(alias));
+    if (display && !cleanContactDisplayName(contactDisplayById.get(canonical))) {
+      contactDisplayById.set(canonical, display);
+    }
+  }
+
+  for (const alias of aliases) {
+    if (alias && alias !== canonical) knownChats.delete(alias);
+  }
+  if (merged) knownChats.set(canonical, {...merged, id: canonical});
+  return canonical;
 }
 
 function rememberMessageObject(message, canonicalChatId = '') {
@@ -421,13 +614,13 @@ const FLOOD_WINDOW_MS = 5000;
 const FLOOD_MESSAGE_LIMIT = 3;
 const FLOOD_QUIET_MS = 5000;
 const FLOOD_NOTICE_COOLDOWN_MS = 60000;
-const FLOOD_NOTICE_TEXT = `Это автоматическая система регистрации заявок.
+const FLOOD_NOTICE_TEXT = `🛑 Пожалуйста, отправляйте всю информацию **одним сообщением**.
+(Голосовые звонки бот не принимает, пишите текстом).
+Чтобы вернуться в меню, отправьте 0.
 
-Вы отправили несколько сообщений подряд, поэтому автоматические ответы временно приостановлены, чтобы не создавать лишнюю переписку.
-
-Пожалуйста, дождитесь ответа системы. После выбора темы заполните полученный шаблон целиком и отправьте данные одним сообщением. Не отправляйте строки шаблона по отдельности.
-
-Чтобы начать заново, отправьте 0.`;
+🛑 Барлық ақпаратты **бір хабарламамен** жіберіңіз.
+(Бот дауыстық қоңырауларды қабылдамайды, мәтінмен жазыңыз).
+Мәзірге оралу үшін 0 жіберіңіз.`;
 const inboundFloodState = new Map();
 // Повтор одинакового автоответа не отправляется снова сразу. Это особенно
 // важно для людей, которые пишут несколько произвольных сообщений вместо
@@ -440,9 +633,77 @@ const autoReplyCooldowns = new Map();
 // после завершения первой отправки.
 const autoReplyInflight = new Set();
 const autoReplyExactCooldowns = new Map();
-const AUTO_REPLY_EXACT_COOLDOWN_MS = 8000;
-const AUTO_REPLY_MENU_COOLDOWN_MS = 45000;
-const AUTO_REPLY_HINT_COOLDOWN_MS = 15000;
+
+// EO_AUTOREPLY_CATEGORY_V6_20260930
+// One inbound WhatsApp message may reach us through both the live event and
+// reserve recovery. Track the source message id so it can never produce two
+// automatic replies. Separately track the body/recipient of an auto-reply
+// before client.sendMessage() returns, because message_create may fire first.
+const autoReplySourceInflight138 = new Set();
+const autoReplySourceSent138 = new Map();
+const pendingAutoReplyEchoes138 = new Map();
+const AUTO_REPLY_SOURCE_TTL_MS = 10 * 60 * 1000;
+const AUTO_REPLY_ECHO_TTL_MS = 20000;
+
+function normalizeAutoReplyBody138(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function rememberPendingAutoReplyEcho138(recipients, content) {
+  const aliases = new Set();
+  for (const raw of (recipients || [])) {
+    const value = String(raw || '').trim();
+    if (!value) continue;
+    aliases.add(value);
+    const known = chatIdAliases.get(value);
+    if (known) for (const alias of known) aliases.add(String(alias || '').trim());
+  }
+  const body = normalizeAutoReplyBody138(content);
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  pendingAutoReplyEchoes138.set(token, {
+    aliases,
+    body,
+    until: Date.now() + AUTO_REPLY_ECHO_TTL_MS,
+  });
+  return token;
+}
+
+function forgetPendingAutoReplyEcho138(token) {
+  if (token) pendingAutoReplyEchoes138.delete(token);
+}
+
+function matchesPendingAutoReplyEcho138(message, rawChatId = '') {
+  const now = Date.now();
+  const raw = String(rawChatId || '').trim();
+  const body = normalizeAutoReplyBody138(incomingText(message));
+  for (const [token, entry] of pendingAutoReplyEchoes138) {
+    if (!entry || now > Number(entry.until || 0)) {
+      pendingAutoReplyEchoes138.delete(token);
+      continue;
+    }
+    if (!entry.aliases || !entry.aliases.has(raw)) continue;
+    if (entry.body && body && entry.body !== body) continue;
+    if (entry.body && !body) continue;
+    pendingAutoReplyEchoes138.delete(token);
+    return true;
+  }
+  return false;
+}
+
+function cleanupAutoReplySourceIds138(now = Date.now()) {
+  for (const [key, at] of autoReplySourceSent138) {
+    if (now - Number(at || 0) > AUTO_REPLY_SOURCE_TTL_MS) autoReplySourceSent138.delete(key);
+  }
+}
+
+// EO_STRICT_AUTOREPLY_20260930
+// The bot must be strict about the current dialog state, but it must not
+// answer every separate user message with the same prompt.
+const AUTO_REPLY_EXACT_COOLDOWN_MS = 60000;
+const AUTO_REPLY_MENU_COOLDOWN_MS = 60000;
+const AUTO_REPLY_HINT_COOLDOWN_MS = 45000;
+const AUTO_REPLY_GATE_COOLDOWN_MS = 30000;
+const AUTO_REPLY_PROFILE_COOLDOWN_MS = 30000;
 // Помечаем сообщения, которые отправила сама система. Событие message_create
 // также приходит на исходящие сообщения, и без этой метки автоответ системы
 // ошибочно включал бы «ручной диалог» на 30 минут.
@@ -508,9 +769,12 @@ function matchesActiveInternalOutgoing(message, rawChatId = '') {
 // человек не мог заставить систему заспамить его автоответами повторными
 // звонками, уведомление отправляется не чаще одного раза в минуту.
 const CALL_REJECT_NOTICE_COOLDOWN_MS = 60000;
-const CALL_REJECT_NOTICE_TEXT = `Звонки для обычных пользователей отключены.
-
-Пожалуйста, напишите сообщение в этот чат. Это автоматическая система регистрации заявок, поэтому выберите нужную тему и следуйте подсказке системы.`;
+const CALL_REJECT_NOTICE_RU = `🛑 Пожалуйста, отправляйте всю информацию **одним сообщением**.
+(Голосовые звонки бот не принимает, пишите текстом).
+Чтобы вернуться в меню, отправьте 0.`;
+const CALL_REJECT_NOTICE_KZ = `🛑 Барлық ақпаратты **бір хабарламамен** жіберіңіз.
+(Бот дауыстық қоңырауларды қабылдамайды, мәтінмен жазыңыз).
+Мәзірге оралу үшін 0 жіберіңіз.`;
 const callRejectNoticeAt = new Map();
 
 // Резервный контроль звонков. В некоторых текущих сборках WhatsApp Web
@@ -522,7 +786,7 @@ let callPollBaselineReady = false;
 let callPollModuleWarningShown = false;
 const callPollKnownIds = new Set();
 const processedIncomingCalls = new Map();
-const CALL_POLL_INTERVAL_MS = 700;
+const CALL_POLL_INTERVAL_MS = Math.max(10000, Number(process.env.QUEUE_CALL_POLL_INTERVAL_MS || 15000));
 const CALL_DEDUP_TTL_MS = 10 * 60 * 1000;
 
 function isLiveInboundMessage(message) {
@@ -543,7 +807,23 @@ function messageText(message) {
     document: '[Документ]',
     sticker: '[Стикер]',
   };
+  const raw = message?._data || {};
+  const mime = String(message?.mimetype || raw.mimetype || raw.mediaData?.mimetype || '').toLowerCase();
+  if (mime.startsWith('image/')) return labels.image;
+  if (mime.startsWith('video/')) return labels.video;
+  if (mime.startsWith('audio/')) return String(message?.type || raw.type) === 'ptt' ? labels.ptt : labels.audio;
   return labels[String((message && message.type) || '')] || '[Сообщение]';
+}
+
+function safeWhatsAppBody(value) {
+  const body = String(value || '').trim();
+  if (!body) return '';
+  if (/^data:[^,]{1,160};base64,/i.test(body)) return '';
+  const compact = body.replace(/\s+/g, '');
+  // WA Web can expose an encrypted/encoded media payload as `body` before its
+  // message type and media flags have finished loading. Never render such blobs as chat text.
+  if (compact.length > 512 && /^[A-Za-z0-9+/]*={0,2}$/.test(compact)) return '';
+  return body;
 }
 
 function incomingText(message) {
@@ -553,11 +833,13 @@ function incomingText(message) {
   if (/^[1-9]$/.test(selected)) return selected;
   const raw=message?._data || {};
   const media=['image','video','audio','ptt','document','sticker'].includes(String(message?.type || ''));
+  const hasMediaMetadata = Boolean(
+    message?.hasMedia || raw.hasMedia || raw.directPath || raw.mediaKey || raw.mediaData ||
+    message?.mimetype || raw.mimetype || raw.clientUrl || raw.deprecatedMms3Url || raw.filehash || raw.encFilehash
+  );
   const body=String((message && message.body) || '').trim();
-  if (media && (raw.caption || raw.mediaData?.caption)) return String(raw.caption || raw.mediaData.caption).trim();
-  // Thumbnails sometimes occupy body in internal media models. Never expose them as text.
-  if (media && (body.startsWith('data:') || (body.length>200 && /^[A-Za-z0-9+/=\s]+$/.test(body)))) return '';
-  return body;
+  if ((media || hasMediaMetadata) && (raw.caption || raw.mediaData?.caption)) return String(raw.caption || raw.mediaData.caption).trim();
+  return safeWhatsAppBody(body);
 }
 
 function incomingMenuChoice(message) {
@@ -565,7 +847,37 @@ function incomingMenuChoice(message) {
     (message && (message.selectedRowId || message.selectedButtonId)) || ''
   ).trim();
   const dynamicChoice = selected.match(/^menu_(\d{1,2})$/);
-  return MENU_CHOICE_NUMBERS[selected] || (dynamicChoice ? dynamicChoice[1] : '') || (/^\d{1,2}$/.test(selected) ? selected : '');
+  const selectedChoice = MENU_CHOICE_NUMBERS[selected] ||
+    (dynamicChoice ? dynamicChoice[1] : '') ||
+    (/^[0-8]$/.test(selected) ? selected : '');
+  if (selectedChoice) return selectedChoice;
+
+  // Users usually type menu digits as ordinary WhatsApp text, not as an
+  // interactive row/button event. Treat 0..8 as explicit navigation.
+  const typed = String(incomingText(message) || '').trim();
+  return /^[0-8]$/.test(typed) ? typed : '';
+}
+
+// EO_DRAFT_FINISH_PRIORITY_V13_20261001
+function isDraftFinishText138(value) {
+  const normalized = String(value || '')
+    .toLocaleLowerCase('ru-RU')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.,!?:;—\-]+$/g, '')
+    .trim();
+  return new Set([
+    'готово', 'готов',
+    'вся инфа', 'вся информация', 'это вся инфа', 'это вся информация',
+    'все данные', 'это все данные', 'это всё', 'это все',
+    'всё что есть', 'все что есть', 'больше данных нет',
+    'данных больше нет', 'другой информации нет', 'больше информации нет',
+    'больше ничего нет', 'это вся имеющаяся информация',
+    'создать заявку', 'создай заявку', 'отправить заявку', 'отправь заявку',
+    'завершить заявку',
+    'дайын', 'бар ақпарат осы', 'осы барлық ақпарат', 'басқа ақпарат жоқ',
+    'басқа мәлімет жоқ', 'бар мәлімет осы', 'өтінімді құру', 'өтінімді жіберу',
+  ]).has(normalized);
 }
 
 function liveMessageItem(message, fromMe = false, bodyOverride = '', notify = false) {
@@ -836,9 +1148,9 @@ async function resolveParticipantIdentity(rawId, fallbackName = '', contactHint 
   if (raw.endsWith('@lid') && phoneId) lidToPhone.set(raw, phoneId);
   if (contactId.endsWith('@lid') && phoneId) lidToPhone.set(contactId, phoneId);
 
-  // Queue profile photos for group senders/participants. The avatar worker is
-  // bounded and cached, so this does not block message processing.
-  avatarSync.enqueue([raw, contactId, phoneId].filter(Boolean));
+  // Profile photos are intentionally NOT bulk-queued from participant resolution.
+  // The active chat/group avatar is still requested by syncConnection().
+  // This keeps message synchronization ahead of cosmetic avatar work.
 
   return {
     id: raw || contactId || phoneId,
@@ -917,27 +1229,46 @@ async function resolveMentionPresentation(message, sourceBody = '') {
   return { body, mentions: result };
 }
 
+// .116: one in-page decrypt evaluation at a time.  A timed-out Puppeteer
+// promise is NOT cancelled by Promise.race; never accumulate orphaned decoders.
+let directMediaEvaluation = null;
+// The official WWebJS media downloader can also outlive a Promise.race timeout.
+// Bound its actual in-flight promises rather than just waiting callers.
+let officialMediaDownloads = 0;
+const directMediaReasonLoggedAt = new Map();
+function reportDirectMediaFailure(reason) {
+  const label = String(reason || 'unknown').replace(/[\r\n]/g, ' ').slice(0, 110);
+  const now = Date.now();
+  if (now - Number(directMediaReasonLoggedAt.get(label) || 0) < 60000) return;
+  directMediaReasonLoggedAt.set(label, now);
+  if (directMediaReasonLoggedAt.size > 100) for (const [key, at] of directMediaReasonLoggedAt) {
+    if (now - at > 3600000) directMediaReasonLoggedAt.delete(key);
+  }
+  console.warn('[media116] direct recovery:', label);
+}
 async function downloadMediaDirectById(messageId) {
   const mid = String(messageId || '').trim();
-  if (!mid) return null;
+  if (!mid || directMediaEvaluation || shutdownStarted || !client.pupPage) return null;
+  let evaluation = null;
   try {
-    return await Promise.race([
-      client.pupPage.evaluate(async (msgId) => {
+    evaluation = client.pupPage.evaluate(async (msgId) => {
+        let phase = 'collection';
         try {
-          const Collections = window.require('WAWebCollections');
-          const Msg = Collections && Collections.Msg;
-          if (!Msg) return null;
+          let Msg = null;
+          try { Msg = window.require('WAWebCollections')?.Msg || null; } catch (_) {}
+          if (!Msg) Msg = (window.Store && (window.Store.Msg || window.Store.Messages)) || null;
+          if (!Msg) return {__media_error:'collection-unavailable'};
           const idCandidates = [String(msgId)];
           // For LID messages the browser model may require the structured Wid
           // object. Rebuild it from the stable serialized form as well.
-          const parsed = String(msgId).match(/^(true|false)_(.+)_([A-Za-z0-9-]{8,})$/);
+          // false_<chat@g.us>_<stanza>_<sender@lid> is a four-part key.
+          // Old three-part parser failed on all group messages with participants.
+          const parsed = String(msgId).match(/^(true|false)_([^_]+)_([^_]+)(?:_(.+))?$/);
           if (parsed) {
             idCandidates.push({
-              fromMe: parsed[1] === 'true',
-              remote: parsed[2],
-              id: parsed[3],
-              $1: String(msgId),
-              _serialized: String(msgId),
+              fromMe: parsed[1] === 'true', remote: parsed[2], id: parsed[3],
+              participant: parsed[4] || undefined,
+              $1: String(msgId), _serialized: String(msgId),
             });
             idCandidates.push(parsed[3]);
           }
@@ -968,12 +1299,12 @@ async function downloadMediaDirectById(messageId) {
                  `${Boolean(id.fromMe)}_${id.remote}_${id.id}` === wanted)));
             }) || null;
           }
-          if (!msg) return null;
+          if (!msg) return {__media_error:'message-model-not-in-browser-cache'};
 
           // WhatsApp часто создаёт событие раньше, чем файл полностью готов.
           // Просим Web-клиент принудительно подготовить медиа, как это делает
           // whatsapp-web.js внутри Message.downloadMedia().
-          if (msg.mediaData && msg.mediaData.mediaStage !== 'RESOLVED') {
+          if (msg.mediaData && msg.mediaData.mediaStage !== 'RESOLVED' && typeof msg.downloadMedia === 'function') {
             try {
               await Promise.race([
                 msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 }),
@@ -984,6 +1315,23 @@ async function downloadMediaDirectById(messageId) {
           // Даже при REUPLOADING не выходим сразу: directPath/mediaKey уже могут
           // быть доступны и файл можно забрать напрямую. Если ещё рано, очередь
           // догрузки повторит попытку через несколько секунд.
+
+          // Official WhatsApp Web download helper may be present on newer builds.
+          // It returns an actual media payload, not the low-resolution body thumbnail.
+          if (window.WWebJS && typeof window.WWebJS.downloadMedia === 'function') {
+            try {
+              const original = await window.WWebJS.downloadMedia(msg);
+              if (original && typeof original.data === 'string' && original.data.length > 100) {
+                return {
+                  data: original.data, mimetype: original.mimetype || msg.mimetype || '',
+                  filename: original.filename || msg.filename || '', filesize: original.filesize || msg.size || 0,
+                };
+              }
+              if (typeof original === 'string' && original.length > 100) {
+                return {data:original, mimetype:msg.mimetype || '',filename:msg.filename || '',filesize:msg.size || 0};
+              }
+            } catch (_) {}
+          }
 
           // На новых сборках библиотеки уже может быть готовый resolveMediaBlob.
           if (window.WWebJS && typeof window.WWebJS.resolveMediaBlob === 'function') {
@@ -1003,26 +1351,56 @@ async function downloadMediaDirectById(messageId) {
 
           const directPath = msg.directPath || (msg.mediaData && msg.mediaData.directPath) || '';
           const mediaKey = msg.mediaKey || (msg.mediaData && msg.mediaData.mediaKey);
-          if (!directPath || !mediaKey) return null;
+          if (!directPath || !mediaKey) return {__media_error:'original-url-or-key-not-ready'};
           const mockQpl = {
             addAnnotations() { return this; },
             addPoint() { return this; },
             end() { return this; },
           };
-          const managerModule = window.require('WAWebDownloadManager');
+          phase = 'download-manager';
+          let managerModule = null;
+          try { managerModule = window.require('WAWebDownloadManager'); } catch (_) {}
+          if (!managerModule) managerModule = window.Store && window.Store.DownloadManager;
           const manager = managerModule && (managerModule.downloadManager || managerModule);
-          if (!manager || typeof manager.downloadAndMaybeDecrypt !== 'function') return null;
-          const decryptedMedia = await manager.downloadAndMaybeDecrypt({
-            directPath,
-            encFilehash: msg.encFilehash || (msg.mediaData && msg.mediaData.encFilehash),
-            filehash: msg.filehash || (msg.mediaData && msg.mediaData.filehash),
-            mediaKey,
-            mediaKeyTimestamp: msg.mediaKeyTimestamp || (msg.mediaData && msg.mediaData.mediaKeyTimestamp),
-            type: msg.type,
-            signal: new AbortController().signal,
-            downloadQpl: mockQpl,
-          });
-          if (!decryptedMedia) return null;
+          if (!manager || typeof manager.downloadAndMaybeDecrypt !== 'function')
+            return {__media_error:'download-manager-unavailable'};
+          const declaredMime = String(msg.mimetype || (msg.mediaData && msg.mediaData.mimetype) || '').trim().toLowerCase();
+          const mediaType = String(msg.type || '').toLowerCase();
+          const fallbackMimes = mediaType === 'ptt'
+            ? ['audio/ogg; codecs=opus', 'audio/ogg']
+            : mediaType === 'audio'
+              ? ['audio/ogg; codecs=opus', 'audio/ogg', 'audio/mpeg', 'audio/mp4']
+              : mediaType === 'image'
+                ? ['image/jpeg', 'image/png', 'image/webp']
+                : mediaType === 'video'
+                  ? ['video/mp4', 'video/webm']
+                  : mediaType === 'sticker' ? ['image/webp', 'image/png'] : [];
+          const mimeCandidates = declaredMime && declaredMime !== 'application/octet-stream'
+            ? [declaredMime, ...fallbackMimes]
+            : fallbackMimes.length ? fallbackMimes : ['application/octet-stream'];
+          let decryptedMedia = null;
+          let lastMimeError = null;
+          for (const candidateMime of [...new Set(mimeCandidates)]) {
+            try {
+              decryptedMedia = await manager.downloadAndMaybeDecrypt({
+                directPath,
+                encFilehash: msg.encFilehash || (msg.mediaData && msg.mediaData.encFilehash),
+                filehash: msg.filehash || (msg.mediaData && msg.mediaData.filehash),
+                mediaKey,
+                mediaKeyTimestamp: msg.mediaKeyTimestamp || (msg.mediaData && msg.mediaData.mediaKeyTimestamp),
+                type: msg.type,
+                mimetype: candidateMime,
+                signal: new AbortController().signal,
+                downloadQpl: mockQpl,
+              });
+              if (decryptedMedia) break;
+            } catch (error) {
+              lastMimeError = error;
+              if (!/unexpected mimetype/i.test(String(error && (error.message || error.name) || ''))) throw error;
+            }
+          }
+          if (!decryptedMedia && lastMimeError) throw lastMimeError;
+          if (!decryptedMedia) return {__media_error:'decrypt-returned-empty'};
           const data = await window.WWebJS.arrayBufferToBase64Async(decryptedMedia);
           return {
             data,
@@ -1030,16 +1408,35 @@ async function downloadMediaDirectById(messageId) {
             filename: msg.filename || (msg.mediaData && msg.mediaData.filename) || '',
             filesize: msg.size || (msg.mediaData && msg.mediaData.size) || 0,
           };
-        } catch (_) {
-          return null;
+        } catch (error) {
+          // Do not print message IDs or decrypted bytes to service logs.
+          return {__media_error:phase + ':' + String(error && (error.message || error.name) || 'failure').slice(0, 70)};
         }
-      }, mid),
-      new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
+      }, mid);
+    directMediaEvaluation = evaluation;
+    // An outstanding Chromium evaluation remains guarded after timeout until
+    // it actually settles; subsequent media retries use the official API only.
+    evaluation.then(() => {
+      if (directMediaEvaluation === evaluation) directMediaEvaluation = null;
+    }, () => {
+      if (directMediaEvaluation === evaluation) directMediaEvaluation = null;
+    });
+    const result = await Promise.race([
+      evaluation,
+      new Promise((resolve) => setTimeout(() => resolve({__media_error:'direct-evaluation-timeout'}), 8000)),
     ]);
-  } catch (_) {
+    if (result && result.__media_error) {
+      reportDirectMediaFailure(result.__media_error);
+      return null;
+    }
+    return result || null;
+  } catch (error) {
+    reportDirectMediaFailure('puppeteer:' + String(error && (error.message || error.name) || 'failure'));
     return null;
   }
 }
+
+
 
 function applyMediaResult(item, media, message) {
   if (!media || !media.data) return false;
@@ -1059,8 +1456,6 @@ function applyMediaResult(item, media, message) {
 
 async function attachMediaToItem(message, item) {
   if (!message) return item;
-  // Make whatsapp-web.js compatible with the current Wid shape before its
-  // own downloadMedia() implementation reads message.id._serialized.
   const normalizedMessageId = normalizeMessageIdObject(message);
   const raw = message._data || {};
   const mediaExpected = Boolean(
@@ -1068,7 +1463,6 @@ async function attachMediaToItem(message, item) {
     ['image', 'video', 'audio', 'ptt', 'document', 'sticker'].includes(String(message.type || ''))
   );
   if (!mediaExpected) return item;
-
   const mid = normalizedMessageId || serializedId(message && message.id);
   if (mid) {
     const recoveredUntil = Number(locallyRecoveredMediaIds.get(String(mid)) || 0);
@@ -1080,40 +1474,39 @@ async function attachMediaToItem(message, item) {
     if (recoveredUntil) locallyRecoveredMediaIds.delete(String(mid));
   }
   let lastError = null;
-
-  // Сначала используем официальный Message.downloadMedia(). Даём ему больше
-  // времени, чем раньше: на реальном рабочем WhatsApp фото нередко готовится
-  // несколько секунд после появления самого сообщения.
+  let officialTimedOut = false;
   if (typeof message.downloadMedia === 'function') {
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    if (officialMediaDownloads >= 2) {
+      officialTimedOut = true;
+    } else {
+      officialMediaDownloads += 1;
+      const official = Promise.resolve().then(() => message.downloadMedia());
+      const release = () => { officialMediaDownloads = Math.max(0, officialMediaDownloads - 1); };
+      official.then(release, release);
       try {
+        const timeoutMarker = {__media_timeout:true};
         const media = await Promise.race([
-          message.downloadMedia(),
-          new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+          official,
+          new Promise(resolve => setTimeout(() => resolve(timeoutMarker), 6500)),
         ]);
-        if (applyMediaResult(item, media, message)) return item;
+        if (media === timeoutMarker) {
+          officialTimedOut = true;
+          reportDirectMediaFailure('official-evaluation-timeout');
+        } else if (applyMediaResult(item, media, message)) {
+          return item;
+        }
       } catch (error) {
         lastError = error;
+        reportDirectMediaFailure('official:' + String(error && (error.message || error.name) || 'failure'));
       }
-      if (typeof message.reload === 'function') {
-        try {
-          await Promise.race([
-            message.reload(),
-            new Promise((resolve) => setTimeout(() => resolve(null), 1500)),
-          ]);
-        } catch (_) {}
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
-
-  // Если объект Message в библиотеке устарел или hasMedia=false, забираем файл
-  // прямо из внутреннего Msg WhatsApp Web по ID. Это главный резерв для фото.
-  if (mid) {
+  // A direct download is serialized and attempted once per cycle. If the official
+  // Chromium call is still running, defer to the retry queue instead of piling on.
+  if (!officialTimedOut && mid) {
     const direct = await downloadMediaDirectById(mid);
     if (applyMediaResult(item, direct, message)) return item;
   }
-
   item.media_name = String(item.media_name || `WhatsApp ${message.type || 'media'}`).slice(0, 180);
   item.media_pending = true;
   console.warn(
@@ -1164,9 +1557,20 @@ async function mentionsConnectedAccount(message) {
   return false;
 }
 
-async function publishLiveMessage(chatId, sender, message, fromMe = false, bodyOverride = '', notify = false, manualContact = false, senderPhone = '', senderId = '') {
-  const safeChatId = String(chatId || '').trim();
-  if (!safeChatId) return;
+async function publishLiveMessage(chatId, sender, message, fromMe = false, bodyOverride = '', notify = false, manualContact = false, senderPhone = '', senderId = '', deferMedia = false) {
+  const requestedChatId = String(chatId || '').trim();
+  if (!requestedChatId) return;
+  const raw = (message && message._data) || {};
+  const eventRemote = String(
+    fromMe
+      ? (serializedId(message && message.to) || serializedId(raw.to) || serializedId(message && message.id && message.id.remote) || serializedId(raw.id && raw.id.remote))
+      : (serializedId(message && message.from) || serializedId(raw.from) || serializedId(message && message.id && message.id.remote) || serializedId(raw.id && raw.id.remote))
+  ).trim();
+  let safeChatId = requestedChatId;
+  if (!safeChatId.endsWith('@g.us') && eventRemote && !eventRemote.endsWith('@g.us')) {
+    safeChatId = mergeKnownDirectChatAlias138(safeChatId, eventRemote) || safeChatId;
+  }
+  const sourceChatId138 = [requestedChatId, eventRemote].find((value) => String(value || '').endsWith('@lid')) || eventRemote || requestedChatId;
   rememberMessageObject(message, safeChatId);
   const rawBody = String(bodyOverride || messageText(message)).trim();
   const mentionView = await resolveMentionPresentation(message, rawBody);
@@ -1179,10 +1583,31 @@ async function publishLiveMessage(chatId, sender, message, fromMe = false, bodyO
   // written from the work phone/WhatsApp Web. Earlier builds had the resolver
   // but never called it, so WhatsApp showed the quote while our UI did not.
   await attachQuoteToItem(message, item);
-  try { await attachMediaToItem(message, item); }
-  catch (error) {
+
+  // QUEUE_FAST_INBOUND_20260930
+  // Never make a fresh inbound message wait 6-15 seconds for Chromium media
+  // decryption. Put the text/caption in the Queue immediately and let the
+  // existing bounded media-recovery worker attach the file afterwards.
+  const rawMedia = (message && message._data) || {};
+  const mediaExpected = Boolean(
+    message && (
+      message.hasMedia || rawMedia.directPath || rawMedia.mediaKey || rawMedia.mediaData ||
+      message.mimetype || rawMedia.mimetype || rawMedia.clientUrl || rawMedia.deprecatedMms3Url ||
+      ['image','video','audio','ptt','document','sticker'].includes(String(message.type || ''))
+    )
+  );
+  if (deferMedia && mediaExpected) {
+    item.media_name = String(
+      (message && message.filename) || rawMedia.filename || `WhatsApp ${String((message && message.type) || 'media')}`
+    ).slice(0, 180);
+    item.media_mime = String((message && message.mimetype) || rawMedia.mimetype || '').slice(0, 120);
     item.media_pending = true;
-    console.warn('Не удалось загрузить отдельное вложение:', error.message || error);
+  } else {
+    try { await attachMediaToItem(message, item); }
+    catch (error) {
+      item.media_pending = true;
+      console.warn('Не удалось загрузить отдельное вложение:', error.message || error);
+    }
   }
   if (item.media_pending && item.id) {
     pendingMediaMessages.set(String(item.id), {
@@ -1227,6 +1652,7 @@ async function publishLiveMessage(chatId, sender, message, fromMe = false, bodyO
     postJson('/api/chat-list-sync', { connected: true, chats }),
     postJson('/api/chat-messages-sync', {
       chat_id: safeChatId,
+      source_chat_id: sourceChatId138,
       append: true,
       messages: [item],
     }),
@@ -1236,6 +1662,7 @@ async function publishLiveMessage(chatId, sender, message, fromMe = false, bodyO
 
 async function markChatRead(chatId) {
   const safeChatId = String(chatId || '').trim();
+  if (!backgroundWorkAllowed()) return;
   if (!safeChatId || safeChatId.endsWith('@g.us') || typeof client.sendSeen !== 'function') return;
   const previous = knownChats.get(safeChatId);
   // No need to call into WhatsApp Web every two seconds for an already-read chat.
@@ -1254,6 +1681,7 @@ async function markChatRead(chatId) {
       await postJson('/api/chat-list-sync', { connected: true, chats });
     }
   } catch (error) {
+    noteBrowserPressure(error, 'sendSeen');
     console.warn('Не удалось отметить сообщение прочитанным. Заявка продолжает обрабатываться:', error.message || error);
   } finally {
     markReadBusy = false;
@@ -1262,6 +1690,7 @@ async function markChatRead(chatId) {
 
 async function repairStoredGroupMessageIdentities(groupId, requestedIds = []) {
   const safeGroupId = String(groupId || '').trim();
+  if (!backgroundWorkAllowed()) return;
   if (!safeGroupId.endsWith('@g.us') || groupIdentityRepairBusy || !connectorOperational) return;
   const now = Date.now();
   if (now - Number(groupIdentityRepairAt.get(safeGroupId) || 0) < 8000) return;
@@ -1393,7 +1822,7 @@ async function repairStoredGroupMessageIdentities(groupId, requestedIds = []) {
 }
 
 async function syncGroupParticipants(groupId) {
-  if (participantSyncBusy) return;
+  if (participantSyncBusy || !backgroundWorkAllowed()) return;
   participantSyncBusy = true;
   const safeGroupId = String(groupId || '').trim();
   if (!safeGroupId.endsWith('@g.us')) {
@@ -1562,9 +1991,8 @@ async function syncGroupParticipants(groupId) {
       return { mention_id: raw, resolved_id: phoneId || raw, name, phone, is_admin: Boolean(p.is_admin), is_me: me };
     });
     await postJson('/api/group-participants-sync', { chat_id: safeGroupId, participants: quick });
-    const quickAvatarIds = [...new Set(quick.flatMap((participant) => [participant.mention_id, participant.resolved_id]).filter(Boolean))];
-    avatarSync.enqueue(quickAvatarIds);
-    avatarSync.sync(client, postJson, quickAvatarIds.slice(0, 3)).catch(() => {});
+    // Do not fan out avatar requests for every group participant here.
+    // syncConnection() fetches the avatar of the actively opened chat/group.
     console.log(`Участники группы загружены: ${safeGroupId} · ${quick.length}`);
 
     // Имена догружаем небольшими порциями, чтобы не подвешивать QR-коннектор.
@@ -1617,7 +2045,7 @@ async function syncGroupParticipants(groupId) {
 }
 
 async function syncContactDiscovery() {
-  if (contactDiscoveryBusy) return;
+  if (contactDiscoveryBusy || !backgroundWorkAllowed()) return;
   const now=Date.now(); if(now-lastContactDiscoveryAt<PERF_CONTACT_COOLDOWN_MS)return; lastContactDiscoveryAt=now; contactDiscoveryBusy=true;
   try {
     const contacts=await Promise.race([client.getContacts(),new Promise(r=>setTimeout(()=>r([]),7000))]);
@@ -1633,19 +2061,21 @@ async function syncContactDiscovery() {
       return {chat_id:chatId,raw_id:raw,phone:prettyPhoneFromId(pn),name:displayName,saved:Boolean(c.isMyContact)};
     });
     await postJson('/api/contact-list-sync',{contacts:payload});
-    avatarSync.enqueue(payload.map(c=>c.chat_id));
+    // Avatars are loaded on demand for the active chat / active group.
+    // Bulk-enqueueing up to 1000 contacts caused continuous profile-photo
+    // lookups and 20-second retries for privacy/no-photo contacts.
   } catch(error){console.warn('Поиск контактов WhatsApp временно недоступен:',error.message||error);}
   finally { contactDiscoveryBusy=false; }
 }
 
 async function syncSelectedContactProfile(chatId) {
-  if (profileSyncBusy) return;
+  if (profileSyncBusy || !backgroundWorkAllowed()) return;
   const safe=String(chatId||'').trim(); if(!safe||safe.endsWith('@g.us'))return; const now=Date.now(); if(safe===lastProfileSyncChatId&&now-lastProfileSyncAt<30000)return; lastProfileSyncChatId=safe;lastProfileSyncAt=now; profileSyncBusy=true;
   try { const pn=safe.endsWith('@c.us')?safe:await resolveDirectPhoneId(safe); const contact=await Promise.race([client.getContactById(pn||safe),new Promise(r=>setTimeout(()=>r(null),2200))]); if(!contact)return; let pic='',about='',formatted=''; try{pic=await Promise.race([contact.getProfilePicUrl(),new Promise(r=>setTimeout(()=>r(''),1500))])||'';}catch(_){} try{about=await Promise.race([contact.getAbout(),new Promise(r=>setTimeout(()=>r(''),1500))])||'';}catch(_){} try{formatted=await Promise.race([contact.getFormattedNumber(),new Promise(r=>setTimeout(()=>r(''),1500))])||'';}catch(_){} const displayName=cleanContactDisplayName(contact.pushname||contact.name||contact.shortName||''); if(displayName){contactDisplayById.set(safe,displayName);if(pn)contactDisplayById.set(pn,displayName);} await postJson('/api/contact-profile-sync',{chat_id:safe,name:displayName,phone:formatted||prettyPhoneFromId(pn),about:String(about||''),profile_pic_url:String(pic||''),is_business:Boolean(contact.isBusiness)}); } catch(error){console.warn('Профиль WhatsApp не загрузился:',error.message||error);}
   finally { profileSyncBusy=false; }
 }
 
-async function recoverRawInboundCandidate(row) {
+async function recoverRawInboundCandidate(row, allowAutomation = true) {
   const mid = String((row && row.id) || '').trim();
   const from = String((row && (row.from || row.remote)) || '').trim();
   if (!mid || !from || from.endsWith('@g.us')) return false;
@@ -1656,14 +2086,15 @@ async function recoverRawInboundCandidate(row) {
   const type = String((row && row.type) || 'chat');
   const forwarded = Boolean(row && (row.isForwarded || row.forwarded || Number(row.forwardingScore || 0) > 0));
   const fallbackByType = { location: '[Геолокация]', vcard: '[Контакт]', multi_vcard: '[Контакты]' };
-  const text = String((row && row.body) || '').trim() || (row && row.has_media ? messageText({ type }) : (fallbackByType[type] || ''));
+  const text = safeWhatsAppBody(row && row.body) || (row && row.has_media ? messageText({ type, mimetype: row.mimetype }) : (fallbackByType[type] || ''));
   const timestamp = Number((row && row.timestamp) || Math.floor(Date.now() / 1000));
   if (!text && !row.has_media) return false;
 
-  const previous = knownChats.get(canonicalChatId) || {};
-  knownChats.set(canonicalChatId, {
+  const effectiveChatId138 = mergeKnownDirectChatAlias138(canonicalChatId, from) || canonicalChatId;
+  const previous = knownChats.get(effectiveChatId138) || {};
+  knownChats.set(effectiveChatId138, {
     ...previous,
-    id: canonicalChatId,
+    id: effectiveChatId138,
     name: sender,
     last_message: text || '[Вложение]',
     timestamp,
@@ -1676,7 +2107,8 @@ async function recoverRawInboundCandidate(row) {
   await Promise.all([
     postJson('/api/chat-list-sync', { connected: true, chats }),
     postJson('/api/chat-messages-sync', {
-      chat_id: canonicalChatId,
+      chat_id: effectiveChatId138,
+      source_chat_id: from,
       append: true,
       messages: [{ id: mid, from_me: false, body: text || '[Вложение]', type, timestamp, ack: 0, notify: false, forwarded }],
     }),
@@ -1697,17 +2129,33 @@ async function recoverRawInboundCandidate(row) {
       next_at: Date.now() + 1000,
     });
   }
+  // Startup history older than the short catch-up window is restored only to
+  // the chat UI. It must not replay old menus/language prompts after a restart.
+  if (!allowAutomation) return true;
+
+  // Keep menu/category semantics even when the live WhatsApp event was missed.
+  const recoveredMenuChoice = /^[0-8]$/.test(String(text || '').trim())
+    ? String(text || '').trim()
+    : '';
+  const recoveredDraftFinish138 = isDraftFinishText138(text);
   const result = await postJson('/api/whatsapp', {
     external_id: mid,
     sender,
     phone: phoneDigits ? `+${phoneDigits}` : '',
     chat_id: canonicalChatId,
     text,
-    menu_choice: '',
+    menu_choice: recoveredMenuChoice,
+    draft_finish: recoveredDraftFinish138,
     attachment_name: row && row.has_media ? `WhatsApp ${type}` : '',
     message_timestamp: timestamp,
     message_type: type,
   });
+  if (result) {
+    result._source_message_id138 = mid;
+    result._source_menu_choice138 = recoveredMenuChoice;
+    result._source_finish_command138 = recoveredDraftFinish138;
+  }
+  if (result && !result.duplicate) cancelDialogHint138([phoneId, from]);
   if (!result || result.duplicate || result.manual_contact || result.silent || !result.reply) return true;
   await sendAutomaticReply([phoneId, from], result).catch(() => null);
   return true;
@@ -1746,7 +2194,7 @@ async function recoverRawGroupCandidate(row) {
   const timestamp = Number((row && row.timestamp) || Math.floor(Date.now() / 1000));
   const forwarded = Boolean(row && (row.isForwarded || row.forwarded || Number(row.forwardingScore || 0) > 0));
   const mentionIds = Array.isArray(row && row.mentions) ? row.mentions : [];
-  const rawBody = String((row && row.body) || '').trim() || (row && row.has_media ? messageText({ type }) : '');
+  const rawBody = safeWhatsAppBody(row && row.body) || (row && row.has_media ? messageText({ type, mimetype: row.mimetype }) : '');
   const mentionView = rawMentionPresentation(rawBody, mentionIds);
   const identity = await resolveParticipantIdentity(author, String((row && row.sender) || '').trim());
   const phoneId = String(identity.resolved_id || '').endsWith('@c.us') ? String(identity.resolved_id) : '';
@@ -1808,12 +2256,15 @@ async function reconcileRecentInbound() {
   if (now - lastRecentPollAt < 900) return;
   lastRecentPollAt = now;
   recentPollBusy = true;
+  const startupBackfill = now < startupInboundRecoveryUntil;
+  const lookbackSeconds = startupBackfill ? STARTUP_BACKFILL_LOOKBACK_SECONDS : 900;
+  const modelLimit = startupBackfill ? STARTUP_BACKFILL_MODEL_LIMIT : 180;
   try {
     // client.getChats() сейчас может падать внутри сериализации WhatsApp Web с
     // короткой ошибкой "r". Для восстановления входящих читаем только ID
     // последних сообщений напрямую из WAWebCollections.Msg. Это существенно
     // легче и не зависит от сериализации всего списка чатов.
-    const candidates = await client.pupPage.evaluate(() => {
+    const candidates = await client.pupPage.evaluate(({ lookbackSeconds, modelLimit }) => {
         const widText = (value) => {
           if (!value) return '';
           if (typeof value === 'string') return value;
@@ -1826,8 +2277,8 @@ async function reconcileRecentInbound() {
         let models = [];
         if (Msg && typeof Msg.getModelsArray === 'function') models = Msg.getModelsArray();
         else if (Msg && Array.isArray(Msg.models)) models = Msg.models;
-        const cutoff = Math.floor(Date.now() / 1000) - 900;
-        return (Array.isArray(models) ? models : []).slice(-180).map((m) => ({
+        const cutoff = Math.floor(Date.now() / 1000) - lookbackSeconds;
+        return (Array.isArray(models) ? models : []).slice(-modelLimit).map((m) => ({
           id: widText(m && m.id),
           from: widText(m && m.from),
           remote: widText(m && m.id && m.id.remote),
@@ -1837,6 +2288,7 @@ async function reconcileRecentInbound() {
             : [],
           from_me: Boolean(m && m.id && m.id.fromMe),
           type: String((m && m.type) || 'chat'),
+          mimetype: String((m && (m.mimetype || (m.mediaData && m.mediaData.mimetype))) || ''),
           timestamp: Number((m && (m.t || m.timestamp)) || 0),
           body: String((m && (m.body || m.caption || m.pollName || m.eventName)) || ''),
           sender: String((m && (m.notifyName || m.pushname)) || ''),
@@ -1849,13 +2301,20 @@ async function reconcileRecentInbound() {
           forwarded: Boolean(m && (m.forwarded || m.isForwarded)),
           forwardingScore: Number((m && (m.forwardingScore || (m._data && m._data.forwardingScore))) || 0),
         })).filter((m) => m.id && !m.from_me && m.timestamp >= cutoff);
-      });
+      }, { lookbackSeconds, modelLimit });
 
     let recovered = 0;
-    for (const row of (Array.isArray(candidates) ? candidates.slice(-40) : [])) {
+    const unreconciled = (Array.isArray(candidates) ? candidates : [])
+      .filter((row) => {
+        const from = String(row && (row.from || row.remote) || '');
+        return row && row.id && !reconciledInboundIds.has(String(row.id)) &&
+          USER_MESSAGE_TYPES.has(String(row.type || '')) && from !== 'status@broadcast' && !from.endsWith('@newsletter');
+      });
+    const batch = startupBackfill ? unreconciled.slice(-STARTUP_BACKFILL_BATCH) : unreconciled.slice(-40);
+    for (const row of batch) {
       const mid = String(row.id || '');
       const from = String(row.from || row.remote || '');
-      if (!mid || reconciledInboundIds.has(mid) || inboundProcessingIds.has(mid) || from === 'status@broadcast' || from.endsWith('@newsletter')) continue;
+      if (!mid || reconciledInboundIds.has(mid) || from === 'status@broadcast' || from.endsWith('@newsletter')) continue;
       if (!USER_MESSAGE_TYPES.has(String(row.type || ''))) continue;
       const isGroupMessage = from.endsWith('@g.us');
       let message = null;
@@ -1864,6 +2323,7 @@ async function reconcileRecentInbound() {
         if (message) rememberMessageObject(message, from);
       } catch (_) {}
       if (message && !message.fromMe && isLiveInboundMessage(message)) {
+        reconciledInboundIds.set(mid, now);
         recovered += 1;
         // И личные, и групповые сообщения повторно подаются в единый обработчик.
         // Это важно: на текущем WhatsApp Web событие message иногда пропадает
@@ -1874,18 +2334,27 @@ async function reconcileRecentInbound() {
       // Если библиотека не смогла собрать Message, всё равно сохраняем текст.
       // Для групп отдельно сохраняем автора, @упоминания и уведомление.
       try {
+        const rowTimestamp = Number(row && row.timestamp || 0);
+        const allowStartupAutomation = !startupBackfill ||
+          (rowTimestamp > 0 && rowTimestamp >= connectorReadyAt - STARTUP_AUTOMATION_MAX_AGE_SECONDS);
         const restored = isGroupMessage
           ? await recoverRawGroupCandidate(row)
-          : await recoverRawInboundCandidate(row);
+          : await recoverRawInboundCandidate(row, allowStartupAutomation);
         if (restored) {
           reconciledInboundIds.set(mid, now);
           recovered += 1;
         }
       } catch (_) {}
     }
+    if (startupBackfill) {
+      const remaining = unreconciled.filter((row) => !reconciledInboundIds.has(String(row.id))).length;
+      const ceiling = startupInboundRecoveryStartedAt + 5 * 60 * 1000;
+      startupInboundRecoveryUntil = remaining > 0 && Date.now() < ceiling
+        ? Math.min(ceiling, Date.now() + 60 * 1000)
+        : 0;
+    }
     if (recovered) console.log(`Резервная синхронизация восстановила входящих: ${recovered}`);
     for (const [id, t] of reconciledInboundIds) if (now - t > 3600000) reconciledInboundIds.delete(id);
-    for (const [id, t] of inboundProcessingIds) if (now - t > 60000) inboundProcessingIds.delete(id);
   } catch (error) {
     console.warn('Резервная синхронизация входящих:', error && error.stack ? error.stack.split('\n')[0] : (error.message || error));
   } finally {
@@ -2049,7 +2518,7 @@ async function reconcileRecentOutgoing() {
       // A phone screenshot can appear in Store.Msg a little earlier than its media
       // metadata. Saving/reconciling that empty provisional model loses the image
       // forever, because later sweeps skip the same message id. Leave it pending.
-      const provisionalBody = String(row.body || '').trim();
+      const provisionalBody = safeWhatsAppBody(row.body);
       if (!row.has_media && !provisionalBody) {
         continue;
       }
@@ -2057,7 +2526,7 @@ async function reconcileRecentOutgoing() {
         id: mid,
         from_me: true,
         sender: 'Рабочий WhatsApp',
-        body: String(row.body || messageText({ type: row.type }) || '').trim(),
+        body: safeWhatsAppBody(row.body) || messageText({ type: row.type, mimetype: row.mimetype }),
         type: String(row.type || 'chat'),
         timestamp: Number(row.timestamp || Math.floor(Date.now() / 1000)),
         ack: Math.max(1, Math.min(4, Number(row.ack || 0))),
@@ -2302,108 +2771,124 @@ async function retryOutgoingMediaProbe() {
 }
 
 async function retryPendingMedia() {
-  if (pendingMediaBusy || !pendingMediaMessages.size) return;
+  if (pendingMediaBusy || !pendingMediaMessages.size || !backgroundWorkAllowed()) return;
   pendingMediaBusy = true;
   try {
     const now = Date.now();
     const entries = [...pendingMediaMessages.entries()]
-    .filter(([, meta]) => Number(meta.next_at || 0) <= now)
-    .slice(0, 4);
-  for (const [messageId, meta] of entries) {
-    try {
-      const locallyRecoveredUntil = Number(locallyRecoveredMediaIds.get(String(messageId)) || 0);
-      if (locallyRecoveredUntil > Date.now()) {
-        pendingMediaMessages.delete(messageId);
-        outgoingMediaProbe.delete(messageId);
-        continue;
-      }
-      if (locallyRecoveredUntil) locallyRecoveredMediaIds.delete(String(messageId));
-      if (isRememberedInternalOutgoing(messageId)) {
-        pendingMediaMessages.delete(messageId);
-        outgoingMediaProbe.delete(messageId);
-        continue;
-      }
-      let message = null;
+      .filter(([, meta]) => Number(meta.next_at || 0) <= now)
+      .slice(0, 1);
+
+    for (const [messageId, meta] of entries) {
       try {
-        message = await Promise.race([
-          client.getMessageById(messageId),
-          new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
-        ]);
-      } catch (_) {}
+        const locallyRecoveredUntil = Number(locallyRecoveredMediaIds.get(String(messageId)) || 0);
+        if (locallyRecoveredUntil > Date.now()) {
+          pendingMediaMessages.delete(messageId);
+          outgoingMediaProbe.delete(messageId);
+          continue;
+        }
+        if (locallyRecoveredUntil) locallyRecoveredMediaIds.delete(String(messageId));
+        if (isRememberedInternalOutgoing(messageId)) {
+          pendingMediaMessages.delete(messageId);
+          outgoingMediaProbe.delete(messageId);
+          continue;
+        }
 
-      const item = message
-        ? liveMessageItem(message, Boolean(meta.from_me), messageText(message), Boolean(meta.notify))
-        : {
-            id: String(messageId),
-            from_me: Boolean(meta.from_me),
-            sender: String(meta.sender || ''),
-            body: String(meta.body || '[Вложение]'),
-            type: String(meta.type || 'media'),
-            timestamp: Number(meta.timestamp || Math.floor(Date.now() / 1000)),
-            ack: 0,
-            notify: Boolean(meta.notify),
-            forwarded: Boolean(meta.forwarded),
-          };
-      item.forwarded = Boolean(item.forwarded || meta.forwarded);
-      item.sender = String(meta.sender || item.sender || '');
-      item.sender_phone = String(meta.sender_phone || item.sender_phone || '');
-      item.sender_id = String(meta.sender_id || item.sender_id || '');
+        let message = null;
+        try {
+          message = await Promise.race([
+            client.getMessageById(messageId),
+            new Promise((resolve) => setTimeout(() => resolve(null), 1800)),
+          ]);
+        } catch (_) {}
 
-      if (message) await attachMediaToItem(message, item);
-      if (!item.media_base64) {
-        const direct = await downloadMediaDirectById(messageId);
-        applyMediaResult(item, direct, message || { type: meta.type || 'media' });
-      }
+        const item = message
+          ? liveMessageItem(message, Boolean(meta.from_me), messageText(message), Boolean(meta.notify))
+          : {
+              id: String(messageId),
+              from_me: Boolean(meta.from_me),
+              sender: String(meta.sender || ''),
+              body: String(meta.body || '[Вложение]'),
+              type: String(meta.type || 'media'),
+              timestamp: Number(meta.timestamp || Math.floor(Date.now() / 1000)),
+              ack: 0,
+              notify: Boolean(meta.notify),
+              forwarded: Boolean(meta.forwarded),
+            };
+        item.forwarded = Boolean(item.forwarded || meta.forwarded);
+        item.sender = String(meta.sender || item.sender || '');
+        item.sender_phone = String(meta.sender_phone || item.sender_phone || '');
+        item.sender_id = String(meta.sender_id || item.sender_id || '');
 
-      if (item.media_base64) {
-        await postJson('/api/chat-messages-sync', {
-          chat_id: String(meta.chat_id || ''),
-          append: true,
-          messages: [item],
-        });
-        if (item.media_pending) throw new Error("Передача вложения в панель не завершена");
-        pendingMediaMessages.delete(messageId);
-        if (meta.from_me) reconciledOutgoingIds.set(messageId, Date.now());
-        console.log(`Вложение WhatsApp догружено и сохранено: ${messageId}`);
-        continue;
-      }
+        if (message) {
+          await attachMediaToItem(message, item);
+        } else {
+          const direct = await downloadMediaDirectById(messageId);
+          applyMediaResult(item, direct, { type: meta.type || 'media' });
+        }
 
-      meta.attempts = Number(meta.attempts || 0) + 1;
-      meta.next_at = now + Math.min(12000, 1800 + meta.attempts * 700);
-      if (meta.attempts >= 36) {
-        pendingMediaMessages.delete(messageId);
-        console.warn(`Не удалось скачать вложение после ${meta.attempts} попыток: ${messageId}`);
-      } else {
-        pendingMediaMessages.set(messageId, meta);
-      }
-    } catch (error) {
-      meta.attempts = Number(meta.attempts || 0) + 1;
-      meta.next_at = now + Math.min(12000, 1800 + meta.attempts * 700);
-      if (meta.attempts >= 36) {
-        pendingMediaMessages.delete(messageId);
-        console.warn('Не удалось догрузить вложение WhatsApp:', error.message || error);
-      } else {
-        pendingMediaMessages.set(messageId, meta);
+        if (item.media_base64) {
+          await postJson('/api/chat-messages-sync', {
+            chat_id: String(meta.chat_id || ''),
+            append: true,
+            messages: [item],
+          });
+          if (item.media_pending) throw new Error('Передача вложения в панель не завершена');
+          pendingMediaMessages.delete(messageId);
+          if (meta.from_me) reconciledOutgoingIds.set(messageId, Date.now());
+          console.log(`Вложение WhatsApp догружено и сохранено: ${messageId}`);
+          continue;
+        }
+
+        meta.attempts = Number(meta.attempts || 0) + 1;
+        meta.next_at = now + Math.min(90000, 6000 + meta.attempts * 9000);
+        if (meta.attempts >= 12) {
+          pendingMediaMessages.delete(messageId);
+          console.warn(`Не удалось скачать вложение после ${meta.attempts} попыток: ${messageId}`);
+        } else {
+          pendingMediaMessages.set(messageId, meta);
+        }
+      } catch (error) {
+        meta.attempts = Number(meta.attempts || 0) + 1;
+        meta.next_at = Date.now() + Math.min(90000, 6000 + meta.attempts * 9000);
+        noteBrowserPressure(error, 'media recovery');
+        if (meta.attempts >= 12) {
+          pendingMediaMessages.delete(messageId);
+          console.warn('Не удалось догрузить вложение WhatsApp:', error.message || error);
+        } else {
+          pendingMediaMessages.set(messageId, meta);
+        }
       }
     }
-  }
   } finally {
     pendingMediaBusy = false;
   }
 }
 
-
 async function runFastSync() {
   if (fastSyncBusy || shutdownStarted || !connectorOperational) return;
+  if (Date.now() < startupLiveOnlyUntil) return;
   fastSyncBusy = true;
   try {
-    // Serialize Puppeteer-heavy recovery tasks. Running them in parallel can
-    // make Chromium collect an outstanding evaluation promise and produce
-    // Runtime.callFunctionOn: Promise was collected.
+    // Critical lane: missed inbound messages always go first.
     await reconcileRecentInbound();
-    await reconcileRecentOutgoing();
-    await retryPendingMedia();
-    await retryOutgoingMediaProbe();
+
+    // Optional/background lane.
+    if (!backgroundWorkAllowed()) return;
+    const now = Date.now();
+
+    if (now - lastOutgoingRecoveryAt >= BACKGROUND_OUTGOING_INTERVAL_MS) {
+      lastOutgoingRecoveryAt = now;
+      await reconcileRecentOutgoing();
+      if (!backgroundWorkAllowed()) return;
+    }
+
+    if (now - lastMediaRecoveryAt >= BACKGROUND_MEDIA_INTERVAL_MS) {
+      lastMediaRecoveryAt = now;
+      await retryPendingMedia();
+      if (!backgroundWorkAllowed()) return;
+      await retryOutgoingMediaProbe();
+    }
   } finally {
     fastSyncBusy = false;
   }
@@ -2411,6 +2896,7 @@ async function runFastSync() {
 
 
 async function repairStoredMessageQuotes(chatId, messageIds) {
+  if (!backgroundWorkAllowed()) return;
   const targetChatId = String(chatId || '').trim();
   const ids = Array.isArray(messageIds) ? messageIds.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 20) : [];
   if (!targetChatId || !ids.length || quoteRepairBusy || typeof client.getMessageById !== 'function') return;
@@ -2448,7 +2934,7 @@ async function repairStoredMessageQuotes(chatId, messageIds) {
 }
 
 async function syncPresence(ids) {
-  if (presenceSyncBusy) return;
+  if (presenceSyncBusy || !backgroundWorkAllowed()) return;
   const cleanIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter((id) => id && !id.endsWith('@g.us')).slice(0, 16))];
   if (!cleanIds.length) return;
   const signature = cleanIds.join('|');
@@ -2559,9 +3045,9 @@ async function syncConnection() {
     }
     syncContactDiscovery().catch(() => {});
     const requestedGroupId = String((chatControl && chatControl.requested_group_id) || '');
-    avatarSync.sync(client,postJson,[requestedChatId,requestedGroupId].filter(Boolean)).catch(()=>{});
+    syncActiveAvatar(requestedChatId, requestedGroupId);
     const now = Date.now();
-    if (requestedGroupId && (requestedGroupId !== lastRequestedGroupId || now - lastGroupParticipantSyncAt > 30000)) {
+    if (requestedGroupId && (requestedGroupId !== lastRequestedGroupId || now - lastGroupParticipantSyncAt > 10 * 60 * 1000)) {
       lastRequestedGroupId = requestedGroupId;
       lastGroupParticipantSyncAt = now;
       syncGroupParticipants(requestedGroupId).catch(() => {});
@@ -2580,8 +3066,8 @@ async function syncConnection() {
     const refreshState = await postJson('/api/group-refresh-check', {});
     const refreshRequest = String((refreshState && refreshState.request) || '');
     if (refreshRequest && refreshRequest !== lastGroupRefreshRequest) {
-      lastGroupRefreshRequest = refreshRequest;
-      await syncGroups();
+      const refreshed = await syncGroups();
+      if (refreshed) lastGroupRefreshRequest = refreshRequest;
     }
     heartbeatErrorReported = false;
   } catch (error) {
@@ -2604,131 +3090,121 @@ async function publishConnectorState(status, qrDataUrl = '') {
 }
 
 async function syncGroups() {
-  const found = new Map();
-  const diagnostics = {
-    chats_ok: false,
-    chats_total: 0,
-    chats_groups: 0,
-    contacts_ok: false,
-    contacts_total: 0,
-    contacts_groups: 0,
-    enriched: 0,
-    errors: [],
-  };
+  if (shutdownStarted || !connectorOperational) return false;
+  if (groupSyncBusy) return false;
 
-  const addGroup = (item, source) => {
-    if (!item) return false;
-    const id = serializedId(item.id);
-    if (!id.endsWith('@g.us')) return false;
+  const now = Date.now();
+  if (!backgroundWorkAllowed()) {
+    if (!groupSyncDeferredTimer) {
+      const blockedUntil = Math.max(startupLiveOnlyUntil, hotInboundUntil, browserPressureUntil);
+      const delay = Math.max(1000, blockedUntil - now + 500);
+      groupSyncDeferredTimer = setTimeout(() => {
+        groupSyncDeferredTimer = null;
+        void syncGroups();
+      }, delay);
+      if (groupSyncDeferredTimer.unref) groupSyncDeferredTimer.unref();
+    }
+    return false;
+  }
+  if (now - lastGroupSyncAt < GROUP_SYNC_MIN_INTERVAL_MS) return false;
 
-    const previous = found.get(id) || {
-      id,
-      name: '',
-      participant_count: 0,
-      sources: [],
-    };
-    const candidateName = String(
-      item.name || item.subject || item.pushname || item.shortName || ''
-    ).trim();
-    const participantCount = Array.isArray(item.participants)
-      ? item.participants.length
-      : Number(previous.participant_count || 0);
-
-    found.set(id, {
-      id,
-      name: candidateName || previous.name || 'Группа WhatsApp',
-      participant_count: Math.max(0, Number(participantCount || 0)),
-      sources: [...new Set([...(previous.sources || []), source])],
-    });
+  groupSyncBusy = true;
+  lastGroupSyncAt = now;
+  try {
+    await syncGroupsCore();
     return true;
+  } finally {
+    groupSyncBusy = false;
+    lastGroupSyncAt = Date.now();
+  }
+}
+
+async function syncGroupsCore() {
+  const diagnostics = {
+    chats_ok: false, chats_total: 0, chats_groups: 0,
+    contacts_ok: false, contacts_total: 0, contacts_groups: 0,
+    enriched: 0, errors: [],
   };
 
-  // getChats() обычно даёт последние/текущие чаты, но не во всех сборках
-  // WhatsApp Web туда попадают все группы. Поэтому это только первый источник.
   try {
-    const chats = await client.getChats();
+    const snapshot = await client.pupPage.evaluate(() => {
+      const widText = (value) => {
+        if (!value) return '';
+        if (typeof value === 'string') return value;
+        if (typeof value._serialized === 'string') return value._serialized;
+        if (typeof value.$1 === 'string') return value.$1;
+        if (value.user && value.server) return `${value.user}@${value.server}`;
+        return '';
+      };
+      const models = (collection) => {
+        if (!collection) return [];
+        try { if (typeof collection.getModelsArray === 'function') return collection.getModelsArray() || []; } catch (_) {}
+        try { if (Array.isArray(collection.models)) return collection.models; } catch (_) {}
+        try { if (Array.isArray(collection._models)) return collection._models; } catch (_) {}
+        return [];
+      };
+      const found = new Map();
+      const add = (item, source) => {
+        if (!item) return;
+        const id = widText(item.id || item.wid);
+        if (!id.endsWith('@g.us') && item.isGroup !== true) return;
+        const name = String(
+          item.name || item.subject || item.formattedTitle || item.pushname ||
+          item.shortName || (item.contact && (item.contact.name || item.contact.pushname)) || ''
+        ).trim();
+        const participants = Array.isArray(item.participants)
+          ? item.participants
+          : (item.groupMetadata && Array.isArray(item.groupMetadata.participants)
+            ? item.groupMetadata.participants : []);
+        const previous = found.get(id) || { id, name: '', participant_count: 0, sources: [] };
+        found.set(id, {
+          id,
+          name: name || previous.name || 'Группа WhatsApp',
+          participant_count: Math.max(Number(previous.participant_count || 0), participants.length || 0),
+          sources: [...new Set([...(previous.sources || []), source])],
+        });
+      };
+
+      let collections = null;
+      try { collections = window.require('WAWebCollections'); } catch (_) {}
+      const chats = models(collections && collections.Chat);
+      const contacts = models(collections && collections.Contact);
+      for (const item of chats) add(item, 'chats');
+      for (const item of contacts) add(item, 'contacts');
+
+      return {
+        groups: [...found.values()],
+        chats_total: chats.length,
+        contacts_total: contacts.length,
+      };
+    });
+
+    const original = Array.isArray(snapshot && snapshot.groups) ? snapshot.groups : [];
+    const groups = original
+      .map((group) => ({
+        id: String(group.id || '').trim(),
+        name: String(group.name || 'Группа WhatsApp').trim(),
+        participant_count: Math.max(0, Number(group.participant_count || 0)),
+      }))
+      .filter((group) => group.id.endsWith('@g.us'))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
     diagnostics.chats_ok = true;
-    diagnostics.chats_total = Array.isArray(chats) ? chats.length : 0;
-    for (const chat of chats || []) {
-      const id = serializedId(chat && chat.id);
-      if (Boolean(chat && chat.isGroup) || id.endsWith('@g.us')) {
-        if (addGroup(chat, 'chats')) diagnostics.chats_groups += 1;
-      }
-    }
-  } catch (error) {
-    diagnostics.errors.push(`getChats: ${error.message || error}`);
-  }
-
-  // В whatsapp-web.js группа также является Contact с isGroup=true. Этот
-  // источник нужен для групп, которые не загружены в текущий список чатов.
-  try {
-    const contacts = await client.getContacts();
     diagnostics.contacts_ok = true;
-    diagnostics.contacts_total = Array.isArray(contacts) ? contacts.length : 0;
-    for (const contact of contacts || []) {
-      const id = serializedId(contact && contact.id);
-      if (Boolean(contact && contact.isGroup) || id.endsWith('@g.us')) {
-        if (addGroup(contact, 'contacts')) diagnostics.contacts_groups += 1;
-      }
-    }
-  } catch (error) {
-    diagnostics.errors.push(`getContacts: ${error.message || error}`);
-  }
+    diagnostics.chats_total = Number(snapshot && snapshot.chats_total || 0);
+    diagnostics.contacts_total = Number(snapshot && snapshot.contacts_total || 0);
+    diagnostics.chats_groups = original.filter((g) => Array.isArray(g.sources) && g.sources.includes('chats')).length;
+    diagnostics.contacts_groups = original.filter((g) => Array.isArray(g.sources) && g.sources.includes('contacts')).length;
 
-  if (!diagnostics.chats_ok && !diagnostics.contacts_ok) {
-    console.warn('Не удалось обновить список групп: оба источника WhatsApp недоступны.');
-    if (diagnostics.errors.length) console.warn(diagnostics.errors.join(' | '));
-    return;
-  }
-
-  // Если группа нашлась только как Contact, пытаемся получить её Chat, чтобы
-  // подтянуть нормальное название и число участников. Ошибка одной группы не
-  // прерывает весь список.
-  const groupsToEnrich = [...found.values()]
-    .filter((group) => !group.name || group.name === 'Группа WhatsApp' || !group.participant_count)
-    .slice(0, 250);
-  for (let index = 0; index < groupsToEnrich.length; index += 6) {
-    const chunk = groupsToEnrich.slice(index, index + 6);
-    await Promise.all(
-      chunk.map(async (group) => {
-        try {
-          const chat = await client.getChatById(group.id);
-          if (!chat) return;
-          const current = found.get(group.id) || group;
-          const name = String(chat.name || current.name || 'Группа WhatsApp').trim();
-          const participantCount = Array.isArray(chat.participants)
-            ? chat.participants.length
-            : Number(current.participant_count || 0);
-          found.set(group.id, {
-            ...current,
-            name,
-            participant_count: Math.max(0, Number(participantCount || 0)),
-          });
-          diagnostics.enriched += 1;
-        } catch (_) {
-          // Группа всё равно останется в списке с данными из Contact/getChats.
-        }
-      })
+    await postJson('/api/group-list-sync', { groups, diagnostics });
+    console.log(
+      `Список групп обновлён облегчённо: ${groups.length}. ` +
+      `Чаты ${diagnostics.chats_groups}/${diagnostics.chats_total}; ` +
+      `контакты ${diagnostics.contacts_groups}/${diagnostics.contacts_total}.`
     );
-  }
-
-  const groups = [...found.values()]
-    .map((group) => ({
-      id: group.id,
-      name: String(group.name || 'Группа WhatsApp').trim(),
-      participant_count: Math.max(0, Number(group.participant_count || 0)),
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
-
-  await postJson('/api/group-list-sync', { groups, diagnostics });
-  avatarSync.enqueue(groups.map(g=>g.id));
-  console.log(
-    `Список групп обновлён: ${groups.length}. ` +
-      `Через чаты: ${diagnostics.chats_groups}/${diagnostics.chats_total}; ` +
-      `через контакты: ${diagnostics.contacts_groups}/${diagnostics.contacts_total}.`
-  );
-  if (diagnostics.errors.length) {
-    console.warn('Часть способов поиска групп дала ошибку:', diagnostics.errors.join(' | '));
+  } catch (error) {
+    noteBrowserPressure(error, 'group snapshot');
+    console.warn('Облегчённая синхронизация групп временно недоступна:', error.message || error);
   }
 }
 
@@ -2815,75 +3291,227 @@ function registerPersonalInbound(chatId, recipients, sender) {
 async function sendToUser(recipients, content) {
   const targets = [...new Set(recipients.map(value => String(value || '').trim()).filter(Boolean))];
   if (!targets.length) throw new Error('WhatsApp-адрес пользователя не определён');
-  // A transport exception can occur after delivery. Trying the same user via
-  // the next PN/LID address would send the automatic reply twice.
-  const outcome = await delivery.sendOnce({
-    client, recipient:targets[0], aliases:targets, content, options:{}, begin:async()=>true,
-  });
-  if (outcome.status !== 'sent') throw new Error(outcome.error);
-  rememberInternalOutgoingMessage(outcome.message);
-  return outcome.message;
+
+  // message_create can arrive BEFORE delivery.sendOnce() returns. Register the
+  // exact automatic reply first so that its WhatsApp echo is never mistaken for
+  // a manual employee message (which could otherwise silence the bot later).
+  const echoToken = rememberPendingAutoReplyEcho138(targets, content);
+  let outcome = null;
+  try {
+    // A transport exception can occur after delivery. Trying the same user via
+    // the next PN/LID address would send the automatic reply twice.
+    outcome = await delivery.sendOnce({
+      client, recipient:targets[0], aliases:targets, content, options:{}, begin:async()=>true,
+    });
+    if (outcome.status !== 'sent') throw new Error(outcome.error);
+    rememberInternalOutgoingMessage(outcome.message);
+    return outcome.message;
+  } catch (error) {
+    if (isBridgePressureError(error) && connectorOperational && !shutdownStarted) {
+      void restartAfterStuckBridge('Отправка автоответа потеряла рабочий WhatsApp bridge');
+    }
+    throw error;
+  } finally {
+    // If message_create already fired it removed the marker. If it has not, the
+    // exact provider id is remembered above, so the marker is no longer needed.
+    forgetPendingAutoReplyEcho138(echoToken);
+  }
 }
 
+const dialogHintTimers138 = new Map();
+function cancelDialogHint138(recipients) {
+  for (const target of (recipients || [])) {
+    const pending = dialogHintTimers138.get(String(target || ''));
+    if (!pending) continue;
+    clearTimeout(pending.timer);
+    for (const alias of pending.aliases) if (dialogHintTimers138.get(alias) === pending) dialogHintTimers138.delete(alias);
+    pending.resolve(null);
+  }
+}
+
+// EO_BOT_HARD_RESET_20260930
+const botResetTokenByChat138 = new Map();
+
+function botResetAliases138(chatId, phoneId = '') {
+  const aliases = new Set();
+  const add = (value) => {
+    const safe = String(value || '').trim();
+    if (safe) aliases.add(safe);
+  };
+  add(chatId);
+  add(phoneId);
+  const phoneDigits = String(phoneId || chatId || '').replace(/\D/g, '');
+  if (phoneDigits) add(`${phoneDigits}@c.us`);
+
+  // Expand PN/LID aliases already learned by this connector.
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (const value of [...aliases]) {
+      const known = chatIdAliases.get(value);
+      if (known) for (const alias of known) add(alias);
+      const mapped = lidToPhone.get(value);
+      if (mapped) add(mapped);
+    }
+    for (const [lid, pn] of lidToPhone) {
+      if (aliases.has(lid) || aliases.has(pn)) {
+        add(lid);
+        add(pn);
+      }
+    }
+  }
+  return [...aliases];
+}
+
+function clearBotRuntimeForUser138(chatId, phoneId, resetToken) {
+  const token = String(resetToken || '').trim();
+  if (!token) return false;
+
+  const tokenKey = String(chatId || phoneId || '').trim();
+  if (!tokenKey) return false;
+  if (botResetTokenByChat138.get(tokenKey) === token) return false;
+  botResetTokenByChat138.set(tokenKey, token);
+
+  const aliases = botResetAliases138(chatId, phoneId);
+  cancelDialogHint138(aliases);
+
+  for (const alias of aliases) {
+    inboundFloodState.delete(alias);
+    callRejectNoticeAt.delete(alias);
+    internalOutgoingUntil.delete(alias);
+  }
+
+  const belongsToUser = (key) => aliases.some((alias) => String(key || '').startsWith(`${alias}|`));
+  for (const key of [...autoReplyCooldowns.keys()]) {
+    if (belongsToUser(key)) autoReplyCooldowns.delete(key);
+  }
+  for (const key of [...autoReplyExactCooldowns.keys()]) {
+    if (belongsToUser(key)) autoReplyExactCooldowns.delete(key);
+  }
+  for (const key of [...autoReplyInflight]) {
+    if (belongsToUser(key)) autoReplyInflight.delete(key);
+  }
+
+  console.log(`Hard reset бота применён в коннекторе: ${tokenKey}; aliases=${aliases.length}`);
+  return true;
+}
 async function sendAutomaticReply(recipients, result) {
+  cancelDialogHint138(recipients);
+  if (!result || !result.reply) return null;
+
+  // A deliberate menu/category transition must feel immediate. Do not hold it
+  // behind the burst debounce used for free-form detail messages.
+  const navigationChoice138 = String(result._source_menu_choice138 || '').trim();
+  if (/^[0-8]$/.test(navigationChoice138) || result.language_required || result._source_finish_command138) {
+    return sendAutomaticReplyNow138(recipients, result);
+  }
+
+  if (result.awaiting_details || result.menu_reminder) {
+    return new Promise((resolve, reject) => {
+      const aliases = [...new Set((recipients || []).map(String).filter(Boolean))];
+      const pending = { aliases, resolve, timer: null };
+      pending.timer = setTimeout(() => {
+        for (const alias of aliases) if (dialogHintTimers138.get(alias) === pending) dialogHintTimers138.delete(alias);
+        sendAutomaticReplyNow138(recipients, {...result, _dialog_debounced138: true}).then(resolve, reject);
+      }, 750);
+      for (const alias of aliases) dialogHintTimers138.set(alias, pending);
+    });
+  }
+  return sendAutomaticReplyNow138(recipients, result);
+}
+async function sendAutomaticReplyNow138(recipients, result) {
   if (!result || !result.reply) return null;
   const targets = [...new Set((recipients || []).map((value) => String(value || '').trim()).filter(Boolean))];
   const primaryTarget = targets[0] || 'unknown';
-  const kind = result.menu_gate
-    ? 'menu-gate'
-    : result.menu_reminder
-      ? 'menu-reminder'
-    : (result.awaiting_category || result.main_menu || result.support_menu)
-      ? 'menu'
-      : result.awaiting_details
-        ? `details:${String(result.category || 'general')}`
-        : result.template_error_id
-          ? 'template-error'
-          : result.created
-            ? 'accepted'
-            : 'generic';
-  const cooldown = result.force_menu
+
+  const sourceMessageId = String(result._source_message_id138 || '').trim();
+  const sourceKey = sourceMessageId ? `${primaryTarget}|${sourceMessageId}` : '';
+  cleanupAutoReplySourceIds138();
+  if (sourceKey && (autoReplySourceSent138.has(sourceKey) || autoReplySourceInflight138.has(sourceKey))) {
+    result.reply_suppressed = true;
+    console.log(`Дубль автоответа по тому же входящему сообщению для ${primaryTarget} подавлен.`);
+    return null;
+  }
+
+  // Menu navigation and language selection are explicit user actions. They must
+  // get one response for every distinct inbound message, even when the reply text
+  // is identical to something sent a few seconds ago.
+  const sourceMenuChoice = String(result._source_menu_choice138 || '').trim();
+  const explicitMenuNavigation = /^[0-8]$/.test(sourceMenuChoice);
+  const explicitLanguageFlow = Boolean(result.language_required);
+  const explicitDraftFinish = Boolean(result._source_finish_command138);
+  const priorityInteraction = explicitMenuNavigation || explicitLanguageFlow || explicitDraftFinish;
+
+  const missingSignature = Array.isArray(result.missing_fields)
+    ? result.missing_fields.map((value) => String(value || '').trim()).filter(Boolean).sort().join(',')
+    : '';
+  const kind = result.language_required
+    ? 'language'
+    : result.profile_required
+      ? 'profile'
+      : result.menu_gate
+        ? 'menu-gate'
+        : result.menu_reminder
+          ? 'menu-reminder'
+          : (result.awaiting_category || result.main_menu || result.support_menu)
+            ? 'menu'
+            : result.awaiting_details
+              ? `details:${String(result.category || 'general')}:${missingSignature || 'prompt'}`
+              : result.template_error_id
+                ? 'template-error'
+                : result.created
+                  ? 'accepted'
+                  : 'generic';
+
+  // force_menu means an explicit transition/opening of the menu. It may bypass
+  // cooldown, except menu_reminder: an invalid message while the menu is already
+  // open must NOT cause the same menu to be sent on every user message.
+  const explicitMenuRefresh = Boolean(result.force_menu && !result.menu_reminder);
+  const cooldown = priorityInteraction
     ? 0
-    : kind === 'menu'
-      ? AUTO_REPLY_MENU_COOLDOWN_MS
-    : kind === 'menu-gate'
-      ? 5000
-    : kind === 'menu-reminder'
-      ? 8000
-      : (kind.startsWith('details:') || kind === 'template-error')
-        ? AUTO_REPLY_HINT_COOLDOWN_MS
-        : 0;
+    : explicitMenuRefresh
+      ? 0
+      : kind === 'language' || kind === 'profile'
+        ? AUTO_REPLY_PROFILE_COOLDOWN_MS
+        : kind === 'menu'
+          ? AUTO_REPLY_MENU_COOLDOWN_MS
+          : kind === 'menu-gate'
+            ? AUTO_REPLY_GATE_COOLDOWN_MS
+            : kind === 'menu-reminder'
+              ? AUTO_REPLY_MENU_COOLDOWN_MS
+              : (kind.startsWith('details:') || kind === 'template-error')
+                ? AUTO_REPLY_HINT_COOLDOWN_MS
+                : 0;
   const cooldownKey = `${primaryTarget}|${kind}`;
   const now = Date.now();
   const lastSent = Number(autoReplyCooldowns.get(cooldownKey) || 0);
   if (cooldown && now - lastSent < cooldown) {
     result.reply_suppressed = true;
-    console.log(`Повторный автоответ ${kind} для ${primaryTarget} подавлен.`);
+    const left = Math.max(1, Math.ceil((cooldown - (now - lastSent)) / 1000));
+    console.log(`Строгий автоответ: повтор ${kind} для ${primaryTarget} подавлен ещё на ${left} сек.`);
     return null;
   }
 
   const exactText = `${String(result.preface || '').trim()}\n${String(result.reply || '').trim()}`.trim();
   const exactKey = `${primaryTarget}|${exactText}`;
   const exactLastSent = Number(autoReplyExactCooldowns.get(exactKey) || 0);
-  if (exactLastSent && now - exactLastSent < AUTO_REPLY_EXACT_COOLDOWN_MS) {
+  if (!priorityInteraction && exactLastSent && now - exactLastSent < AUTO_REPLY_EXACT_COOLDOWN_MS) {
     result.reply_suppressed = true;
     console.log(`Точный повтор автоответа для ${primaryTarget} подавлен.`);
     return null;
   }
-  if (autoReplyInflight.has(exactKey)) {
+  if (!priorityInteraction && autoReplyInflight.has(exactKey)) {
     result.reply_suppressed = true;
     console.log(`Параллельный дубль автоответа для ${primaryTarget} подавлен.`);
     return null;
   }
-  autoReplyInflight.add(exactKey);
+  if (!priorityInteraction) autoReplyInflight.add(exactKey);
+  if (sourceKey) autoReplySourceInflight138.add(sourceKey);
 
   try {
     // Интерактивное меню отключено намеренно.
     // После команды 1 пользователь получает один обычный текстовый список.
     if (result.awaiting_category || result.main_menu || result.support_menu) {
-      const plainMenuText = result.support_menu
-        ? String(result.reply || 'Напишите свой вопрос одним сообщением.')
-        : String(result.reply || MAIN_MENU_TEXT);
+      const plainMenuText = String(result.reply || '').trim();
+      if (!plainMenuText) return null;
 
       const reminderText = result.preface ? String(result.preface).trim() : '';
       const fingerprint = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase('ru');
@@ -2903,6 +3531,7 @@ async function sendAutomaticReply(recipients, result) {
       result.delivered_reply = combinedText;
       autoReplyCooldowns.set(cooldownKey, Date.now());
       autoReplyExactCooldowns.set(exactKey, Date.now());
+      if (sourceKey) autoReplySourceSent138.set(sourceKey, Date.now());
       return textMessage;
     }
 
@@ -2913,9 +3542,11 @@ async function sendAutomaticReply(recipients, result) {
     result.delivered_reply = deliveredReply;
     if (cooldown) autoReplyCooldowns.set(cooldownKey, Date.now());
     autoReplyExactCooldowns.set(exactKey, Date.now());
+    if (sourceKey) autoReplySourceSent138.set(sourceKey, Date.now());
     return textMessage;
   } finally {
-    autoReplyInflight.delete(exactKey);
+    if (!priorityInteraction) autoReplyInflight.delete(exactKey);
+    if (sourceKey) autoReplySourceInflight138.delete(sourceKey);
     const cleanupBefore = Date.now() - 5 * 60 * 1000;
     for (const [key, sentAt] of autoReplyExactCooldowns) {
       if (Number(sentAt || 0) < cleanupBefore) autoReplyExactCooldowns.delete(key);
@@ -3450,6 +4081,7 @@ async function pollOutbound() {
     await pollWhatsappAction();
     const result = await postJson('/api/outbound/claim', {
       created_after: connectorReadyAt,
+      wait_ms: 18000,
     });
     queued = result.message;
     if (!queued) return;
@@ -3477,9 +4109,13 @@ async function pollOutbound() {
     }
     let content = String(queued.body || '');
     if (queued.media_path) {
-      const mediaPath = String(queued.media_path || '');
-      if (!fs.existsSync(mediaPath)) throw new Error('Файл для отправки больше не найден на сервере');
+      const mediaPath = path.resolve(String(queued.media_path || ''));
+      if (!fs.existsSync(mediaPath)) {
+        mediaDebug(`missing queue=${queued.id} path=${mediaPath}`);
+        throw new Error('Файл для отправки больше не найден на сервере');
+      }
       const info = {name:String(queued.media_name || 'Вложение'), mime:String(queued.media_mime || 'application/octet-stream'), size:fs.statSync(mediaPath).size};
+      mediaDebug(`send queue=${queued.id} name=${info.name} mime=${info.mime} size=${info.size} recipient=${recipient}`);
       if (info.size>512*1024*1024) throw new Error('Файл превышает 512 МБ');
       if (info.size>largeMedia.threshold) {
         const prepared=await largeMedia.prepare(client,mediaPath,MessageMedia,info);
@@ -3498,9 +4134,11 @@ async function pollOutbound() {
     });
     if (outcome.status !== 'sent') {
       await postJson('/api/outbound/result', {message_id:queued.id, status:outcome.status, error:outcome.error});
+      if (queued && queued.media_path) mediaDebug(`result queue=${queued.id} status=${outcome.status} error=${outcome.error || ''} detail=${outcome.detail || ''}`);
       console.warn(outcome.error, outcome.detail || '');
       return;
     }
+    if (queued && queued.media_path) mediaDebug(`result queue=${queued.id} status=sent provider=${serializedId(outcome.message && outcome.message.id) || ''}`);
     const sentMessage = outcome.message;
     delivered = true;
     deliveredId = serializedId(sentMessage && sentMessage.id);
@@ -3586,6 +4224,7 @@ async function pollOutbound() {
     }
   } catch (error) {
     const reason = error && error.message ? error.message : String(error);
+    if (queued && queued.media_path) mediaDebug(`exception queue=${queued.id} reason=${reason}`);
     console.error('Не удалось отправить ответ из заявки:', reason);
     if (queued && queued.id) {
       try {
@@ -3619,6 +4258,85 @@ client.on('qr', async (qr) => {
     console.warn('Не удалось показать QR-код в админке:', error.message || error);
   }
 });
+
+async function whatsappBridgeReady() {
+  if (shutdownStarted) return false;
+  try {
+    if (!client.pupPage || client.pupPage.isClosed()) return false;
+    const probe = client.pupPage.evaluate(() => {
+      try {
+        const collections = window.require('WAWebCollections');
+        return Boolean(
+          window.WWebJS &&
+          typeof window.WWebJS.getChat === 'function' &&
+          typeof window.WWebJS.sendMessage === 'function' &&
+          collections &&
+          collections.Msg
+        );
+      } catch (_) {
+        return false;
+      }
+    });
+    return Boolean(await Promise.race([
+      probe,
+      new Promise((resolve) => setTimeout(() => resolve(false), 5000)),
+    ]));
+  } catch (_) {
+    return false;
+  }
+}
+
+async function checkBridgeHealth() {
+  if (bridgeWatchdogBusy || shutdownStarted || !connectorOperational) return;
+  if (Date.now() < startupLiveOnlyUntil) return;
+  bridgeWatchdogBusy = true;
+  try {
+    const ok = await whatsappBridgeReady();
+    if (ok) {
+      bridgeFailureCount = 0;
+      bridgeRecoveryStartedAt = 0;
+      return;
+    }
+
+    bridgeFailureCount += 1;
+    if (bridgeFailureCount < 2) return;
+
+    connectorOperational = false;
+    bridgeRecoveryStartedAt = Date.now();
+    bridgeFailureCount = 0;
+    console.warn(
+      'WhatsApp Web потерял рабочий bridge при состоянии CONNECTED. ' +
+      'Автоответы временно приостановлены; запускаю восстановление без сброса сессии.'
+    );
+    publishConnectorState('connecting').catch(() => {});
+    startReadyFallback();
+  } finally {
+    bridgeWatchdogBusy = false;
+  }
+}
+
+async function restartAfterStuckBridge(reason) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  connectorOperational = false;
+  console.error(`${reason}. Перезапускаю процесс коннектора через systemd; сохранённая сессия остаётся на диске.`);
+  if (outboundTimer) clearInterval(outboundTimer);
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  if (fastInboundTimer) clearInterval(fastInboundTimer);
+  if (groupSyncTimer) clearInterval(groupSyncTimer);
+  if (performanceTimer) clearInterval(performanceTimer);
+  if (bridgeWatchdogTimer) clearInterval(bridgeWatchdogTimer);
+  stopReadyFallback();
+  stopIncomingCallPolling();
+  try {
+    await publishConnectorState('connecting');
+  } catch (_) {}
+  try {
+    const timeout = new Promise((resolve) => setTimeout(resolve, 8000));
+    await Promise.race([client.destroy(), timeout]);
+  } catch (_) {}
+  process.exit(1);
+}
 
 function stopReadyFallback() {
   if (readyFallbackTimer) {
@@ -3673,6 +4391,9 @@ async function activateConnector(source = 'ready') {
   if (connectorOperational) return;
   connectorOperational = true;
   connectorReadyAt = Math.floor(Date.now() / 1000);
+  startupInboundRecoveryStartedAt = Date.now();
+  startupLiveOnlyUntil = startupInboundRecoveryStartedAt + STARTUP_LIVE_ONLY_MS;
+  startupInboundRecoveryUntil = startupInboundRecoveryStartedAt + 5 * 60 * 1000;
   stopReadyFallback();
   console.log(
     source === 'ready'
@@ -3683,28 +4404,37 @@ async function activateConnector(source = 'ready') {
   console.log('Префикс не требуется.');
   console.log('Новые сообщения групп передаются во вкладку «Группы».');
   console.log('Ответы из карточек заявок отправляются через это подключение.');
+  console.log(`Быстрый запуск: live-сообщения и автоответы доступны сразу; фоновая история стартует через ${Math.round(STARTUP_LIVE_ONLY_MS / 1000)} сек.`);
+  console.log(`После прогрева проверяю не более 30 минут истории (до ${STARTUP_BACKFILL_MODEL_LIMIT} последних моделей, по ${STARTUP_BACKFILL_BATCH} за проход).`);
   publishConnectorState('ready').catch((error) => {
     console.warn('Не удалось опубликовать состояние ready:', error.message || error);
   });
   // Сначала поднимаем лёгкие live-процессы, а полный обход групп запускаем
   // чуть позже. Так вкладки получают сохранённые данные и новые сообщения,
   // пока WhatsApp Web спокойно заканчивает инициализацию.
+  // Keep only the local connection/control sync immediate. Every WhatsApp-Web
+  // heavy task is delayed until the 12-second live-only window is over.
   syncConnection().catch(() => {});
   setTimeout(() => {
-    syncContactDiscovery().catch(() => {});
     runFastSync().catch(() => {});
-  }, 150);
+  }, STARTUP_LIVE_ONLY_MS + 250);
   setTimeout(() => {
-    syncGroups().catch((error) => {
-      console.warn('Первичная синхронизация групп пока недоступна:', error.message || error);
-    });
-  }, 900);
+    syncContactDiscovery().catch(() => {});
+  }, STARTUP_LIVE_ONLY_MS + 15000);
+  setTimeout(() => {
+    if (backgroundWorkAllowed()) {
+      syncGroups().catch((error) => {
+        noteBrowserPressure(error, 'initial groups');
+        console.warn('Первичная синхронизация групп пока недоступна:', error.message || error);
+      });
+    }
+  }, 60000);
   if (!outboundTimer) {
-    outboundTimer = setInterval(pollOutbound, 800);
+    outboundTimer = setInterval(pollOutbound, 150);
     setTimeout(() => { void pollOutbound(); }, 100);
   }
   if (!heartbeatTimer) {
-    heartbeatTimer = setInterval(syncConnection, 2000);
+    heartbeatTimer = setInterval(() => { void syncConnection(); }, 10000);
   }
   if (!performanceTimer) {
     performanceTimer = setInterval(() => { void reportPerformance(); }, 15000);
@@ -3713,12 +4443,24 @@ async function activateConnector(source = 'ready') {
   if (!fastInboundTimer) {
     fastInboundTimer = setInterval(() => { void runFastSync(); }, PERF_RECOVERY_INTERVAL_MS);
     setTimeout(() => { void runFastSync(); }, 250);
-    console.log(`Резервная синхронизация WhatsApp активна: ${PERF_RECOVERY_INTERVAL_MS} мс; новые события обрабатываются сразу.`);
+    console.log(`Draft Finish v13 активен: «готово/Готово/Дайын» имеет приоритет меню — без debounce/cooldown; Fast Startup сохранён. Резервная проверка ${PERF_RECOVERY_INTERVAL_MS} мс.`);
   }
   if (!groupSyncTimer) {
-    groupSyncTimer = setInterval(syncGroups, 5 * 60 * 1000);
+    groupSyncTimer = setInterval(() => {
+      syncGroups().catch((error) => {
+        // A local API/socket failure must never become an unhandled rejection
+        // that kills the whole Node connector.
+        console.warn('Фоновая синхронизация групп временно недоступна:', error.message || error);
+      });
+    }, 60 * 60 * 1000);
   }
-  startIncomingCallPolling();
+  if (!bridgeWatchdogTimer) {
+    bridgeWatchdogTimer = setInterval(() => { void checkBridgeHealth(); }, 5000);
+    setTimeout(() => { void checkBridgeHealth(); }, 3000);
+  }
+  setTimeout(() => {
+    if (!shutdownStarted && connectorOperational) startIncomingCallPolling();
+  }, STARTUP_LIVE_ONLY_MS + 3000);
 }
 
 async function checkReadyFallback() {
@@ -3726,45 +4468,118 @@ async function checkReadyFallback() {
   try {
     const state = await client.getState();
     const normalized = String(state || '').toUpperCase();
+    const elapsed = Math.floor((Date.now() - readyFallbackStartedAt) / 1000);
+
     if (normalized === 'CONNECTED') {
-      console.warn('Событие ready не пришло, но WhatsApp уже сообщает CONNECTED. Включаю рабочий режим.');
-      await activateConnector('CONNECTED');
+      const bridgeReady = await whatsappBridgeReady();
+      if (bridgeReady) {
+        console.warn('WhatsApp сообщает CONNECTED и рабочий bridge доступен. Включаю рабочий режим.');
+        bridgeRecoveryStartedAt = 0;
+        await activateConnector('CONNECTED+bridge');
+        return;
+      }
+      if (elapsed > 0 && elapsed % 15 < 4) {
+        console.warn(`WhatsApp CONNECTED, но bridge ещё восстанавливается (${elapsed} сек.).`);
+      }
+      if (elapsed >= 90) {
+        await restartAfterStuckBridge('WhatsApp остался CONNECTED без рабочего bridge более 90 секунд');
+      }
       return;
     }
-    const elapsed = Math.floor((Date.now() - readyFallbackStartedAt) / 1000);
+
     if (elapsed > 0 && elapsed % 30 < 6) {
       console.log(`Ожидание готовности WhatsApp: ${normalized || 'UNKNOWN'}, ${elapsed} сек.`);
+    }
+    if (elapsed >= 120) {
+      await restartAfterStuckBridge(`WhatsApp не перешёл в рабочее состояние за ${elapsed} секунд`);
     }
   } catch (error) {
     const elapsed = Math.floor((Date.now() - readyFallbackStartedAt) / 1000);
     if (elapsed > 0 && elapsed % 30 < 6) {
       console.warn('Проверка состояния WhatsApp во время запуска:', error.message || error);
     }
+    if (elapsed >= 120) {
+      await restartAfterStuckBridge(`Проверка состояния WhatsApp не восстановилась за ${elapsed} секунд`);
+    }
   }
 }
 
 function startReadyFallback() {
-  stopReadyFallback();
+  if (readyFallbackTimer || shutdownStarted) return;
   readyFallbackStartedAt = Date.now();
-  readyFallbackTimer = setInterval(checkReadyFallback, 1500);
-  setTimeout(checkReadyFallback, 600);
+  readyFallbackTimer = setInterval(() => { void checkReadyFallback(); }, 3000);
+  setTimeout(() => { void checkReadyFallback(); }, 800);
 }
 
 client.on('authenticated', () => {
-  console.log('WhatsApp подтвердил подключение. Загружаю сессию...');
-  publishConnectorState('connecting');
-  startReadyFallback();
+  const now = Date.now();
+  if (now - lastAuthenticatedLogAt > 3000) {
+    console.log('WhatsApp подтвердил подключение. Проверяю рабочий bridge...');
+    lastAuthenticatedLogAt = now;
+  }
+  if (authRecoveryBusy || shutdownStarted) return;
+  authRecoveryBusy = true;
+  void (async () => {
+    try {
+      if (connectorOperational) {
+        const ok = await whatsappBridgeReady();
+        if (ok) return;
+        connectorOperational = false;
+        bridgeRecoveryStartedAt = Date.now();
+        console.warn('WhatsApp Web перезагрузил контекст. Перевожу коннектор в режим восстановления.');
+      }
+      await publishConnectorState('connecting');
+      startReadyFallback();
+    } finally {
+      authRecoveryBusy = false;
+    }
+  })();
 });
 
 client.on('change_state', (state) => {
   const normalized = String(state || '').toUpperCase();
   console.log(`Состояние WhatsApp: ${normalized || 'UNKNOWN'}`);
+
+  // QUEUE_CONNECTOR_STATE_RECOVERY_20260930
+  // WhatsApp Web may briefly go OPENING/PAIRING while the Chromium page reloads.
+  // During that window getState()/the UI can still look connected even though
+  // WWebJS has lost its execution context. Mark the connector non-operational
+  // immediately so the UI does not show a stale green state and auto-reply work
+  // is not attempted against a detached frame.
+  if (normalized === 'OPENING' || normalized === 'PAIRING' || normalized === 'TIMEOUT') {
+    if (connectorOperational) {
+      connectorOperational = false;
+      bridgeFailureCount = 0;
+      bridgeRecoveryStartedAt = Date.now();
+      console.warn(`WhatsApp перешёл в ${normalized}. Рабочий bridge временно недоступен; ожидаю восстановление.`);
+      publishConnectorState('connecting').catch(() => {});
+    }
+    startReadyFallback();
+    return;
+  }
+
   if (normalized === 'CONNECTED') {
-    activateConnector('change_state=CONNECTED');
+    // Never trust CONNECTED alone. checkReadyFallback() verifies that WWebJS,
+    // sendMessage and WAWebCollections are actually injected before re-enabling.
+    if (!connectorOperational) {
+      startReadyFallback();
+      setTimeout(() => { void checkReadyFallback(); }, 250);
+    }
+    return;
+  }
+
+  if (normalized && normalized !== 'CONNECTED' && connectorOperational) {
+    connectorOperational = false;
+    bridgeFailureCount = 0;
+    bridgeRecoveryStartedAt = Date.now();
+    publishConnectorState('connecting').catch(() => {});
+    startReadyFallback();
   }
 });
 
 client.on('ready', () => {
+  bridgeFailureCount = 0;
+  bridgeRecoveryStartedAt = 0;
   activateConnector('ready');
 });
 
@@ -3775,6 +4590,8 @@ client.on('auth_failure', (message) => {
 
 client.on('disconnected', (reason) => {
   connectorOperational = false;
+  bridgeFailureCount = 0;
+  bridgeRecoveryStartedAt = 0;
   stopReadyFallback();
   stopIncomingCallPolling();
   console.error('WhatsApp отключил сессию:', reason);
@@ -3946,12 +4763,16 @@ async function handleIncomingCall(call, source = 'event') {
     if (!canonicalChatId || now - lastNoticeAt < CALL_REJECT_NOTICE_COOLDOWN_MS) return;
     callRejectNoticeAt.set(canonicalChatId, now);
 
+    const userLanguage = String(permission.language || '').trim().toLowerCase();
+    const callReply = userLanguage === 'kz'
+      ? CALL_REJECT_NOTICE_KZ
+      : (userLanguage === 'ru' ? CALL_REJECT_NOTICE_RU : `${CALL_REJECT_NOTICE_RU}\n\n${LANGUAGE_SELECTION_TEXT}`);
     const replyResult = {
-      reply: `${CALL_REJECT_NOTICE_TEXT}\n\n${START_MENU_TEXT}`,
-      menu_gate: true,
+      reply: callReply,
+      menu_gate: false,
     };
     await sendAutomaticReply([phoneId, callerId], replyResult);
-    console.log(`После отклонения звонка отправлена инструкция открыть меню заявок: ${canonicalChatId}`);
+    console.log(`После отклонения звонка отправлена инструкция на языке пользователя: ${canonicalChatId}`);
   } catch (error) {
     console.error('Не удалось автоматически обработать входящий звонок:', error.message || error);
   }
@@ -4058,7 +4879,7 @@ async function readIncomingCallCollection() {
 }
 
 async function pollIncomingCalls() {
-  if (callPollBusy || shutdownStarted || !connectorOperational) return;
+  if (callPollBusy || shutdownStarted || !connectorOperational || !backgroundWorkAllowed()) return;
   callPollBusy = true;
   try {
     const snapshot = await readIncomingCallCollection();
@@ -4093,6 +4914,7 @@ async function pollIncomingCalls() {
       tail.forEach((key) => callPollKnownIds.add(key));
     }
   } catch (error) {
+    noteBrowserPressure(error, 'call polling');
     console.warn('Ошибка резервного контроля звонков:', error.message || error);
   } finally {
     callPollBusy = false;
@@ -4367,7 +5189,8 @@ client.on('message_create', async (message) => {
     // WhatsApp id/stanza to the internal send. Otherwise the same screenshot is
     // imported as a "manual" message and its media is endlessly re-downloaded.
     const outgoingEventId = normalizeMessageIdObject(message) || serializedId(message && message.id);
-    let internalChatEvent = isRememberedInternalOutgoing(outgoingEventId) || isInternalOutgoing(rawChatId) || matchesActiveInternalOutgoing(message, rawChatId);
+    const automaticReplyEcho = matchesPendingAutoReplyEcho138(message, rawChatId);
+    let internalChatEvent = automaticReplyEcho || isRememberedInternalOutgoing(outgoingEventId) || isInternalOutgoing(rawChatId) || matchesActiveInternalOutgoing(message, rawChatId);
     let canonicalForInternal = rawChatId;
     if (!internalChatEvent && !rawChatId.endsWith('@g.us') && !rawChatId.endsWith('@c.us')) {
       const resolvedInternalChat = await resolveDirectPhoneId(rawChatId).catch(() => '');
@@ -4471,16 +5294,10 @@ client.on('message_create', async (message) => {
 client.on('message', async (message) => {
   let templateErrorId = 0;
   let stage = 'проверка сообщения';
-  const incomingEventId = serializedId(message && message.id);
-  let handledSuccessfully = false;
-  if (incomingEventId) {
-    if (reconciledInboundIds.has(incomingEventId)) return;
-    const startedAt = Number(inboundProcessingIds.get(incomingEventId) || 0);
-    if (startedAt && Date.now() - startedAt < 60000) return;
-    inboundProcessingIds.set(incomingEventId, Date.now());
-  }
   try {
     const from = String(message.from || '');
+    const incomingEventId = serializedId(message && message.id);
+    if (incomingEventId) reconciledInboundIds.set(incomingEventId, Date.now());
     if (from.endsWith('@g.us')) {
       if (
         message.fromMe ||
@@ -4489,15 +5306,15 @@ client.on('message', async (message) => {
       ) {
         return;
       }
+      noteHotInboundPriority();
       const groupText = incomingText(message);
       const fallbackSender = String((message._data && message._data.notifyName) || '').trim();
       const groupSenderInfo = await resolveGroupSenderInfo(message, fallbackSender);
       const groupSender = groupSenderInfo.name || fallbackSender || 'Участник группы';
       const mentionedUs = await mentionsConnectedAccount(message);
       // В группах система НИКОГДА не запускает обработчик заявок и не отправляет
-      // автоответы. Сообщение сохраняется в переписку. Начиная с 1.00.2 глобальный
-      // центр уведомлений показывает все непрочитанные сообщения незаглушённых
-      // групп, а реальное @упоминание дополнительно помечается как упоминание.
+      // автоответы. Сообщение сохраняется в переписку, а уведомление создаётся
+      // только если участник явно упомянул подключённый рабочий WhatsApp через @.
       await publishLiveMessage(
         from,
         groupSender,
@@ -4507,9 +5324,9 @@ client.on('message', async (message) => {
         mentionedUs,
         false,
         groupSenderInfo.phone || '',
-        groupSenderInfo.id || groupSenderInfo.resolved_id || ''
+        groupSenderInfo.id || groupSenderInfo.resolved_id || '',
+        true
       );
-      handledSuccessfully = true;
       if (mentionedUs) {
         console.log(`Упоминание рабочего WhatsApp в группе: ${from} | ${groupSender}`);
       }
@@ -4531,6 +5348,7 @@ client.on('message', async (message) => {
       console.log('Старое событие WhatsApp пропущено без ответа.');
       return;
     }
+    noteHotInboundPriority();
 
     // getChat() и getContact() намеренно не вызываются. После обновлений
     // WhatsApp Web эти дополнительные запросы иногда падают с ошибкой "r".
@@ -4551,6 +5369,12 @@ client.on('message', async (message) => {
       : '';
     const text = incomingText(message);
 
+    // Persist text and identifiers before the first request to the application.
+    inboundSpool.enqueue({external_id:serializedId(message && message.id),sender,
+      phone:phoneDigits ? `+${phoneDigits}` : '',chat_id:canonicalChatId,text,
+      menu_choice:incomingMenuChoice(message),attachment_name:attachmentName,
+      message_timestamp:Number(message.timestamp || Math.floor(Date.now()/1000)),message_type:String(message.type || 'chat')});
+
     // Политику контакта узнаём ДО публикации сообщения. Раньше коннектор
     // возвращался сразу после этой проверки, из-за чего у добавленного через
     // админку пользователя сообщение могло потеряться для панели. Теперь
@@ -4567,23 +5391,36 @@ client.on('message', async (message) => {
     } catch (error) {
       console.warn('Не удалось заранее проверить политику контакта. Сервер проверит её при обработке сообщения:', error.message || error);
     }
+    if (contactPolicy && contactPolicy.bot_reset_token) {
+      clearBotRuntimeForUser138(canonicalChatId, phoneId || from, contactPolicy.bot_reset_token);
+    }
     const isManualContact = Boolean(contactPolicy && contactPolicy.manual_contact);
 
-    // Любое входящее сообщение сначала сохраняем в чат, включая медиа. Для
-    // контактов администратора сервер затем только отключает автоматику; повторный
-    // upsert по тому же message id не удваивает уведомление.
-    const savedInboundItem = await publishLiveMessage(canonicalChatId, sender, message, false, text, false, isManualContact).catch((error) => {
+    // EO_FAST_REPLY_V5_20260930
+    // The panel/UI copy and bot decision no longer wait for each other.
+    // Media is already deferred by publishLiveMessage(), so /api/whatsapp can
+    // start immediately with text + lightweight attachment metadata.
+    const liveStartedAt = Date.now();
+    const panelSyncPromise = publishLiveMessage(
+      canonicalChatId, sender, message, false, text, false, isManualContact, '', '', true
+    ).then((item) => {
+      const panelMs = Date.now() - liveStartedAt;
+      if (panelMs > 1000) {
+        console.log(`Fast Reply WhatsApp→панель: ${panelMs} мс | ${canonicalChatId}`);
+      }
+      return item;
+    }).catch((error) => {
       console.warn('Не удалось сразу показать входящее сообщение в панели:', error.message || error);
       return null;
     });
 
-    // Не блокируем несколько коротких сообщений подряд. Ранее антиспам мог
-    // мешать обычному живому общению и сам присылал лишнее предупреждение.
-    // Повторные автоматические меню/подсказки теперь ограничиваются cooldown в
-    // sendAutomaticReply, поэтому сообщения пользователя всегда доходят до
-    // серверной логики и не теряются.
-
+    // Не блокируем несколько коротких сообщений подряд. Повторные автоматические
+    // меню/подсказки ограничиваются strict-cooldown в sendAutomaticReply.
     stage = 'передача сообщения в локальную систему';
+    const apiStartedAt = Date.now();
+    const rawMedia = (message && message._data) || {};
+    const fastMediaMime = String((message && message.mimetype) || rawMedia.mimetype || '').slice(0, 120);
+    const draftFinish138 = isDraftFinishText138(text);
     const result = await postJson('/api/whatsapp', {
       external_id: serializedId(message && message.id),
       sender,
@@ -4591,16 +5428,27 @@ client.on('message', async (message) => {
       chat_id: canonicalChatId,
       text,
       menu_choice: incomingMenuChoice(message),
-      attachment_name: String((savedInboundItem && savedInboundItem.media_name) || attachmentName || ''),
-      media_base64: String((savedInboundItem && savedInboundItem.media_base64) || ''),
-      media_receipt: String((savedInboundItem && savedInboundItem.media_receipt) || ''),
-      media_mime: String((savedInboundItem && savedInboundItem.media_mime) || ''),
-      media_name: String((savedInboundItem && savedInboundItem.media_name) || attachmentName || ''),
+      draft_finish: draftFinish138,
+      attachment_name: String(attachmentName || ''),
+      media_base64: '',
+      media_receipt: '',
+      media_mime: fastMediaMime,
+      media_name: String(attachmentName || ''),
       message_timestamp: Number(message.timestamp || Math.floor(Date.now() / 1000)),
       message_type: String(message.type || 'chat'),
     });
-    handledSuccessfully = true;
+    result._source_message_id138 = incomingEventId;
+    result._source_menu_choice138 = incomingMenuChoice(message);
+    result._source_finish_command138 = draftFinish138;
 
+    const apiMs = Date.now() - apiStartedAt;
+    if (apiMs > 1000) {
+      console.log(`Fast Reply WhatsApp→бот: обработчик ${apiMs} мс | ${canonicalChatId}`);
+    }
+    // Keep the UI sync alive, but never make the user's auto-reply wait for it.
+    void panelSyncPromise;
+
+    if (!result.duplicate) cancelDialogHint138([phoneId, from]);
     if (result.duplicate) {
       return;
     }
@@ -4618,30 +5466,23 @@ client.on('message', async (message) => {
     if (result.ignored) {
       const preview = String(message.body || '').trim().replace(/\s+/g, ' ').slice(0, 90);
       console.log(`Пропущено сообщение от ${sender}: ${result.reason || 'не распознано'}${preview ? ` | ${preview}` : ''}`);
-      const menuResult = {
-        ...result,
-        reply: result.reply || MAIN_MENU_TEXT,
-        awaiting_category: true,
-      };
-      await sendAutomaticReply([phoneId, from], menuResult);
+      if (result.reply) await sendAutomaticReply([phoneId, from], result);
       return;
     }
     if (result.created) {
       console.log(`Создана заявка #${result.ticket_id}: ${result.title || result.category || 'рабочий запрос'} | ${sender}`);
       if (result.reply) {
         stage = 'отправка подтверждения пользователю';
-        await sendAutomaticReply([phoneId, from], result);
-        console.log(`Подтверждение по заявке #${result.ticket_id} отправлено пользователю: ${sender}`);
+        const confirmationMessage = await sendAutomaticReply([phoneId, from], result);
+        if (confirmationMessage) {
+          console.log(`Подтверждение по заявке #${result.ticket_id} отправлено пользователю: ${sender}`);
+        }
       }
       return;
     }
     if (result.linked) {
       console.log(`Уточнение связано с заявкой #${result.ticket_id}: ${sender}`);
-      const linkedReply = `Уточнение добавлено к запросу №${result.ticket_id}.\n\n${MAIN_MENU_TEXT}`;
-      await sendAutomaticReply(
-        [phoneId, from],
-        { reply: linkedReply, awaiting_category: true }
-      );
+      if (result.reply) await sendAutomaticReply([phoneId, from], result);
       return;
     }
     if (!result.reply) {
@@ -4651,7 +5492,7 @@ client.on('message', async (message) => {
     templateErrorId = Number(result.template_error_id || 0);
     stage = 'отправка автоматического ответа пользователю';
     const replyMessage = await sendAutomaticReply([phoneId, from], result);
-    if (templateErrorId) {
+    if (templateErrorId && replyMessage) {
       stage = 'сохранение результата отправки';
       await postJson('/api/template-error-delivery', {
         template_error_id: templateErrorId,
@@ -4660,7 +5501,7 @@ client.on('message', async (message) => {
           serializedId(replyMessage && replyMessage.id),
       });
       console.log(`Отправлен шаблон неполного БИН: ${sender}`);
-    } else {
+    } else if (!templateErrorId && replyMessage) {
       console.log(`Отправлена просьба уточнить обращение: ${sender}`);
     }
   } catch (error) {
@@ -4680,11 +5521,6 @@ client.on('message', async (message) => {
         console.error('Не удалось сохранить ошибку отправки:', ackError.message || ackError);
       }
     }
-  } finally {
-    if (incomingEventId) {
-      inboundProcessingIds.delete(incomingEventId);
-      if (handledSuccessfully) reconciledInboundIds.set(incomingEventId, Date.now());
-    }
   }
 });
 
@@ -4697,6 +5533,8 @@ async function gracefulShutdown(signal) {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (fastInboundTimer) clearInterval(fastInboundTimer);
   if (groupSyncTimer) clearInterval(groupSyncTimer);
+  if (performanceTimer) clearInterval(performanceTimer);
+  if (bridgeWatchdogTimer) clearInterval(bridgeWatchdogTimer);
   stopReadyFallback();
   stopIncomingCallPolling();
 
@@ -4719,7 +5557,32 @@ process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
 
 console.log('Запускаю WhatsApp Web. Восстанавливаю сохранённую сессию...');
 publishConnectorState('connecting').catch(() => {});
+
+// EO_CONNECTOR_STARTUP_RETRY_20260930
+// If WhatsApp Web destroys its execution context while initialize() is running,
+// do not leave a dead Node process alive because background timers keep the
+// event loop open. Exit cleanly with code 1 so systemd Restart=always starts a
+// fresh Chromium process with the SAME saved LocalAuth session.
 client.initialize().catch((error) => {
-  console.error('Не удалось запустить WhatsApp Web:', error.message || error);
-  process.exitCode = 1;
+  connectorOperational = false;
+  const reason = error && error.message ? error.message : String(error);
+  console.error('Не удалось запустить WhatsApp Web:', reason);
+  publishConnectorState('connecting').catch(() => {});
+  console.error('Перезапускаю коннектор через systemd через 2 сек. Сессия WhatsApp сохраняется.');
+  setTimeout(() => process.exit(1), 2000);
 });
+
+// Disk queue survives a connector restart and retains failed jobs for later attempts.
+let inboundRecoveryBusy=false;
+const inboundRecoveryTimer=setInterval(async()=>{
+  if(inboundRecoveryBusy || shutdownStarted || !connectorOperational)return;
+  inboundRecoveryBusy=true;
+  try {
+    await inboundSpool.drain(payload=>postJsonWithRetry('/api/whatsapp',payload),async(payload,result)=>{
+      if(result.reply && !result.duplicate && !result.silent && !result.manual_contact)
+        await postJsonOnce('/api/inbound-recovery-reply',{external_id:payload.external_id,chat_id:payload.chat_id,reply:result.reply});
+    });
+  } catch(error){console.error('Очередь входящих требует проверки:',error.message||error);}
+  finally{inboundRecoveryBusy=false;}
+},3000);
+inboundRecoveryTimer.unref();

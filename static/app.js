@@ -35,7 +35,7 @@ window.QueueVoice = (() => {
   }};
 })();
 (() => {
-  const QUEUE_FRONTEND_BUILD = "3.3.58";
+  const QUEUE_FRONTEND_BUILD = "1.00.6.36-reply-media-binding-fix";
   document.documentElement.dataset.queueBuild = QUEUE_FRONTEND_BUILD;
   const menu = document.getElementById("ticket-context-menu");
   const menuTitle = document.getElementById("context-ticket-title");
@@ -69,6 +69,32 @@ window.QueueVoice = (() => {
   let refreshing = false;
   const adminMode = document.body && document.body.dataset.admin === "1";
 
+  let queueRealtimeRevision = 0;
+  let queueRealtimeStarted = false;
+  async function queueRealtimeLoop() {
+    let backoff = 250;
+    while (queueRealtimeStarted) {
+      try {
+        const response = await fetch(`/api/realtime-wait?since=${encodeURIComponent(queueRealtimeRevision)}&timeout=25000`, {cache:"no-store"});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const state = await response.json();
+        const nextRevision = Number(state.revision || 0);
+        const changed = Boolean(state.changed) || nextRevision > queueRealtimeRevision;
+        if (nextRevision > queueRealtimeRevision) queueRealtimeRevision = nextRevision;
+        if (changed) window.dispatchEvent(new CustomEvent("queue-realtime", {detail:state}));
+        backoff = 250;
+        await new Promise(resolve => window.setTimeout(resolve, 20));
+      } catch (_) {
+        await new Promise(resolve => window.setTimeout(resolve, backoff));
+        backoff = Math.min(5000, Math.round(backoff * 1.7));
+      }
+    }
+  }
+  function startQueueRealtime() {
+    if (queueRealtimeStarted || !(conversationPage || dashboard || notificationCenter)) return;
+    queueRealtimeStarted = true;
+    void queueRealtimeLoop();
+  }
 
   function queueNotice(message, kind = "info") {
     const note=document.createElement("div");
@@ -149,12 +175,20 @@ window.QueueVoice = (() => {
   }
 
   async function postForm(endpoint, values) {
+    if (["/quick-status","/quick-priority"].includes(endpoint)) {
+      const row = document.querySelector(`[data-ticket-row][data-ticket-id="${Number(values.ticket_id)}"]`);
+      values.revision = row?.dataset.revision ?? "-1";
+      values.csrf_token = document.querySelector('meta[name="queue-csrf"]')?.content || "";
+    }
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {"Content-Type": "application/x-www-form-urlencoded"},
       body: new URLSearchParams(values),
     });
-    if (!response.ok) throw new Error("Не удалось сохранить изменение");
+    if (!response.ok) {
+      const error = await response.json().catch(()=>({}));
+      throw new Error(error.error || "Не удалось сохранить изменение");
+    }
     return response;
   }
 
@@ -293,17 +327,26 @@ window.QueueVoice = (() => {
   }
 
   function applyTheme(theme) {
-    const nextTheme = theme === "dark" ? "dark" : "light";
+    const nextTheme = theme === "pink" ? "pink" : (theme === "dark" ? "dark" : "light");
     document.documentElement.dataset.theme = nextTheme;
     localStorage.setItem("queue-theme", nextTheme);
     if (themeToggle) {
-      themeToggle.textContent = nextTheme === "dark" ? "Светлая тема" : "Тёмная тема";
+      if (nextTheme === "pink") {
+        themeToggle.textContent = "Розовая тема 🌸";
+        themeToggle.title = "Персональная тема назначена администратором";
+        themeToggle.setAttribute("aria-label", "Розовая персональная тема");
+      } else {
+        themeToggle.textContent = nextTheme === "dark" ? "Светлая тема" : "Тёмная тема";
+        themeToggle.removeAttribute("title");
+      }
     }
+    return nextTheme;
   }
 
   if (themeToggle) {
     applyTheme(document.documentElement.dataset.theme);
     themeToggle.addEventListener("click", () => {
+      if (document.documentElement.dataset.theme === "pink") return;
       applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
     });
   }
@@ -350,9 +393,266 @@ window.QueueVoice = (() => {
     const composer = conversationPage.querySelector("[data-chat-composer]");
     const refreshButton = conversationPage.querySelector("[data-chat-refresh]");
     const connection = document.getElementById("whatsapp-connection");
-    const manualModeButton = conversationPage.querySelector("[data-manual-mode-toggle]");
-    const manualModeState = conversationPage.querySelector("[data-manual-mode-state]");
+    let manualModeButton = conversationPage.querySelector("[data-manual-mode-toggle]");
+    let manualModeState = conversationPage.querySelector("[data-manual-mode-state]");
+    let botResetButton = conversationPage.querySelector("[data-bot-reset]");
     const profileButton = conversationPage.querySelector("[data-profile-toggle]");
+    // EO_BOT_RESTART_UI_FIX_20260930:
+    // This control belongs only to personal WhatsApp dialogs.
+    // Never attach it to the Groups sidebar / "Обновить" button.
+    const botRestartPersonalPage = location.pathname === "/whatsapp";
+    const botRestartHeaderActions = conversationPage.querySelector(".chat-header-actions");
+    if (!manualModeButton && botRestartPersonalPage) {
+      manualModeButton = document.createElement("button");
+      manualModeButton.type = "button";
+      manualModeButton.className = "button compact secondary";
+      manualModeButton.dataset.manualModeToggle = "1";
+      if (profileButton && profileButton.parentElement) {
+        profileButton.insertAdjacentElement("afterend", manualModeButton);
+      } else if (botRestartHeaderActions) {
+        botRestartHeaderActions.append(manualModeButton);
+      }
+    }
+    if (!botResetButton && botRestartPersonalPage) {
+      botResetButton = document.createElement("button");
+      botResetButton.type = "button";
+      botResetButton.className = "button compact secondary toolbar-overflow-source";
+      botResetButton.dataset.botReset = "1";
+      botResetButton.textContent = "↻ Перезагрузить бота";
+    }
+    if (!manualModeState && botRestartPersonalPage) {
+      manualModeState = document.createElement("small");
+      manualModeState.dataset.manualModeState = "1";
+      manualModeState.className = "manual-mode-state";
+      const chatHeader = conversationPage.querySelector(".chat-header");
+      const titleBlock = chatTitle?.parentElement;
+      if (titleBlock && chatHeader && chatHeader.contains(titleBlock)) {
+        titleBlock.append(manualModeState);
+      } else if (manualModeButton?.parentElement) {
+        manualModeButton.parentElement.insertAdjacentElement("afterend", manualModeState);
+      }
+    }
+
+    // EO_CHAT_OVERFLOW_BOT_CONTROLS_V19_20261001
+    // CSP-safe version:
+    // - never writes element.style (strict style-src blocks inline styles);
+    // - keeps the real v15 controls hidden in their original DOM location;
+    // - creates menu proxy buttons which call the REAL control's .click();
+    // - removes duplicate old auto-reply rows from the existing "..." menu.
+    let botManualContactV17 = false;
+    let botOverflowPanelV17 = null;
+    let nameAvatarSourceV17 = null;
+
+    const normalizeActionLabelV17 = (value) => String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLocaleLowerCase("ru-RU");
+
+    const isVisibleV17 = (element) => {
+      if (!element || !element.isConnected) return false;
+      const style = getComputedStyle(element);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || 1) === 0) return false;
+      const box = element.getBoundingClientRect();
+      return box.width > 4 && box.height > 4;
+    };
+
+    function findNameAvatarSourceV17() {
+      if (nameAvatarSourceV17 && nameAvatarSourceV17.isConnected) return nameAvatarSourceV17;
+      const scope = botRestartHeaderActions || document;
+      const found = [...scope.querySelectorAll("button, a, [role='button']")].find((item) => {
+        if (item === manualModeButton || item === botResetButton) return false;
+        if (item.dataset && item.dataset.eoOverflowProxyV19 === "1") return false;
+        const label = normalizeActionLabelV17(item.textContent || item.getAttribute("aria-label") || item.title);
+        return label.includes("имя") && label.includes("аватар");
+      }) || null;
+      if (found) nameAvatarSourceV17 = found;
+      return found;
+    }
+
+    function parkHeaderBotControlsV17() {
+      findNameAvatarSourceV17();
+      // "hidden" is CSP-safe; unlike element.style it does not create an
+      // inline style declaration.
+      for (const button of [manualModeButton, botResetButton, nameAvatarSourceV17]) {
+        if (!button) continue;
+        button.classList.remove("toolbar-overflow-source", "bot-reload-visible");
+        button.hidden = true;
+      }
+    }
+
+    function panelLabelScoreV18(element) {
+      const text = normalizeActionLabelV17(element && element.textContent);
+      if (!text) return 0;
+      const labels = ["теги / заметка", "экспорт", "обращения", "заявка"];
+      return labels.reduce((score, label) => score + (text.includes(label) ? 1 : 0), 0);
+    }
+
+    function findExistingOverflowPanelV17() {
+      const selectors = [
+        "[role='menu']", "menu", "nav", "aside", "section", "details", "div"
+      ].join(",");
+      const candidates = [];
+      for (const node of document.querySelectorAll(selectors)) {
+        if (!isVisibleV17(node)) continue;
+        const score = panelLabelScoreV18(node);
+        if (score < 3) continue;
+        const rect = node.getBoundingClientRect();
+        if (rect.width < 120 || rect.width > 560 || rect.height < 80 || rect.height > 900) continue;
+        candidates.push({node, score, area: rect.width * rect.height});
+      }
+      candidates.sort((a,b) => (b.score - a.score) || (a.area - b.area));
+      return candidates[0]?.node || null;
+    }
+
+    function menuButtonClassV19(panel) {
+      const sample = [...panel.querySelectorAll("button, [role='button'], a")].find((item) =>
+        item !== manualModeButton &&
+        item !== botResetButton &&
+        item !== nameAvatarSourceV17 &&
+        item.dataset?.eoOverflowProxyV19 !== "1"
+      );
+      return sample && sample.className ? String(sample.className) : "button compact";
+    }
+
+    function removeDuplicateBotRowsV19(panel) {
+      const duplicateLabels = new Set([
+        "выключить автоответчик",
+        "включить автоответчик",
+        "отключить автоответы",
+        "включить автоответы",
+        "⏸ отключить автоответы",
+        "▶ включить автоответы",
+        "↻ перезагрузить бота",
+        "перезагрузить бота",
+        "↻ имя / аватар",
+        "имя / аватар",
+      ]);
+      [...panel.querySelectorAll("button, a, [role='button']")].forEach((item) => {
+        if (item.dataset?.eoOverflowProxyV19 === "1") return;
+        const label = normalizeActionLabelV17(item.textContent || item.getAttribute("aria-label") || item.title);
+        if (duplicateLabels.has(label)) item.remove();
+      });
+    }
+
+    function createProxyV19(panel, key, label, source) {
+      if (!panel || !source) return null;
+      let proxy = panel.querySelector(`[data-eo-overflow-proxy-v19="${key}"]`);
+      if (!proxy) {
+        proxy = document.createElement("button");
+        proxy.type = "button";
+        proxy.dataset.eoOverflowProxyV19 = key;
+        proxy.className = menuButtonClassV19(panel);
+        proxy.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          const activeSource =
+            key === "manual" ? manualModeButton :
+            key === "reset" ? botResetButton :
+            findNameAvatarSourceV17();
+
+          if (!activeSource) {
+            window.QueueUI?.toast?.("Действие пока недоступно");
+            return;
+          }
+          if (activeSource.disabled) {
+            window.QueueUI?.toast?.("Сначала выберите пользователя");
+            return;
+          }
+
+          // HTMLElement.click() invokes the already-tested v15 handler even
+          // when the source control itself is hidden.
+          activeSource.click();
+
+          // Close the current overflow popover after the action.
+          const moreButton = [...document.querySelectorAll("button, [role='button'], summary")].find((item) => {
+            const text = normalizeActionLabelV17(item.textContent || item.getAttribute("aria-label") || item.title);
+            return text === "..." || text === "…";
+          });
+          if (moreButton) window.setTimeout(() => moreButton.click(), 0);
+        });
+        panel.append(proxy);
+      }
+      proxy.textContent = label;
+      proxy.disabled = !selectedChatId || Boolean(source.disabled);
+      return proxy;
+    }
+
+    function syncOverflowBotActionsV17() {
+      // Remove old broken v17 proxies and any stale v19 proxies which ended up
+      // outside the currently visible panel.
+      document.querySelectorAll("[data-eo-overflow-proxy-v17]").forEach((item) => item.remove());
+
+      const panel = findExistingOverflowPanelV17();
+      if (!panel) {
+        parkHeaderBotControlsV17();
+        return false;
+      }
+      botOverflowPanelV17 = panel;
+
+      const allowed = Boolean(selectedChatId) &&
+        !String(selectedChatId).endsWith("@g.us") &&
+        !botManualContactV17;
+
+      if (!allowed) {
+        panel.querySelectorAll("[data-eo-overflow-proxy-v19]").forEach((item) => item.remove());
+        parkHeaderBotControlsV17();
+        return true;
+      }
+
+      parkHeaderBotControlsV17();
+      removeDuplicateBotRowsV19(panel);
+
+      createProxyV19(
+        panel,
+        "manual",
+        manualModeActive ? "▶ Включить автоответы" : "⏸ Отключить автоответы",
+        manualModeButton
+      );
+      createProxyV19(panel, "reset", "↻ Перезагрузить бота", botResetButton);
+
+      const avatarAction = findNameAvatarSourceV17();
+      if (avatarAction) createProxyV19(panel, "avatar", "↻ Имя / аватар", avatarAction);
+
+      return true;
+    }
+
+    function scheduleOverflowSyncV17() {
+      [0, 25, 70, 150, 300, 600].forEach((delay) => window.setTimeout(syncOverflowBotActionsV17, delay));
+    }
+
+    if (botRestartPersonalPage) {
+      const titleBlock = chatTitle?.parentElement;
+      if (manualModeState && titleBlock && manualModeState.parentElement !== titleBlock) titleBlock.append(manualModeState);
+      parkHeaderBotControlsV17();
+
+      document.addEventListener("click", (event) => {
+        const target = event.target instanceof Element ? event.target.closest("button, summary, a, [role='button']") : null;
+        if (!target) return;
+        const label = normalizeActionLabelV17(target.textContent || target.getAttribute("aria-label") || target.title);
+        if (label === "..." || label === "…" || label.includes("ещё") || label.includes("дополн")) {
+          scheduleOverflowSyncV17();
+        }
+      }, true);
+
+      if (!document.documentElement.dataset.botOverflowObserverV19) {
+        document.documentElement.dataset.botOverflowObserverV19 = "1";
+        let observerTimerV19 = 0;
+        const observerV19 = new MutationObserver(() => {
+          window.clearTimeout(observerTimerV19);
+          observerTimerV19 = window.setTimeout(() => {
+            const panel = findExistingOverflowPanelV17();
+            if (panel) syncOverflowBotActionsV17();
+          }, 40);
+        });
+        observerV19.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["hidden", "class", "aria-expanded"]
+        });
+      }
+    }
     const profileSummary = conversationPage.querySelector("[data-contact-profile-summary]");
     const participantsList = conversationPage.querySelector("[data-group-participants]");
     const participantsCount = conversationPage.querySelector("[data-participants-count]");
@@ -367,11 +667,33 @@ window.QueueVoice = (() => {
     const mediaName = conversationPage.querySelector("[data-media-name]");
     const emojiToggle = conversationPage.querySelector("[data-emoji-toggle]");
     const emojiPicker = conversationPage.querySelector("[data-emoji-picker]");
-    const forwardToolbar = conversationPage.querySelector("[data-forward-toolbar]");
-    const forwardCount = conversationPage.querySelector("[data-forward-count]");
-    const forwardTarget = conversationPage.querySelector("[data-forward-target]");
-    const forwardCancel = conversationPage.querySelector("[data-forward-cancel]");
-    const forwardSend = conversationPage.querySelector("[data-forward-send]");
+    let forwardToolbar = conversationPage.querySelector("[data-forward-toolbar]");
+    if (!forwardToolbar) forwardToolbar = document.createElement("div");
+    forwardToolbar.dataset.forwardToolbar = "1";
+    forwardToolbar.classList.add("chat-forward-toolbar-repair");
+    // Rebuild the selection toolbar instead of reusing possibly stale or
+    // template-hidden controls. Keep its location directly between messages
+    // and the composer so the send controls cannot be clipped by the scroller.
+    forwardToolbar.replaceChildren();
+    const forwardCount = document.createElement("span");
+    forwardCount.dataset.forwardCount = "1";
+    const forwardTarget = document.createElement("select");
+    forwardTarget.dataset.forwardTarget = "1";
+    forwardTarget.setAttribute("aria-label", "Чат для пересылки");
+    const forwardCancel = document.createElement("button");
+    forwardCancel.type = "button";
+    forwardCancel.dataset.forwardCancel = "1";
+    forwardCancel.className = "button compact ghost";
+    forwardCancel.textContent = "Отмена";
+    const forwardSend = document.createElement("button");
+    forwardSend.type = "button";
+    forwardSend.dataset.forwardSend = "1";
+    forwardSend.className = "button compact primary";
+    forwardSend.textContent = "Переслать";
+    forwardToolbar.append(forwardCount, forwardTarget, forwardCancel, forwardSend);
+    if (chatMessages?.parentElement) chatMessages.insertAdjacentElement("afterend", forwardToolbar);
+    else if (composer?.parentElement) composer.parentElement.insertBefore(forwardToolbar, composer);
+    else conversationPage.append(forwardToolbar);
     const stateEndpoint = conversationPage.dataset.stateEndpoint || "/api/chat-state";
     const sendEndpoint = conversationPage.dataset.sendEndpoint || "/chat-send";
     const mediaSendEndpoint = conversationPage.dataset.mediaSendEndpoint || "/chat-media-send";
@@ -383,6 +705,8 @@ window.QueueVoice = (() => {
     let lastChatsSignature = "";
     let stateSequence = 0;
     let forwardTargets = [];
+    let forwardOptionsSignature = "";
+    let forwardBusy = false;
     let participants = [];
     let loading = false;
     let lastMessageSignature = "";
@@ -423,24 +747,12 @@ window.QueueVoice = (() => {
 
     // QUEUE_LINKIFY_3_3_79: render http(s), www and plain-domain links as safe clickable anchors.
     function appendMessageText(container, text, message) {
-      // 1.00.2: WhatsApp may persist the body with an @lid/@c.us numeric token
-      // even though the message already carries a resolved participant name.
-      // Convert every known technical token locally as a final presentation
-      // fallback so an @mention can never become visually "invisible".
-      let value = String(text || "");
+      const value = String(text || "");
       const exactMentions = [];
       (Array.isArray(message && message.mentions) ? message.mentions : []).forEach((mention) => {
         if (!mention || typeof mention !== "object") return;
         const name = String(mention.name || "").trim();
-        if (!name) return;
-        exactMentions.push(`@${name}`);
-        [mention.id, mention.resolved_id].forEach((rawId) => {
-          const raw = String(rawId || "").trim();
-          const technical = raw.split("@")[0].replace(/^@+/, "");
-          if (!technical) return;
-          const escaped = technical.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          value = value.replace(new RegExp(`@${escaped}(?!\\d)`, "g"), `@${name}`);
-        });
+        if (name) exactMentions.push(`@${name}`);
       });
       exactMentions.sort((a, b) => b.length - a.length);
       const escapedMentions = exactMentions.map((item) => item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -545,48 +857,31 @@ window.QueueVoice = (() => {
     }
 
     function clampFloatingPanel(panel, left, top, margin = 10) {
-      const rect = panel.getBoundingClientRect();
-      const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
-      const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
-      panel.style.left = `${Math.min(Math.max(margin, left), maxLeft)}px`;
-      panel.style.top = `${Math.min(Math.max(margin, top), maxTop)}px`;
-    }
-
-    // 1.00.3: context-menu-specific placement. Unlike the generic picker
-    // helper above, this never exposes the menu at an unsafe coordinate first.
-    // That prevents CSS interface zoom from creating horizontal document
-    // overflow and moving the whole conversation after a right-click.
-    function placeMessageContextMenu(panel, clientX, clientY, margin = 8) {
-      if (!(panel instanceof HTMLElement)) return;
-      const viewport = window.visualViewport;
-      const viewportLeft = Number(viewport?.offsetLeft || 0);
-      const viewportTop = Number(viewport?.offsetTop || 0);
-      const viewportWidth = Number(viewport?.width || document.documentElement.clientWidth || window.innerWidth);
-      const viewportHeight = Number(viewport?.height || document.documentElement.clientHeight || window.innerHeight);
-
+      if (!panel) return;
       panel.style.right = "auto";
       panel.style.bottom = "auto";
-      const previousVisibility = panel.style.visibility;
-      panel.style.visibility = "hidden";
-      panel.style.left = "0px";
-      panel.style.top = "0px";
-
-      const rect = panel.getBoundingClientRect();
-      const scaleX = panel.offsetWidth > 0 && rect.width > 0 ? rect.width / panel.offsetWidth : 1;
-      const scaleY = panel.offsetHeight > 0 && rect.height > 0 ? rect.height / panel.offsetHeight : scaleX;
-      const safeScaleX = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1;
-      const safeScaleY = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : 1;
-      const minLeft = viewportLeft + margin;
-      const minTop = viewportTop + margin;
-      const maxLeft = Math.max(minLeft, viewportLeft + viewportWidth - rect.width - margin);
-      const maxTop = Math.max(minTop, viewportTop + viewportHeight - rect.height - margin);
-      const wantedLeft = Math.min(Math.max(minLeft, Number(clientX) + 2 || minLeft), maxLeft);
-      const wantedTop = Math.min(Math.max(minTop, Number(clientY) + 2 || minTop), maxTop);
-
-      panel.style.left = `${wantedLeft / safeScaleX}px`;
-      panel.style.top = `${wantedTop / safeScaleY}px`;
-      panel.style.visibility = previousVisibility;
+      panel.style.left = `${Math.max(margin, Number(left) || margin)}px`;
+      panel.style.top = `${Math.max(margin, Number(top) || margin)}px`;
+      const adjust = () => {
+        if (!panel.isConnected) return;
+        const rect = panel.getBoundingClientRect();
+        let dx = 0, dy = 0;
+        if (rect.left < margin) dx = margin - rect.left;
+        else if (rect.right > window.innerWidth - margin) dx = (window.innerWidth - margin) - rect.right;
+        if (rect.top < margin) dy = margin - rect.top;
+        else if (rect.bottom > window.innerHeight - margin) dy = (window.innerHeight - margin) - rect.bottom;
+        if (!dx && !dy) return;
+        const scaleX = rect.width > 0 && panel.offsetWidth > 0 ? rect.width / panel.offsetWidth : 1;
+        const scaleY = rect.height > 0 && panel.offsetHeight > 0 ? rect.height / panel.offsetHeight : scaleX;
+        const currentLeft = Number.parseFloat(panel.style.left) || 0;
+        const currentTop = Number.parseFloat(panel.style.top) || 0;
+        panel.style.left = `${currentLeft + dx / (scaleX || 1)}px`;
+        panel.style.top = `${currentTop + dy / (scaleY || 1)}px`;
+      };
+      adjust();
+      requestAnimationFrame(adjust);
     }
+    window.QueueClampFloatingPanel = clampFloatingPanel;
 
     function openReactionPicker(message, bubble, button, pointer = null) {
       const anchorRect = button?.getBoundingClientRect ? button.getBoundingClientRect() : bubble?.getBoundingClientRect();
@@ -701,6 +996,8 @@ window.QueueVoice = (() => {
 
       addItem("Реакция", "☺", (item) => openReactionPicker(message, bubble, item));
       addItem("Ответить", "↩", () => { closeMessageContextMenu(); startReply(message); });
+      addItem(messageIsBookmarked(selectedChatId, message.id) ? "Убрать из избранного" : "В избранное", "★",
+        () => { closeMessageContextMenu(); toggleMessageBookmark(message).catch((err) => queueAlert(err.message)); });
       const forwardBlocked = isMentionOnlyMessage(message) && !selectedForForward.has(message.id);
       const forwardItem = addItem(
         selectedForForward.has(message.id) ? "Убрать из пересылки" : "Переслать",
@@ -718,11 +1015,9 @@ window.QueueVoice = (() => {
         addItem("Удалить", "⌫", () => { closeMessageContextMenu(); queueMessageAction(message, "delete"); }, true);
       }
 
-      const pageScrollX = window.scrollX;
       document.body.append(menu);
-      placeMessageContextMenu(menu, event.clientX, event.clientY, 8);
+      clampFloatingPanel(menu, event.clientX + 2, event.clientY + 2, 8);
       menu.querySelector("button")?.focus({preventScroll: true});
-      if (window.scrollX !== pageScrollX) window.scrollTo(pageScrollX, window.scrollY);
 
       window.setTimeout(() => {
         const close = (clickEvent) => {
@@ -738,6 +1033,7 @@ window.QueueVoice = (() => {
       try { sessionStorage.removeItem(`queue-manual-unread:${chatId}`); } catch (_) {}
       saveDraft();
       const changed = selectedChatId !== chatId;
+      if (changed && selectedChatId) void window.QueueConversationLock?.releaseIfOwned?.(selectedChatId);
       selectedChatId = chatId;
       if (changed) {
         profileOpen = false;
@@ -773,7 +1069,7 @@ window.QueueVoice = (() => {
       loadChatState(true);
     }
 
-    const supportsReplyQueue = conversationPage.hasAttribute("data-whatsapp-page");
+    const supportsReplyQueue = false; // 1.00.6.31 fix4: obsolete reply queue removed
     let needsReplyOnly = supportsReplyQueue && sessionStorage.getItem("queue-needs-reply:" + location.pathname) === "1";
     const needsReplyButton = document.createElement("button");
     needsReplyButton.type = "button"; needsReplyButton.className = "button compact ghost reply-queue-toggle";
@@ -792,6 +1088,87 @@ window.QueueVoice = (() => {
       const value = Number(chat.waiting_since || 0);
       return Number.isFinite(value) && value > 0 ? value : 0;
     }
+    // Saved messages are per logged-in employee and persisted in app_settings.
+    let messageBookmarks = [];
+    const bookmarkKey = (chatId, messageId) => `${String(chatId || '')}\u0001${String(messageId || '')}`;
+    function messageIsBookmarked(chatId, messageId) {
+      return messageBookmarks.some((item) => bookmarkKey(item.chat_id, item.message_id) === bookmarkKey(chatId, messageId));
+    }
+    async function refreshMessageBookmarks(refreshMessages = false) {
+      const response = await fetch('/api/message-bookmarks', {cache: 'no-store'});
+      if (!response.ok) throw new Error('Не удалось загрузить избранные сообщения');
+      const data = await response.json();
+      messageBookmarks = Array.isArray(data.bookmarks) ? data.bookmarks : [];
+      if (refreshMessages && selectedChatId) {
+        lastMessageSignature = '';
+        renderMessages(mergedConversationMessages());
+      }
+      return messageBookmarks;
+    }
+    async function toggleMessageBookmark(message) {
+      if (!message?.id || !selectedChatId) return;
+      const newValue = !messageIsBookmarked(selectedChatId, message.id);
+      const body = new URLSearchParams({
+        chat_id: selectedChatId, message_id: String(message.id), favorite: newValue ? '1' : '0',
+        preview: String(message.body || message.media_name || '[Вложение]').slice(0, 280),
+        sender: String(message.sender || (message.from_me ? 'Вы' : '')).slice(0, 100),
+        chat_name: selectedChatName(), timestamp: String(message.timestamp || 0),
+      });
+      const response = await fetch('/api/message-bookmarks', {
+        method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'}, body,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.updated) throw new Error(data.error || 'Не удалось изменить закладку');
+      messageBookmarks = Array.isArray(data.bookmarks) ? data.bookmarks : [];
+      lastMessageSignature = '';
+      renderMessages(mergedConversationMessages());
+      window.QueueUI?.toast?.(newValue ? 'Сообщение сохранено в избранное' : 'Сообщение удалено из избранного');
+    }
+    async function showMessageBookmarks() {
+      try { await refreshMessageBookmarks(); }
+      catch (error) { window.QueueUI?.toast?.(error.message); return; }
+      const overlay = document.createElement('div');
+      overlay.className = 'queue-bookmarks-overlay';
+      const panel = document.createElement('section');
+      panel.className = 'queue-bookmarks-panel';
+      panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-label', 'Избранные сообщения');
+      const header = document.createElement('header');
+      const heading = document.createElement('h2'); heading.textContent = `★ Избранные сообщения (${messageBookmarks.length})`;
+      const close = document.createElement('button'); close.type = 'button'; close.className = 'button compact ghost'; close.textContent = 'Закрыть';
+      const onKey = (event) => { if (event.key === 'Escape') dismiss(); };
+      const dismiss = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+      close.addEventListener('click', dismiss); header.append(heading, close); panel.append(header);
+      const list = document.createElement('div'); list.className = 'queue-bookmarks-list';
+      if (!messageBookmarks.length) {
+        const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = 'Пока нет сохранённых сообщений.'; list.append(empty);
+      }
+      for (const item of messageBookmarks) {
+        const link = document.createElement('a'); link.className = 'queue-bookmark-entry';
+        const isGroup = String(item.chat_id || '').endsWith('@g.us');
+        const query = new URLSearchParams({chat_id: String(item.chat_id), message_id: String(item.message_id)});
+        if (item.timestamp) query.set('before_ts', String(item.timestamp));
+        link.href = (isGroup ? '/groups?' : '/whatsapp?') + query;
+        const name = document.createElement('strong'); name.textContent = String(item.chat_name || item.chat_id || 'Чат');
+        const preview = document.createElement('span'); preview.textContent = `${item.sender ? item.sender + ': ' : ''}${item.preview || '[Сообщение]'}`;
+        link.append(name, preview); list.append(link);
+      }
+      panel.append(list); overlay.append(panel);
+      overlay.addEventListener('click', (event) => { if (event.target === overlay) dismiss(); });
+      document.addEventListener('keydown', onKey); document.body.append(overlay); close.focus();
+    }
+    const sidebarHead = conversationPage.querySelector('.chat-sidebar-head');
+    if (sidebarHead && !sidebarHead.querySelector('[data-open-message-bookmarks]')) {
+      const openBookmarks = document.createElement('button');
+      openBookmarks.type = 'button'; openBookmarks.className = 'button compact ghost';
+      openBookmarks.dataset.openMessageBookmarks = '1'; openBookmarks.textContent = '★ Закладки';
+      openBookmarks.addEventListener('click', showMessageBookmarks); sidebarHead.append(openBookmarks);
+    }
+    refreshMessageBookmarks(true).catch(() => {});
+    if (new URLSearchParams(location.search).get('bookmarks') === '1') {
+      showMessageBookmarks();
+    }
+
     // QUEUE_FAVORITES_3_3_79
     async function toggleChatFavorite(chat, nextFavorite) {
       if (!chat || !chat.id) return;
@@ -818,11 +1195,9 @@ window.QueueVoice = (() => {
         const haystack = `${chat.name || ""} ${chat.id || ""} ${chat.last_message || ""}`.toLocaleLowerCase("ru");
         return (!needsReplyOnly || chat.needs_reply) && (!query || haystack.includes(query));
       });
-      filtered.sort((left, right) => {
-        const favoriteDiff = Number(Boolean(right.favorite)) - Number(Boolean(left.favorite));
-        if (favoriteDiff) return favoriteDiff;
-        return Number(right.timestamp || 0) - Number(left.timestamp || 0);
-      });
+      // Starred chats stay at the top, recent chats follow in timestamp order.
+      filtered.sort((left, right) => Number(Boolean(right.favorite)) - Number(Boolean(left.favorite))
+        || Number(right.timestamp || 0) - Number(left.timestamp || 0));
       const chatsSignature = selectedChatId + query + needsReplyOnly + JSON.stringify(filtered);
       if (lastChatsSignature === chatsSignature) return;
       lastChatsSignature = chatsSignature;
@@ -945,17 +1320,28 @@ window.QueueVoice = (() => {
     function updateForwardToolbar() {
       if (!forwardToolbar || !forwardCount || !forwardTarget) return;
       const count = selectedForForward.size;
-      forwardToolbar.hidden = count === 0;
-      forwardCount.textContent = `${count} ${count === 1 ? "сообщение выбрано" : "сообщения выбрано"}`;
-      const previous = forwardTarget.value;
-      forwardTarget.replaceChildren();
-      (forwardTargets.length ? forwardTargets : chats).forEach((chat) => {
-        const option = document.createElement("option");
-        option.value = String(chat.id || "");
-        option.textContent = cleanWhatsAppName(chat.name) || chatFallbackName(chat.id);
-        forwardTarget.append(option);
+      const visible = count > 0;
+      forwardToolbar.hidden = !visible;
+      forwardToolbar.style.setProperty("display", visible ? "flex" : "none", "important");
+      forwardToolbar.style.setProperty("visibility", visible ? "visible" : "hidden", "important");
+      [forwardCount, forwardTarget, forwardCancel, forwardSend].forEach((node) => {
+        node.hidden = !visible;
+        node.style.setProperty("display", visible ? "inline-flex" : "none", "important");
+        node.style.setProperty("visibility", visible ? "visible" : "hidden", "important");
+        node.style.setProperty("opacity", visible ? "1" : "0", "important");
       });
-      if (previous && [...forwardTarget.options].some((opt) => opt.value === previous)) forwardTarget.value = previous;
+      forwardCount.textContent = `${count} ${count === 1 ? "сообщение выбрано" : "сообщения выбрано"}`;
+      const targets = (forwardTargets.length ? forwardTargets : chats).filter(chat => String(chat?.id || '').trim());
+      const optionsSignature = JSON.stringify(targets.map(chat => [String(chat.id), chat.name]));
+      if (optionsSignature !== forwardOptionsSignature) {
+        const previous = forwardTarget.value;
+        forwardOptionsSignature = optionsSignature;
+        const options = [new Option(targets.length ? 'Выберите чат для пересылки' : 'Нет доступных чатов', '')];
+        targets.forEach(chat => options.push(new Option(cleanWhatsAppName(chat.name) || chatFallbackName(chat.id), String(chat.id))));
+        forwardTarget.replaceChildren(...options);
+        forwardTarget.value = options.some(o => o.value === previous) ? previous : '';
+      }
+      forwardSend.disabled = forwardBusy || !forwardTarget.value || forwardSend.dataset.lockDisabled === '1';
     }
 
     function toggleForward(message) {
@@ -975,7 +1361,21 @@ window.QueueVoice = (() => {
     }
 
     async function sendForwardSelection() {
-      if (!selectedChatId || !selectedForForward.size || !forwardTarget || !forwardTarget.value) return;
+      if (forwardBusy) return;
+      if (!selectedChatId) {
+        queueAlert("Сначала откройте чат с сообщением для пересылки");
+        return;
+      }
+      if (!selectedForForward.size) {
+        queueAlert("Сначала выберите сообщение для пересылки");
+        return;
+      }
+      if (!forwardTarget || !forwardTarget.value) {
+        queueAlert("Выберите чат назначения в списке перед пересылкой");
+        forwardTarget?.focus();
+        return;
+      }
+      forwardBusy = true;
       if (forwardSend) forwardSend.disabled = true;
       try {
         const response = await fetch(forwardEndpoint, {
@@ -989,12 +1389,34 @@ window.QueueVoice = (() => {
         });
         const result = await response.json();
         if (!response.ok || !result.queued) throw new Error(result.error || "Не удалось поставить пересылку в очередь");
-        selectedForForward.clear();
-        updateForwardToolbar();
+        const selectedIds = [...selectedForForward];
+        const actionIds = Array.isArray(result.action_ids) ? result.action_ids : [];
+        if (actionIds.length) {
+          const outcomes = await Promise.allSettled(actionIds.map((id) => waitForMessageAction(id)));
+          const actionMessageIds = Array.isArray(result.action_message_ids) ? result.action_message_ids.map(String) : [];
+          const queuedMessageIds = new Set(actionMessageIds);
+          const failed = outcomes
+            .map((outcome, index) => ({outcome, messageId: actionMessageIds[index] || selectedIds[index] || ""}))
+            .filter(({outcome}) => outcome.status === "rejected");
+          const notQueued = selectedIds.filter((id) => !queuedMessageIds.has(String(id)));
+          selectedForForward.clear();
+          [...failed.map((item) => item.messageId), ...notQueued].filter(Boolean).forEach((id) => selectedForForward.add(id));
+          updateForwardToolbar();
+          if (failed.length || notQueued.length) {
+            const firstError = failed[0]?.outcome.reason;
+            const detail = firstError?.message || firstError || "Сообщение отсутствует в очереди WhatsApp";
+            throw new Error(`${failed.length + notQueued.length} сообщений не переслано. Ошибка: ${detail}`);
+          }
+        } else {
+          selectedForForward.clear();
+          updateForwardToolbar();
+        }
+        window.QueueUI?.toast?.(`Переслано сообщений: ${Number(result.count || actionIds.length || 0)}`);
       } catch (error) {
         queueAlert(error.message || "Не удалось переслать сообщения");
       } finally {
-        if (forwardSend) forwardSend.disabled = false;
+        forwardBusy = false;
+        if (forwardSend) forwardSend.disabled = !forwardTarget.value || forwardSend.dataset.lockDisabled === "1";
       }
     }
 
@@ -1188,7 +1610,7 @@ window.QueueVoice = (() => {
       const currentClientHeight = chatMessages.clientHeight;
       const wasNearBottom = !new URL(location.href).searchParams.has("message_id") && currentHeight - (currentTop + currentClientHeight) <= 96;
       const signature = `${historyHasMore ? 1 : 0}:${historyCursor}|` + messages
-        .map((message) => `${message.id}:${message.timestamp}:${message.ack || 0}:${message.edited ? 1 : 0}:${message.deleted ? 1 : 0}:${message.forwarded ? 1 : 0}:${message.sender || ""}:${message.sender_phone || ""}:${message.sender_avatar_url || ""}:${message.body || ""}:${message.media_url || ""}:${message.quoted_message_key || ""}:${message.quoted_sender || ""}:${message.quoted_body || ""}:${message.quote_preview_url || ""}:${message.quote_unavailable ? 1 : 0}:${message.transcript || ""}:${message.highlight_mention ? 1 : 0}:${message.media_name || ""}:${(Array.isArray(message.reactions) ? message.reactions : []).map((reaction) => `${reaction.emoji || ""},${reaction.count || 0},${reaction.me ? 1 : 0}`).join(";")}:${selectedForForward.has(message.id) ? 1 : 0}`)
+        .map((message) => `${message.id}:${message.timestamp}:${message.ack || 0}:${message.edited ? 1 : 0}:${message.deleted ? 1 : 0}:${message.forwarded ? 1 : 0}:${message.sender || ""}:${message.sender_phone || ""}:${message.sender_avatar_url || ""}:${message.body || ""}:${message.media_url || ""}:${message.quoted_message_key || ""}:${message.quoted_sender || ""}:${message.quoted_body || ""}:${message.quote_preview_url || ""}:${message.quote_unavailable ? 1 : 0}:${message.transcript || ""}:${message.highlight_mention ? 1 : 0}:${message.media_name || ""}:${(Array.isArray(message.reactions) ? message.reactions : []).map((reaction) => `${reaction.emoji || ""},${reaction.count || 0},${reaction.me ? 1 : 0}`).join(";")}:${selectedForForward.has(message.id) ? 1 : 0}:${messageIsBookmarked(selectedChatId, message.id) ? 1 : 0}`)
         .join("|");
       if (signature === lastMessageSignature) return;
       lastMessageSignature = signature;
@@ -1214,7 +1636,7 @@ window.QueueVoice = (() => {
         nodes.push(historyBar);
       }
       messages.forEach((message) => {
-        const key = JSON.stringify(message) + selectedForForward.has(message.id);
+        const key = JSON.stringify(message) + selectedForForward.has(message.id) + ':' + messageIsBookmarked(selectedChatId, message.id);
         const existing = oldRows.get(String(message.id));
         if (existing && (existing.dataset.renderKey === key || (!message.deleted && [...existing.querySelectorAll("audio,video")].some(media => !media.paused && !media.ended)))) {
           nodes.push(existing);
@@ -1480,7 +1902,12 @@ window.QueueVoice = (() => {
           forward.disabled = forwardBlocked;
           if (forwardBlocked) forward.title = "Нельзя пересылать сообщение, состоящее только из тега пользователя";
           forward.addEventListener("click", () => toggleForward(message));
-          actions.append(reaction, reply, forward);
+          const bookmark = document.createElement('button');
+          bookmark.type = 'button'; bookmark.className = 'message-bookmark';
+          bookmark.textContent = messageIsBookmarked(selectedChatId, message.id) ? '★ В избранном' : '☆ Избранное';
+          bookmark.title = bookmark.textContent;
+          bookmark.addEventListener('click', () => toggleMessageBookmark(message).catch((err) => queueAlert(err.message)));
+          actions.append(reaction, reply, bookmark, forward);
           if (message.from_me) {
             const edit = document.createElement("button");
             edit.type = "button";
@@ -1643,21 +2070,52 @@ window.QueueVoice = (() => {
     }
 
     function renderManualMode(mode, manualContact = false) {
-      if (!manualModeButton || !manualModeState) return;
-      if (manualContact) { manualModeActive = false; manualModeButton.hidden = true; manualModeState.textContent = ""; return; }
-      manualModeButton.hidden = false;
-      manualModeActive = Boolean(mode && mode.expires_at);
-      manualModeButton.disabled = !selectedChatId;
-      if (manualModeActive) {
-        manualModeButton.textContent = "Включить автоответчик";
-        const actor = mode.actor ? ` · ${mode.actor}` : "";
-        manualModeState.textContent = `Автоответчик выключен${actor}`;
-        manualModeState.className = "manual-mode-state active";
-      } else {
-        manualModeButton.textContent = "Выключить автоответчик";
-        manualModeState.textContent = selectedChatId ? "Автоответчик включён" : "";
-        manualModeState.className = "manual-mode-state";
+      const groupConversation = location.pathname === "/groups" || String(selectedChatId || "").endsWith("@g.us");
+      if (groupConversation) {
+        botManualContactV17 = false;
+        if (manualModeButton) manualModeButton.hidden = true;
+        if (botResetButton) botResetButton.hidden = true;
+        if (manualModeState) manualModeState.hidden = true;
+        manualModeActive = false;
+        parkHeaderBotControlsV17();
+        syncOverflowBotActionsV17();
+        return;
       }
+      if (!manualModeButton || !manualModeState) return;
+      manualModeActive = Boolean(mode && typeof mode === "object" && Object.keys(mode).length);
+      botManualContactV17 = Boolean(manualContact);
+      if (manualContact) {
+        manualModeButton.hidden = true;
+        if (botResetButton) botResetButton.hidden = true;
+        manualModeState.hidden = false;
+        manualModeState.textContent = "Контакт из админки · автоответы отключены";
+        manualModeState.className = "manual-mode-state";
+        parkHeaderBotControlsV17();
+        syncOverflowBotActionsV17();
+        return;
+      }
+      manualModeButton.hidden = false;
+      if (botResetButton) {
+        botResetButton.hidden = false;
+        botResetButton.disabled = !selectedChatId;
+        botResetButton.textContent = "↻ Перезагрузить бота";
+        botResetButton.title = "Очистить текущий сценарий бота только для этого пользователя и начать с главного меню.";
+      }
+      manualModeState.hidden = false;
+      manualModeButton.disabled = !selectedChatId;
+      manualModeButton.textContent = manualModeActive ? "▶ Включить автоответы" : "⏸ Отключить автоответы";
+      manualModeButton.title = manualModeActive
+        ? "Возобновить автоматические ответы для этого пользователя без сброса его текущего сценария."
+        : "Остановить автоматические ответы только для этого пользователя. Сообщения продолжат приходить в систему.";
+      const actor = String((mode && mode.actor) || "").trim();
+      manualModeState.textContent = !selectedChatId
+        ? ""
+        : manualModeActive
+          ? `Автоответы отключены${actor ? ` · ${actor}` : ""}`
+          : "Автоответчик работает для обычного пользователя";
+      manualModeState.className = `manual-mode-state${manualModeActive ? " active" : ""}`;
+      parkHeaderBotControlsV17();
+      syncOverflowBotActionsV17();
     }
 
     function drawProfileSummary() {
@@ -1816,6 +2274,8 @@ window.QueueVoice = (() => {
         if (!response.ok) throw new Error("Нет связи с программой");
         const state = await response.json();
         if (sequence !== stateSequence || requestedChat !== selectedChatId) return;
+        // Let access controls consume only the state snapshot accepted by this poll.
+        window.dispatchEvent(new CustomEvent("queue-chat-state-accepted", {detail: state}));
         chats = Array.isArray(state.chats) ? state.chats : [];
         forwardTargets = Array.isArray(state.forward_targets) ? state.forward_targets : chats;
         if (!selectedChatId && state.selected_chat_id) selectedChatId = state.selected_chat_id;
@@ -1904,22 +2364,60 @@ window.QueueVoice = (() => {
       }
     }
 
+    // EO_AUTOREPLY_TOGGLE_V15_20261001
     if (manualModeButton) {
       manualModeButton.addEventListener("click", async () => {
-        if (!selectedChatId) return;
+        if (!selectedChatId || manualModeButton.dataset.busy === "1") return;
+        manualModeButton.dataset.busy = "1";
         manualModeButton.disabled = true;
+        const action = manualModeActive ? "enable" : "disable";
+        manualModeButton.textContent = manualModeActive ? "Включаю..." : "Отключаю...";
         try {
           const response = await postForm("/chat-mode", {
             chat_id: selectedChatId,
-            action: manualModeActive ? "disable" : "enable",
+            action,
           });
-          const result = await response.json();
-          if (!result.updated && !manualModeActive) throw new Error("Не удалось изменить режим");
-          renderManualMode(result.manual_mode || {});
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || !result.updated) throw new Error(result.error || "Не удалось изменить автоответы");
+          renderManualMode(result.manual_mode || {}, false);
+          window.QueueUI?.toast?.(result.message || (action === "enable" ? "Автоответы включены" : "Автоответы отключены"));
         } catch (error) {
-          queueAlert(error.message || "Не удалось изменить режим автоответчика");
+          queueAlert(error.message || "Не удалось изменить автоответы");
+          await loadChatState(true);
         } finally {
-          manualModeButton.disabled = false;
+          manualModeButton.dataset.busy = "0";
+          manualModeButton.disabled = !selectedChatId;
+          parkHeaderBotControlsV17();
+          syncOverflowBotActionsV17();
+        }
+      });
+    }
+
+    if (botResetButton) {
+      botResetButton.addEventListener("click", async () => {
+        if (!selectedChatId || botResetButton.dataset.busy === "1") return;
+        botResetButton.dataset.busy = "1";
+        botResetButton.disabled = true;
+        const oldText = botResetButton.textContent;
+        botResetButton.textContent = "Перезапуск...";
+        try {
+          const response = await postForm("/chat-mode", {
+            chat_id: selectedChatId,
+            action: "reset",
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || !result.updated) throw new Error(result.error || "Не удалось перезапустить бота");
+          renderManualMode({}, false);
+          manualModeState.textContent = result.message || "Бот перезапущен. Автоответы включены.";
+          window.QueueUI?.toast?.("Бот для этого пользователя перезапущен");
+        } catch (error) {
+          queueAlert(error.message || "Не удалось перезапустить бота");
+        } finally {
+          botResetButton.dataset.busy = "0";
+          botResetButton.disabled = !selectedChatId;
+          if (botResetButton.textContent === "Перезапуск...") botResetButton.textContent = oldText || "↻ Перезагрузить бота";
+          parkHeaderBotControlsV17();
+          syncOverflowBotActionsV17();
         }
       });
     }
@@ -1941,6 +2439,9 @@ window.QueueVoice = (() => {
     }
     if (replyCancel) replyCancel.addEventListener("click", clearReply);
     if (forwardCancel) forwardCancel.addEventListener("click", () => { selectedForForward.clear(); updateForwardToolbar(); lastMessageSignature = ""; loadChatState(true); });
+    if (forwardTarget) forwardTarget.addEventListener("change", () => {
+      if (forwardSend) forwardSend.disabled = forwardBusy || !forwardTarget.value || forwardSend.dataset.lockDisabled === "1";
+    });
     if (forwardSend) forwardSend.addEventListener("click", sendForwardSelection);
 
     const emojiValues = [
@@ -2223,8 +2724,9 @@ window.QueueVoice = (() => {
         if (mentionsInput) mentionsInput.value = "";
         clearAttachment();
         if (emojiPicker) emojiPicker.hidden = true;
-        composeStatus.textContent = "В очереди отправки. Статус появится в переписке";
-        window.setTimeout(() => { composeStatus.textContent = ""; loadChatState(true); }, 3000);
+        composeStatus.textContent = "Отправляется…";
+        void loadChatState(true);
+        window.setTimeout(() => { composeStatus.textContent = ""; }, 1800);
       } catch (error) {
         composeStatus.textContent = error.name === "AbortError" ? "Загрузка отменена" : (error.message || "Не удалось отправить сообщение");
         if (uploadId && !completed) uploadRequest("/upload/cancel", {upload_id:uploadId}).catch(() => {});
@@ -2240,17 +2742,21 @@ window.QueueVoice = (() => {
     });
 
     if (selectedChatId) chatIdInput.value = selectedChatId;
+    // EO_PERFORMANCE_20260930: realtime-first, slow polling only as a safety net.
     let chatPollTimer = null;
     const scheduleChatPoll = () => {
       if (chatPollTimer) window.clearTimeout(chatPollTimer);
       chatPollTimer = window.setTimeout(async () => {
         await loadChatState(false);
         scheduleChatPoll();
-      }, document.hidden ? 4000 : 900);
+      }, document.hidden ? 60000 : 15000);
     };
+    window.addEventListener("queue-realtime", () => {
+      if (!document.hidden) void loadChatState(false);
+    });
     window.addEventListener("queue-open-message", () => {
       const wanted=new URL(location.href).searchParams.get("chat_id");
-      if(wanted && wanted!==selectedChatId){saveDraft(); selectedChatId=wanted; olderMessages=[];latestMessages=[];historyCursor="";historyHasMore=false;restoreDraft();}
+      if(wanted && wanted!==selectedChatId){if(selectedChatId) void window.QueueConversationLock?.releaseIfOwned?.(selectedChatId); saveDraft(); selectedChatId=wanted; olderMessages=[];latestMessages=[];historyCursor="";historyHasMore=false;restoreDraft();}
       delete conversationPage.dataset.jumpLoaded;delete conversationPage.dataset.jumpScrolled;
       loadChatState(true);
     });
@@ -2441,7 +2947,100 @@ window.QueueVoice = (() => {
 
   function startNotifications() {
     if (!notificationCenter || !notificationPopover || !notificationCount || !notificationItems) return;
-    window.QueueUI?.soundToggle(notificationPopover);
+
+    // EO_NOTIFICATION_TRIGGER_V14_20261001
+    const loudSoundKey = "queue-loud-notification-sound-v14";
+    let loudSoundEnabled = true;
+    try { loudSoundEnabled = localStorage.getItem(loudSoundKey) !== "0"; } catch (_) {}
+    let noticeAudioContext = null;
+    let noticeAudioUnlocked = false;
+
+    function ensureNoticeAudio(unlockOnly = false) {
+      if (!loudSoundEnabled) return null;
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return null;
+        if (!noticeAudioContext) noticeAudioContext = new AudioContextClass();
+        if (noticeAudioContext.state === "suspended") {
+          const resumed = noticeAudioContext.resume();
+          if (resumed && typeof resumed.catch === "function") resumed.catch(() => {});
+        }
+        noticeAudioUnlocked = noticeAudioContext.state === "running" || noticeAudioUnlocked;
+        return unlockOnly ? noticeAudioContext : (noticeAudioUnlocked ? noticeAudioContext : null);
+      } catch (_) { return null; }
+    }
+
+    const unlockNoticeAudio = () => {
+      const ctx = ensureNoticeAudio(true);
+      if (!ctx) return;
+      const mark = () => { noticeAudioUnlocked = ctx.state === "running"; };
+      if (ctx.state === "running") mark();
+      else if (ctx.resume) Promise.resolve(ctx.resume()).then(mark).catch(() => {});
+    };
+    document.addEventListener("pointerdown", unlockNoticeAudio, {capture:true, once:true});
+    document.addEventListener("keydown", unlockNoticeAudio, {capture:true, once:true});
+
+    function playTriggerNotice(item = {}) {
+      if (!loudSoundEnabled) return;
+      const ctx = ensureNoticeAudio(false);
+      if (!ctx) {
+        try { window.QueueUI?.playNotice?.(); } catch (_) {}
+        return;
+      }
+      try {
+        const now = ctx.currentTime + 0.015;
+        const compressor = ctx.createDynamicsCompressor();
+        compressor.threshold.value = -24;
+        compressor.knee.value = 10;
+        compressor.ratio.value = 12;
+        compressor.attack.value = 0.003;
+        compressor.release.value = 0.22;
+        compressor.connect(ctx.destination);
+
+        const urgent = ["system","sla"].includes(String(item.kind || "").toLowerCase());
+        const tones = urgent
+          ? [[880,0.00,0.13],[1320,0.16,0.13],[880,0.34,0.13],[1568,0.50,0.20],[1175,0.82,0.15],[1568,1.00,0.22]]
+          : [[880,0.00,0.13],[1320,0.16,0.13],[1568,0.34,0.20],[1175,0.62,0.14]];
+
+        tones.forEach(([frequency, offset, duration]) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "square";
+          osc.frequency.setValueAtTime(frequency, now + offset);
+          gain.gain.setValueAtTime(0.0001, now + offset);
+          gain.gain.exponentialRampToValueAtTime(0.34, now + offset + 0.012);
+          gain.gain.setValueAtTime(0.34, now + offset + Math.max(0.025, duration - 0.035));
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + duration);
+          osc.connect(gain);
+          gain.connect(compressor);
+          osc.start(now + offset);
+          osc.stop(now + offset + duration + 0.02);
+        });
+      } catch (_) {
+        try { window.QueueUI?.playNotice?.(); } catch (_) {}
+      }
+    }
+
+    const loudSoundButton = document.createElement("button");
+    loudSoundButton.type = "button";
+    loudSoundButton.className = "notification-native-toggle";
+    const syncLoudSoundButton = () => {
+      loudSoundButton.textContent = loudSoundEnabled ? "Громкий сигнал: включён" : "Громкий сигнал: выключен";
+    };
+    loudSoundButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      loudSoundEnabled = !loudSoundEnabled;
+      try { localStorage.setItem(loudSoundKey, loudSoundEnabled ? "1" : "0"); } catch (_) {}
+      syncLoudSoundButton();
+      if (loudSoundEnabled) {
+        unlockNoticeAudio();
+        window.setTimeout(() => playTriggerNotice({kind:"info"}), 80);
+      }
+    });
+    notificationPopover.append(loudSoundButton);
+    syncLoudSoundButton();
+
     let loading = false;
     const seenKey = "queue-toast-seen-v331";
     const initKey = "queue-toast-initialized-v331";
@@ -2548,7 +3147,7 @@ window.QueueVoice = (() => {
       source.textContent = String(item.source || "Единая очередь");
       const badge = document.createElement("b");
       badge.className = "toast-kind-badge";
-      badge.textContent = kind === "group" || kind === "groups" ? (item.mentioned ? "Упоминание" : "Группа") : kind === "contact" || kind === "contacts" ? "Сообщение" : kind === "ticket" || kind === "tickets" ? "Заявка" : kind === "support" ? "Поддержка" : kind === "sla" ? "SLA" : kind === "system" ? "Система" : "Событие";
+      badge.textContent = kind === "group" || kind === "groups" ? "Упоминание" : kind === "contact" || kind === "contacts" ? "Сообщение" : kind === "ticket" || kind === "tickets" ? "Заявка" : kind === "support" ? "Поддержка" : kind === "sla" ? "SLA" : kind === "system" ? "Система" : "Событие";
       meta.append(source, badge);
       const title = document.createElement("strong");
       title.textContent = String(item.title || "Новое событие");
@@ -2578,7 +3177,7 @@ window.QueueVoice = (() => {
       close.addEventListener("click", remove);
       card.append(link, close, progress);
       toastStack.prepend(card);
-      window.QueueUI?.playNotice();
+      playTriggerNotice(item);
       showNativeNotice(item);
       while (toastStack.children.length > 4) toastStack.lastElementChild.remove();
       window.setTimeout(remove, ttl);
@@ -2590,21 +3189,36 @@ window.QueueVoice = (() => {
     nativeNoticeButton.className = "notification-native-toggle";
     function syncNativeNoticeButton() {
       if (!("Notification" in window)) {
-        nativeNoticeButton.textContent = "Уведомления Windows недоступны";
+        nativeNoticeButton.textContent = "Уведомления браузера недоступны";
         nativeNoticeButton.disabled = true;
         return;
       }
       nativeNoticeButton.disabled = Notification.permission === "denied";
       nativeNoticeButton.textContent = Notification.permission === "granted"
-        ? "Уведомления Windows включены"
+        ? "Уведомления браузера: включены"
         : Notification.permission === "denied"
-          ? "Уведомления Windows заблокированы в браузере"
-          : "Включить уведомления Windows";
+          ? "Уведомления браузера заблокированы"
+          : "Включить уведомления браузера";
     }
     nativeNoticeButton.addEventListener("click", async (event) => {
       event.stopPropagation();
       if (!("Notification" in window) || Notification.permission === "denied") return;
-      try { await Notification.requestPermission(); } catch (_) {}
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === "granted") {
+          unlockNoticeAudio();
+          playTriggerNotice({kind:"info"});
+          const test = new Notification("Единая очередь", {
+            body: "Уведомления браузера включены. Новые события будут видны даже в другой вкладке.",
+            icon: absoluteAssetUrl("/static/favicon.png?v=3.3.52"),
+            badge: absoluteAssetUrl("/static/favicon.png?v=3.3.52"),
+            tag: "queue-notification-test",
+            renotify: true,
+            silent: false,
+          });
+          window.setTimeout(() => test.close(), 6000);
+        }
+      } catch (_) {}
       syncNativeNoticeButton();
     });
     notificationPopover.append(nativeNoticeButton);
@@ -2643,7 +3257,7 @@ window.QueueVoice = (() => {
         const rows = [
           ["Новые заявки", Number(counts.tickets || 0), "/"],
           ["Новые сообщения WhatsApp", Number(counts.contacts || 0), contactHref],
-          ["Новые сообщения групп", Number(counts.groups || 0), groupHref],
+          ["@ Упоминания в группах", Number(counts.groups || 0), groupHref],
           ["Вопросы в поддержку", Number(counts.support || 0), "/?category=support&status=new"],
           ["Напоминания", Number(counts.reminders || 0), "/reminders"],
           ["Системные предупреждения", Number(counts.system || 0), "/admin/system"],
@@ -2832,9 +3446,10 @@ window.QueueVoice = (() => {
       }
     }
     refresh();
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
-    window.addEventListener("focus", refresh);
-    window.setInterval(refresh, 2500);
+    document.addEventListener("visibilitychange", () => { void refresh(); });
+    window.addEventListener("focus", () => { void refresh(); });
+    window.addEventListener("queue-realtime", () => { void refresh(); });
+    window.setInterval(() => { void refresh(); }, 15000);
   }
 
   if (menu) {
@@ -2892,11 +3507,38 @@ window.QueueVoice = (() => {
   setupMediaLightbox();
   startConversationPage();
   startNotifications();
-  if (dashboard) window.setInterval(() => refreshDashboard(false), 2500);
+  startQueueRealtime();
+  if (dashboard) {
+    window.addEventListener("queue-realtime", () => { if (!document.hidden) void refreshDashboard(false); });
+    window.setInterval(() => { if (!document.hidden) refreshDashboard(false); }, 30000);
+  }
   if (autoPageRefresh) {
     const interval = Math.max(5000, Number(autoPageRefresh.dataset.autoPageRefresh) || 15000);
     window.setInterval(() => {
       if (!document.hidden) window.location.reload();
     }, interval);
   }
+})();
+
+
+// 1.00.6.129: compact chat banners and follow the logged-in employee as current shift.
+(() => {
+  const style = document.createElement("style");
+  style.textContent = `
+    .conversation-lock-banner { padding: 6px 10px !important; margin: 4px 0 !important; min-height: 0 !important; gap: 8px !important; align-items: center !important; }
+    .conversation-lock-banner > div:first-child { display: flex !important; flex: 1 1 auto !important; flex-wrap: wrap !important; align-items: baseline !important; gap: 2px 9px !important; min-width: 0 !important; }
+    .conversation-lock-banner > div:first-child strong, .conversation-lock-banner > div:first-child span { margin: 0 !important; line-height: 1.25 !important; }
+    .conversation-lock-actions { display: flex !important; flex: 0 1 auto !important; flex-wrap: nowrap !important; align-items: center !important; gap: 6px !important; margin: 0 !important; }
+    .conversation-lock-actions .lock-transfer-select { width: auto !important; max-width: min(240px, 32vw) !important; min-height: 32px !important; }
+    .conversation-lock-actions .button { min-height: 32px !important; padding: 5px 10px !important; white-space: nowrap !important; }
+    [data-forward-toolbar] { display: flex !important; flex-wrap: wrap !important; align-items: center !important; gap: 6px !important; padding: 6px 10px !important; min-height: 0 !important; overflow: visible !important; }
+    .chat-forward-toolbar-repair > [data-forward-target], .chat-forward-toolbar-repair > [data-forward-cancel], .chat-forward-toolbar-repair > [data-forward-send] { display: inline-flex !important; visibility: visible !important; opacity: 1 !important; position: static !important; }
+    [data-forward-toolbar][hidden] { display: none !important; }
+    [data-forward-toolbar] [data-forward-count] { font-size: 12px !important; line-height: 1.2 !important; }
+    [data-forward-toolbar] select, [data-forward-toolbar] button { min-height: 32px !important; padding: 5px 9px !important; }
+    [data-forward-toolbar] select { max-width: min(300px, 48vw) !important; }
+    @media (max-width: 700px) { .conversation-lock-banner { align-items: flex-start !important; flex-direction: column !important; } .conversation-lock-actions { width: 100% !important; flex-wrap: wrap !important; } .conversation-lock-actions .lock-transfer-select { flex: 1 1 160px !important; max-width: 100% !important; } }
+  `;
+  document.head.append(style);
+
 })();

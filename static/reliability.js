@@ -54,6 +54,12 @@
   }
 
   function tick(){installChatTools();installMessageInfo();maintenanceGuard();}
-  document.addEventListener('DOMContentLoaded',tick);setInterval(tick,1800);
+  // EO_PERFORMANCE_20260930: refresh after accepted chat state, with a slow fallback.
+  let reliabilityRefreshTimer=0;
+  const scheduleTick=()=>{if(document.hidden)return;clearTimeout(reliabilityRefreshTimer);reliabilityRefreshTimer=setTimeout(tick,250);};
+  document.addEventListener('DOMContentLoaded',tick);
+  window.addEventListener('queue-chat-state-accepted',scheduleTick);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});
+  setInterval(()=>{if(!document.hidden)tick();},10000);
   document.documentElement.dataset.reliabilityBuild=BUILD;
 })();

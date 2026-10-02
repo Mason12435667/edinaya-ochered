@@ -262,3 +262,17 @@
 @media (min-width:981px) and (max-width:1366px){
   .uq-interface-105 .workflow-chat-tools{width:auto!important}
 }
+
+/* 1.00.6.132: reserve space for the forwarding controls in the flex chat layout. */
+body:has([data-conversation-page]) .chat-main > .forward-toolbar,
+body:has([data-conversation-page]) .chat-main > .conversation-lock-banner,
+body:has([data-conversation-page]) .chat-main > .uq-active-tickets-strip {
+  flex: 0 0 auto !important;
+}
+body:has([data-conversation-page]) .chat-main > .forward-toolbar {
+  height: auto !important; max-height: none !important; overflow: visible !important;
+  align-items: center !important; gap: 8px !important;
+}
+body:has([data-conversation-page]) .forward-toolbar > [data-forward-count] { flex: 0 0 auto !important; }
+body:has([data-conversation-page]) .forward-toolbar > select { flex: 1 1 200px !important; width: auto !important; }
+body:has([data-conversation-page]) .forward-toolbar > button { flex: 0 0 auto !important; width: auto !important; }

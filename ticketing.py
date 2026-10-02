@@ -4,14 +4,20 @@ import queue_message_identity
 import queue_quote_lookup
 import difflib
 import json
+import logging
+import sys
+import time
 import re
 from queue_language import tolerant_labels
 import sqlite3
+import threading
 import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
+
+QUEUE_1_00_6_5_SCOPED_PRE_TICKET_MEDIA = True
 
 
 STATUSES = {
@@ -23,6 +29,7 @@ STATUSES = {
 
 CATEGORIES = {
     "bin": "Корректировка БИН",
+    "bin_company_name": "Изменение названия компании",
     "seal": "Навигационная пломба",
     "transport": "Перевозка",
     "package": "Пакет",
@@ -82,64 +89,45 @@ MENU_CATEGORIES = {
     "9": "support",
 }
 
-REQUEST_MENU = """Это автоматическая система регистрации заявок.
+REQUEST_MENU = """Бұл өтінімдерді автоматты тіркеу жүйесі.
 
-Что сделано неправильно: сначала выберите тему номером от 1 до 9. Вы отправили описание до выбора темы или указали пункт не из списка.
+Өтінімдер мәзірін ашып, қажетті мәселені таңдау үшін 1 санын жіберіңіз.
 
-Шаг 1. Сначала выберите свою проблему:
+1 санын жібермейінше, өтінімдер мәзірі ашылмайды және жүйе өтінім сипаттамасын өңдемейді."""
 
-1. Навигационная пломба / НП
-2. Перевозка
-3. Корректировка БИН
+MAIN_MENU = """Бұл өтінімдерді автоматты тіркеу жүйесі.
+
+Өтінімдер мәзірі
+
+1. Навигациялық пломба / НП
+2. Тасымалдау
+3. БИН-ді түзету
 4. Keden
-5. Пакеты
-6. База данных
-7. Мобилка
-8. Другая проблема
-9. Задать вопрос в поддержку
+5. Пакеттер
+6. Дерекқор
+7. Мобильді қосымша
+8. Басқа мәселе
+9. Қолдау қызметіне сұрақ қою
 
-Отправьте только номер пункта от 1 до 9.
-После этого система напишет, какие данные нужны на следующем шаге.
-До выбора номера заявка не создаётся"""
+Қажетті тармақтың нөмірін ғана жіберіңіз, мысалы 1, 2 немесе 3.
+Таңдағаннан кейін жүйе қажетті мәліметтерді көрсетіп, өтінімді қалай толтыру керектігін түсіндіреді.
 
-MAIN_MENU = """Это автоматическая система регистрации заявок.
-
-Главное меню обращений
-
-Выберите свою проблему:
-
-1. Навигационная пломба / НП
-2. Перевозка
-3. Корректировка БИН
-4. Keden
-5. Пакеты
-6. База данных
-7. Мобилка
-8. Другая проблема
-9. Задать вопрос в поддержку
-
-Отправьте номер пункта, затем подробно опишите, что именно не работает"""
+Бұл мәзірге кейін қайта оралу үшін 0 немесе «мәзір» сөзін жіберіңіз."""
 
 MENU_CONTEXT = "__menu__"
 MENU_GATE_CONTEXT = "__menu_gate__"
 
 BIN_WORD_PATTERN = r"бин(?:ы|ов|а|у|ом|е|ами|ах)?"
 
-BIN_TEMPLATE = """Вы выбрали: Корректировка БИН.
+BIN_TEMPLATE = """Сіз «БИН-ді түзету» бөлімін таңдадыңыз.
 
-Можно написать данные обычным текстом и в любом порядке. Строгий шаблон не нужен.
-Нужно указать:
-• старый БИН
-• новый БИН
-• номер АТС / ТС
-• название компании
-• страну
+Қажетті әрекетті таңдаңыз:
+1. Компания атауын өзгерту
+2. БИН бойынша басқа операцияға нұсқаулық алу
 
-Можно отправлять данные в нескольких сообщениях. Уже полученные поля система запомнит и спросит только то, чего не хватает.
+Өтінім тек «Компания атауын өзгерту» операциясы үшін жасалады. Қалған операциялар бойынша жүйе өтінімді тіркемей, нұсқаулық береді.
 
-Пример: старый БИН 123456789012, новый 210987654321, АТС 12345, компания Ромашка, Казахстан.
-
-Чтобы вернуться к выбору проблемы, отправьте 0, «меню», «назад» или «сначала»."""
+1 немесе 2 нөмірін жіберіңіз. Негізгі мәзірге оралу үшін 0 жіберіңіз."""
 
 
 def utc_now() -> str:
@@ -275,7 +263,7 @@ def parse_bin_request(text: str) -> tuple[dict[str, str], list[str]]:
         ),
         "company": _find_labeled_value(
             lines,
-            [r"название\s+компании", r"компания", r"наименование\s+компании"],
+            [r"название\s+компании", r"компания", r"наименование\s+компании", r"компания\s+атауы"],
         ),
         "country": _find_labeled_value(
             lines,
@@ -305,33 +293,40 @@ def parse_bin_request(text: str) -> tuple[dict[str, str], list[str]]:
 def build_missing_bin_reply(missing: list[str]) -> str:
     missing_block = ", ".join(missing)
     return (
-        f"Почти готово. Не хватает: {missing_block}.\n"
-        "Отправьте только недостающие данные, уже полученные поля повторять не нужно."
+        f"Жетіспейтін мәліметтер: {missing_block}.\n"
+        "Тек жетіспейтін деректерді жіберіңіз, бұрын берілген мәліметтерді қайталаудың қажеті жоқ."
     )
 
 
 REQUEST_FIELD_LABELS = {
-    "bin_old": "старый БИН",
-    "bin_new": "новый БИН",
-    "ats_number": "номер АТС / ТС",
-    "company": "название компании",
-    "country": "страну",
-    "fio": "ФИО",
-    "post": "пост",
-    "reference": "номер / идентификатор",
-    "problem": "описание проблемы",
+    "bin_old": "ескі БИН",
+    "bin_number": "компанияның БИН-ін",
+    "bin_new": "жаңа БИН",
+    "ats_number": "АТС / КҚ нөмірін",
+    "company": "компания атауын",
+    "company_old": "компанияның қазіргі атауын",
+    "company_new": "компанияның жаңа атауын",
+    "email": "электрондық поштаны",
+    "contact_phone": "байланыс телефон нөмірін",
+    "country": "елді",
+    "fio": "Аты-жөнін",
+    "post": "постты",
+    "reference": "нөмір / идентификаторды",
+    "problem": "мәселенің сипаттамасын",
 }
 
 REQUEST_REQUIRED_FIELDS = {
     "bin": ["bin_old", "bin_new", "ats_number", "company", "country"],
+    "bin_company_name": ["bin_number", "company_old", "company_new"],
     "seal": ["reference", "problem"],
     "transport": ["reference", "problem"],
     "keden": ["reference", "problem"],
+    "check_td": ["reference"],
     "package": ["reference", "problem"],
     "database": ["problem"],
     "mobile": ["problem"],
     "incident": ["problem"],
-    "general": ["fio", "post", "problem"],
+    "general": ["problem"],
     "support": ["problem"],
 }
 
@@ -361,8 +356,8 @@ def _free_problem_text(text: str, category: str, known_values: dict[str, str]) -
     explicit = _first_named_value(
         normalized,
         [
-            r"проблема", r"описание", r"что\s+не\s+работает", r"что\s+происходит",
-            r"что\s+нужно\s+сделать", r"ошибка", r"вопрос", r"что\s+именно.*",
+            r"проблема", r"описание", r"мәселе", r"сипаттама", r"мәселенің\s+сипаттамасы", r"не\s+жұмыс\s+істемейді", r"что\s+не\s+работает", r"что\s+происходит",
+            r"что\s+нужно\s+сделать", r"не\s+істеу\s+керек", r"ошибка", r"қате", r"вопрос", r"сұрақ", r"что\s+именно.*",
         ],
     )
     if explicit:
@@ -376,7 +371,7 @@ def _free_problem_text(text: str, category: str, known_values: dict[str, str]) -
     )
     pure_field_prefix = re.compile(
         r"^\s*(?:фио|пост|тп|таможенный\s+пост|стар(?:ый|ого)\s+бин|нов(?:ый|ого)\s+бин|бин\s+(?:старый|новый)|"
-        r"компания|название\s+компании|страна)\b",
+        r"компания|название\s+компании|компанияның\s+(?:қазіргі|жаңа)?\s*атауы|страна|ел)\b",
         re.IGNORECASE,
     )
     for line in normalized.splitlines():
@@ -397,7 +392,9 @@ def _free_problem_text(text: str, category: str, known_values: dict[str, str]) -
                 continue
         # Если номер и описание пришли одной строкой, убираем только сам номер,
         # а хвост строки сохраняем как описание проблемы.
-        trimmed = reference_prefix.sub("", line, count=1).strip(" .,:;-—")
+        prefix_match = reference_prefix.match(line)
+        # Words such as «не» are not identifiers: preserve «Пломба не открывается».
+        trimmed = (line[prefix_match.end():] if prefix_match and re.search(r"\d", prefix_match.group(0)) else line).strip(" .,:;-—")
         if trimmed != line.strip(" .,:;-—"):
             if trimmed:
                 lines.append(trimmed)
@@ -417,11 +414,57 @@ def _free_problem_text(text: str, category: str, known_values: dict[str, str]) -
     return ""
 
 
+def valid_company_change_fields(values: dict[str, str]) -> dict[str, str]:
+    """Keep structurally valid fields; identifiers must not become company names."""
+    result = dict(values)
+    if not re.fullmatch(r"[0-9]{12}", str(result.get("bin_number", "")).strip()):
+        result.pop("bin_number", None)
+    for key in ("company_old", "company_new"):
+        value = str(result.get(key, "")).strip()
+        tokens = value.split()
+        has_name = any(re.search(r"[^\W\d_]{2,}", t, re.UNICODE) and not re.search(r"\d", t) for t in tokens)
+        if not has_name or value.casefold().strip(" .") in {"нет", "не знаю", "неизвестно", "жоқ", "білмеймін"}:
+            result.pop(key, None)
+    if result.get("company_old") and normalize_message(result.get("company_new", "")).casefold() == normalize_message(result["company_old"]).casefold():
+        result.pop("company_new", None)
+    return result
+
+
 def extract_request_draft(text: str, category: str) -> dict[str, str]:
     normalized = tolerant_labels(normalize_message(text))
     result: dict[str, str] = {}
     if not normalized:
         return result
+    if category == "bin_company_name":
+        patterns = {
+            "bin_number": [
+                r"(?:бин(?:\s+компании)?|идентификатор\s+бин)\s*[:№#=-]?\s*([0-9]{12})(?![0-9])",
+            ],
+            "company_old": [
+                r"(?:текущее|старое|прежнее)\s+(?:название|наименование)(?:\s+компании)?\s*[:=-]?\s*([^,;\n]{2,120})",
+                r"компанияның\s+қазіргі\s+атауы\s*[:=-]?\s*([^,;\n]{2,120})",
+                r"(?:сейчас\s+(?:компания\s+)?называется)\s*[:=-]?\s*([^,;\n]{2,120})",
+            ],
+            "company_new": [
+                r"(?:новое)\s+(?:название|наименование)(?:\s+компании)?\s*[:=-]?\s*([^,;\n]{2,120})",
+                r"компанияның\s+жаңа\s+атауы\s*[:=-]?\s*([^,;\n]{2,120})",
+                r"(?:переименовать\s+(?:компанию\s+)?в)\s*[:=-]?\s*([^,;\n]{2,120})",
+            ],
+        }
+        for key, pats in patterns.items():
+            value = _extract_value(normalized, pats)
+            if value:
+                result[key] = value
+        # Accept the three-line form shown by the bot, or a standalone BIN.
+        lines = [_clean_numbered_value(line) for line in normalized.splitlines() if line.strip()]
+        if len(lines) == 3 and re.fullmatch(r"[0-9]{12}", lines[0]):
+            result.setdefault("bin_number", lines[0])
+            result.setdefault("company_old", lines[1])
+            result.setdefault("company_new", lines[2])
+        elif re.fullmatch(r"[0-9]{12}", normalized):
+            result.setdefault("bin_number", normalized)
+        return valid_company_change_fields(result)
+
     if category == "bin":
         values, _ = parse_bin_request(normalized)
         result.update({key: value for key, value in values.items() if value})
@@ -468,6 +511,11 @@ def extract_request_draft(text: str, category: str) -> dict[str, str]:
                 normalized,
             )
             fio = m.group(1) if m else ""
+    # A complaint must not be inferred as a person's name merely from 2–3 words.
+    if category == "general" and re.search(
+        r"(?i)(?:\bне\s+|ошиб|проблем|сбой|завис|неактив|откр|закр|нужно|требуется|мәселе|қате|істем|ашылмай|көрінб)", normalized
+    ):
+        fio = _first_named_value(normalized, [r"фио", r"ф\.?и\.?о\.?"])
     post = _first_named_value(normalized, [r"пост", r"название\s+поста", r"тп", r"таможенный\s+пост"])
     if not post and category == "general":
         post_match = re.search(
@@ -488,6 +536,7 @@ def extract_request_draft(text: str, category: str) -> dict[str, str]:
         ],
         "transport": [r"(?:номер\s+)?(?:перевозк(?:а|и)|тс|атс|тд)\s*[:№#-]?\s*([A-ZА-Я0-9/-]{2,})"],
         "keden": [r"(?:номер\s+)?(?:перевозк(?:а|и)|тд)\s*[:№#-]?\s*([A-ZА-Я0-9/-]{2,})"],
+        "check_td": [r"(?:номер\s+)?(?:перевозк(?:а|и)|тд|декларац(?:ия|ии))\s*[:№#-]?\s*([A-ZА-Я0-9/-]{2,})"],
         "package": [r"(?:номер\s+)?(?:пакет(?:а)?|перевозк(?:а|и)|тд)\s*[:№#-]?\s*([A-ZА-Я0-9/-]{2,})"],
         "database": [r"(?:номер\s+)?(?:перевозк(?:а|и)|тд|декларац(?:ия|ии))\s*[:№#-]?\s*([A-ZА-Я0-9/-]{2,})"],
     }
@@ -500,7 +549,7 @@ def extract_request_draft(text: str, category: str) -> dict[str, str]:
                 break
         if ref:
             break
-    if not ref and category in {"seal", "transport", "keden", "package"}:
+    if not ref and category in {"seal", "transport", "keden", "package", "check_td"}:
         # Если пользователь прислал отдельным сообщением только номер, принимаем его как reference.
         only = normalized.strip(" .,:;#№")
         if re.fullmatch(r"[A-ZА-Я0-9/-]{3,}", only, re.IGNORECASE) and re.search(r"\d", only):
@@ -600,16 +649,24 @@ def build_missing_request_reply(category: str, missing_keys: list[str]) -> str:
     if not labels:
         return ""
     if len(labels) == 1:
-        question = f"Укажите, пожалуйста, {labels[0]}."
+        question = f"{labels[0]} көрсетіңіз."
     else:
-        question = "Не хватает только: " + ", ".join(labels) + "."
+        question = "Қосымша көрсету қажет: " + ", ".join(labels) + "."
     return (
         f"{question}\n"
-        "Остальные данные уже запомнил, повторять их не нужно. Можно ответить обычным текстом."
+        "Қалған мәліметтер сақталды, оларды қайталаудың қажеті жоқ. Қарапайым мәтінмен жауап беруге болады."
     )
 
 
 def request_draft_text(category: str, draft: dict[str, str]) -> str:
+    if category == "bin_company_name":
+        return "\n".join(
+            [
+                f"БИН компании: {draft.get('bin_number', '')}",
+                f"Текущее название компании: {draft.get('company_old', '')}",
+                f"Новое название компании: {draft.get('company_new', '')}",
+            ]
+        )
     if category == "bin":
         return "\n".join(
             [
@@ -634,6 +691,19 @@ def request_draft_text(category: str, draft: dict[str, str]) -> str:
             "database": "Номер перевозки / ТД / декларации",
         }.get(category, "Номер")
         parts.append(f"{reference_label}: {draft['reference']}")
+    dynamic_labels = {
+        "email": "Электронная почта",
+        "contact_phone": "Контактный телефон",
+        "bin_number": "БИН компании",
+        "company_old": "Текущее название компании",
+        "company_new": "Новое название компании",
+        "company": "Название компании",
+        "country": "Страна",
+    }
+    for key, label in dynamic_labels.items():
+        value = normalize_message(str(draft.get(key, "")))
+        if value and not any(line.startswith(f"{label}:") for line in parts):
+            parts.append(f"{label}: {value}")
     if draft.get("problem"):
         parts.append(f"Проблема: {draft['problem']}")
     return "\n".join(parts)
@@ -688,6 +758,7 @@ def is_main_menu_command(text: str) -> bool:
     return normalized in {
         "0", "меню", "главное меню", "назад", "сначала", "отмена",
         "вернуться", "вернуться назад", "начать заново", "мню", "менб", "менюу",
+        "мәзір", "негізгі мәзір", "артқа", "басынан", "қайта бастау",
     }
 
 
@@ -800,15 +871,7 @@ def request_detail_issues(text: str, category: str) -> list[str]:
 
     issues: list[str] = []
     if category == "general":
-        has_fio = bool(
-            re.search(r"\bфио\b\s*[:\-]?\s*\S+\s+\S+", lower)
-            or re.search(r"\b[А-ЯЁ][а-яё]{1,}\s+[А-ЯЁ][а-яё]{1,}\b", normalized)
-        )
-        has_post = bool(re.search(r"\bпост\b\s*[:\-]?\s*[a-zа-яё0-9]", lower))
-        if not has_fio:
-            issues.append("Не указано ФИО")
-        if not has_post:
-            issues.append("Не указан пост")
+        # С 1.00.6 ФИО и пост являются полезными, но необязательными полями.
         if not problem_described:
             issues.append("Не описано, что именно не работает")
         return issues
@@ -816,77 +879,109 @@ def request_detail_issues(text: str, category: str) -> list[str]:
         return []
 
     identifier_labels = {
-        "seal": "Не указан номер НП или пломбы",
-        "transport": "Не указан номер перевозки, ТС или ТД",
-        "keden": "Не указан номер перевозки, которую не видит Keden",
-        "package": "Не указан номер пакета, перевозки или ТД",
+        "seal": "НП немесе пломба нөмірі көрсетілмеген",
+        "transport": "Тасымалдау, КҚ немесе ТД нөмірі көрсетілмеген",
+        "keden": "Keden көрмейтін тасымалдау нөмірі көрсетілмеген",
+        "package": "Пакет, тасымалдау немесе ТД нөмірі көрсетілмеген",
     }
     if category in identifier_labels and not has_identifier:
         issues.append(identifier_labels[category])
     if not problem_described:
-        issues.append("Не описано, что нужно сделать или что именно не работает")
+        issues.append("Не істеу керектігі немесе нақты не жұмыс істемейтіні сипатталмаған")
     return issues
 
 
 def request_detail_error_reply(text: str, category: str) -> str:
     issues = request_detail_issues(text, category)
     issue_block = "\n".join(f"• {issue}" for issue in issues)
+    label = {
+        "seal": "Навигациялық пломба",
+        "transport": "Тасымалдау",
+        "bin": "БИН-ді түзету",
+        "keden": "КЕДЕН",
+        "package": "Пакеттер",
+        "database": "Дерекқор",
+        "mobile": "TRANSIT мобильді қосымшасы",
+        "general": "Басқа өтінім",
+        "support": "Қолдау қызметіне сұрақ",
+    }.get(category, CATEGORIES.get(category, category))
     return (
-        f"Заявку пока нельзя создать. В теме «{CATEGORIES.get(category, category)}» не хватает данных:\n"
+        f"Өтінімді әзірге тіркеу мүмкін емес. «{label}» санатында мәліметтер жетіспейді:\n"
         f"{issue_block}\n\n"
-        "Ниже пример, на который можно ориентироваться. Дополните, пожалуйста, недостающие данные. "
-        "Их можно прислать несколькими сообщениями.\n\n"
+        "Жетіспейтін мәліметтерді толықтырыңыз. Оларды бірнеше хабарламамен жіберуге болады.\n\n"
         f"{category_prompt(category)}"
     )
 
 
 def category_prompt(category: str) -> str:
+    if category == "bin_company_name":
+        return (
+            "Сіз «Компания атауын өзгерту» операциясын таңдадыңыз.\n\n"
+            "Өтінімді тіркеу үшін мыналарды ұсыну қажет:\n"
+            "• компанияның БИН-і;\n"
+            "• компанияның қазіргі атауы;\n"
+            "• компанияның жаңа атауы.\n\n"
+            "Мәліметтерді бір хабарламамен немесе кезекпен жіберуге болады. Жүйе алынған ақпаратты сақтап, тек жетіспейтін мәліметтерді сұрайды.\n"
+            "Қажет болған жағдайда растаушы файлды немесе скриншотты тіркеңіз.\n\n"
+            "Негізгі мәзірге оралу үшін 0 жіберіңіз."
+        )
     if category == "bin":
         return BIN_TEMPLATE
-    label = CATEGORIES.get(category, "Другая проблема")
-    required = {
-        "seal": "номер НП / пломбы и что нужно сделать",
-        "transport": "номер перевозки, ТС или ТД и описание проблемы",
-        "keden": "номер перевозки / ТД и что именно Keden не видит или не принимает",
-        "package": "номер пакета, перевозки или ТД и описание проблемы",
-        "database": "что именно не отображается или работает неправильно; номер можно добавить, если он есть",
-        "mobile": "что вы делаете и что происходит / какой текст ошибки",
-        "general": "ФИО, пост и описание проблемы",
-        "support": "ваш вопрос",
-    }.get(category, "описание проблемы")
-    examples = {
-        "seal": "Например: НП 123456 не отображается в базе, нужно открыть",
-        "transport": "Например: перевозка 123456, статус завис и не меняется",
-        "keden": "Например: перевозка 123456, Keden её не видит",
-        "package": "Например: пакет 123456 повреждён, нужно заменить",
-        "database": "Например: в базе не выходит ТД 123456",
-        "mobile": "Например: в разделе проверки нажимаю «Открыть», появляется ошибка 500",
-        "general": "Например: Иванов Иван, пост Алмалы, не выходит перевозка в базе",
-        "support": "Напишите вопрос обычным сообщением",
-    }.get(category, "")
-    return (
-        f"Вы выбрали: {label}.\n\n"
-        "Строгий шаблон не нужен. Напишите обычным текстом, в любом порядке. "
-        "Можно отправить данные в нескольких сообщениях.\n"
-        f"Нужно: {required}.\n"
-        + (f"{examples}.\n" if examples else "")
-        + "Если чего-то не хватит, система запомнит уже полученные данные и спросит только недостающее.\n"
-        "Фото или скриншот можно приложить отдельно.\n\n"
-        "Чтобы вернуться в меню, отправьте 0."
-    )
+    prompts = {
+        "seal": (
+            "Тақырып таңдалды: Навигациялық пломба.\n"
+            "НП немесе пломба нөмірін көрсетіп, не істеу керектігін немесе не жұмыс істемейтінін жазыңыз. Мысал: НП 398423874 ашылмайды.\n"
+            "Егер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n"
+            "0 — негізгі мәзірге оралу"
+        ),
+        "transport": (
+            "Тақырып таңдалды: Тасымалдау.\n"
+            "Тасымалдау нөмірін, КҚ, пломба немесе ТД нөмірін көрсетіп, мәселені толық сипаттаңыз.\n"
+            "Егер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n"
+            "0 — негізгі мәзірге оралу"
+        ),
+        "keden": "Егер КЕДЕН біздің тасымалдауды (НП) көрмесе, КЕДЕН техникалық қолдау қызметіне жазыңыз. Олар осы ТД бойынша пакеттерді қайта жібереді.",
+        "package": (
+            "Тақырып таңдалды: Пакеттер.\n"
+            "Пакет, тасымалдау немесе ТД нөмірін көрсетіп, мәселені толық сипаттаңыз.\n"
+            "0 — негізгі мәзірге оралу"
+        ),
+        "database": (
+            "Тақырып таңдалды: Дерекқор.\n"
+            "Қандай мәселе туындағанын жазыңыз және өзіңіздің немесе басқа пайдаланушының электрондық поштасын көрсетіңіз.\n"
+            "Егер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n"
+            "0 — негізгі мәзірге оралу"
+        ),
+        "mobile": (
+            "Тақырып таңдалды: TRANSIT мобильді қосымшасы.\n"
+            "Мобильді қосымшаның қай бөлімі жұмыс істемейтінін, нені басатыныңызды және қандай қате шығатынын жазыңыз.\n"
+            "Егер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n"
+            "0 — негізгі мәзірге оралу"
+        ),
+        "general": (
+            "Тақырып таңдалды: Басқа өтінім.\n"
+            "Егер жоғарыдағы санаттардың ешқайсысы мәселеңізге сәйкес келмесе, мәселені сипаттап жазыңыз.\n"
+            "Егер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n"
+            "0 — негізгі мәзірге оралу"
+        ),
+        "support": (
+            "Тақырып таңдалды: Қолдау қызметіне сұрақ.\n"
+            "Сұрағыңызды еркін түрде жазыңыз. Арнайы үлгі қажет емес. Егер өтініш жоғарыдағы санаттардың біріне қатысты болса, ол қабылданбауы мүмкін.\n"
+            "Егер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n"
+            "0 — негізгі мәзірге оралу"
+        ),
+    }
+    return prompts.get(category, "Мәселені сипаттап жазыңыз.\n0 — негізгі мәзірге оралу")
 
 
 def is_acknowledgement(text: str) -> bool:
-    # Короткие благодарности/подтверждения не должны случайно создавать новую
-    # заявку. Убираем эмодзи, квадраты замены и прочую пунктуацию, чтобы
-    # «Рахмет 🙏», «Спасибо 👍» и похожие ответы распознавались стабильно.
     normalized = normalize_message(text).casefold()
     normalized = re.sub(r"[^\w\s]+", " ", normalized, flags=re.UNICODE)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return bool(
         re.fullmatch(
-            r"(?:спасибо(?:\s+большое)?|спс|благодарю|рахмет(?:\s+большое)?|"
-            r"ок(?:ей)?|понял(?:а)?|хорошо|ясно|принято|готово)",
+            r"(?:спасибо(?:\s+большое)?|спс|благодарю|рахмет(?:\s+большое)?|рақмет|"
+            r"ок(?:ей)?|понял(?:а)?|хорошо|ясно|принято|готово|түсіндім|жақсы|жарайды)",
             normalized,
         )
     )
@@ -1062,6 +1157,40 @@ def process_incoming_message(
     # Явно выбранная пользователем категория всегда имеет приоритет над
     # автоопределением по тексту. Например, вопрос в поддержку может содержать
     # слово «БИН», но это не должно внезапно запускать шаблон корректировки БИН.
+    if forced_category == "bin_company_name":
+        values = extract_request_draft(normalized, "bin_company_name")
+        missing_keys = [
+            key for key in REQUEST_REQUIRED_FIELDS["bin_company_name"]
+            if not normalize_message(str(values.get(key, "")))
+        ]
+        if missing_keys:
+            return {
+                "created": False,
+                "reply": build_missing_request_reply(missing_keys),
+                "missing": missing_keys,
+            }
+        summary = (
+            f"БИН: {values['bin_number']}\n"
+            f"Текущее название: {values['company_old']}\n"
+            f"Новое название: {values['company_new']}"
+        )
+        return {
+            "created": True,
+            "ticket": {
+                "source": "whatsapp",
+                "sender": sender or "Неизвестный отправитель",
+                "phone": phone,
+                "chat_id": chat_id,
+                "external_id": external_id,
+                "category": "bin_company_name",
+                "priority": "normal",
+                "title": "Изменение названия компании",
+                "summary": summary,
+                "original_text": normalized,
+                "attachment_name": attachment_name,
+            },
+        }
+
     if forced_category == "bin" or (not forced_category and is_bin_request(normalized)):
         values, missing = parse_bin_request(normalized)
         if missing:
@@ -1120,25 +1249,68 @@ class TicketStore:
     def __init__(self, database_path: str | Path):
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._transaction_state = threading.local()
         self.initialize()
 
     @contextmanager
+    def atomic_inbound(self):
+        """Commit the dedup marker and all inbound DB effects together."""
+        if getattr(self._transaction_state, "connection", None) is not None:
+            yield self._transaction_state.connection
+            return
+        with self.connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._transaction_state.connection = connection
+            try:
+                yield connection
+            except BaseException:
+                connection.rollback()
+                raise
+            finally:
+                self._transaction_state.connection = None
+
+    @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.database_path, timeout=15)
-        connection.row_factory = sqlite3.Row
-        connection.create_function("FOLD", 1, lambda value: normalize_message(str(value or "")).casefold())
-        connection.create_function("DIGITS", 1, lambda value: re.sub(r"\D", "", str(value or "")))
-        connection.execute("PRAGMA busy_timeout = 15000")
-        connection.execute("PRAGMA synchronous = NORMAL")
-        connection.execute("PRAGMA temp_store = MEMORY")
-        connection.execute("PRAGMA cache_size = -32768")
-        connection.execute("PRAGMA mmap_size = 134217728")
-        connection.execute("PRAGMA wal_autocheckpoint = 1000")
+        shared = getattr(self._transaction_state, "connection", None)
+        if shared is not None:
+            yield shared
+            return
+        started = time.monotonic()
+        caller = sys._getframe(2).f_code.co_name
+        connection = None
+        failed = False
         try:
+            connection = sqlite3.connect(self.database_path, timeout=15)
+            connection.row_factory = sqlite3.Row
+            connection.create_function("FOLD", 1, lambda value: normalize_message(str(value or "")).casefold())
+            connection.create_function("DIGITS", 1, lambda value: re.sub(r"\D", "", str(value or "")))
+            connection.execute("PRAGMA busy_timeout = 15000")
+            connection.execute("PRAGMA synchronous = NORMAL")
+            connection.execute("PRAGMA temp_store = MEMORY")
+            connection.execute("PRAGMA cache_size = -32768")
+            connection.execute("PRAGMA mmap_size = 134217728")
+            connection.execute("PRAGMA wal_autocheckpoint = 1000")
             yield connection
             connection.commit()
+        except BaseException as error:
+            failed = True
+            if connection is not None:
+                connection.rollback()
+            logging.getLogger(__name__).warning(
+                "[db141] operation=%s duration=%.3fs error=%s thread=%s",
+                caller, time.monotonic() - started, type(error).__name__,
+                threading.current_thread().name,
+            )
+            raise
         finally:
-            connection.close()
+            if connection is not None:
+                connection.close()
+            elapsed = time.monotonic() - started
+            if elapsed >= 2.0 and not failed:
+                logging.getLogger(__name__).warning(
+                    "[db141] slow operation=%s duration=%.3fs thread=%s",
+                    caller, elapsed, threading.current_thread().name,
+                )
 
     def initialize(self) -> None:
         with self.connection() as connection:
@@ -1545,6 +1717,10 @@ class TicketStore:
                 "UPDATE whatsapp_chat_messages SET ack = 1 "
                 "WHERE from_me = 1 AND ack < 1"
             )
+            # Alias reconciliation updates these columns once per alias.
+            # Without indexes every alias scans all tickets and outbound rows.
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_db141_tickets_chat ON tickets(chat_id)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_db141_outbound_chat ON outbound_messages(chat_id)")
             self._merge_whatsapp_lid_aliases(connection)
             # Let SQLite refresh planner statistics for the newly created indexes.
             connection.execute("PRAGMA optimize")
@@ -1698,8 +1874,20 @@ class TicketStore:
                 (alias, canonical, now),
             )
 
+        # Retain every mapping, but reconcile only aliases that still own data.
+        # Re-running thousands of already completed merges held the write lock
+        # on every message/chat sync, delaying unrelated replies and UI requests.
         aliases = connection.execute(
-            "SELECT alias_id, canonical_id FROM whatsapp_chat_aliases WHERE alias_id<>canonical_id"
+            """SELECT a.alias_id, a.canonical_id FROM whatsapp_chat_aliases AS a
+               WHERE a.alias_id<>a.canonical_id AND (
+                   EXISTS(SELECT 1 FROM whatsapp_chat_messages WHERE chat_id=a.alias_id)
+                   OR EXISTS(SELECT 1 FROM whatsapp_chats WHERE chat_id=a.alias_id)
+                   OR EXISTS(SELECT 1 FROM whatsapp_contacts WHERE chat_id=a.alias_id)
+                   OR EXISTS(SELECT 1 FROM conversation_contexts WHERE contact_key=a.alias_id)
+                   OR EXISTS(SELECT 1 FROM whatsapp_call_permissions WHERE contact_key=a.alias_id)
+                   OR EXISTS(SELECT 1 FROM tickets WHERE chat_id=a.alias_id)
+                   OR EXISTS(SELECT 1 FROM outbound_messages WHERE chat_id=a.alias_id)
+               )"""
         ).fetchall()
         for row in aliases:
             alias = normalize_message(str(row["alias_id"] or ""))[:120]
@@ -2898,11 +3086,14 @@ class TicketStore:
         lookback_seconds: int = 600,
         limit: int = 12,
     ) -> list[str]:
-        """Attach recent unassigned inbound images sent before ticket creation.
+        """Attach only pre-ticket images that belong to this ticket context.
 
-        This is intentionally limited to private chats. Group chats can contain
-        several senders and must never donate another participant's image to a
-        ticket. Only locally preserved images with ticket_id=0 are considered.
+        Earlier builds attached every recent unassigned image from the private chat.
+        That could pull an unrelated screenshot from a previous conversation into a
+        newly created ticket. 1.00.6.5 requires the WhatsApp message to be present
+        in ticket_context_history for the ticket that has just been committed.
+        Therefore an image is auto-attached only when it was received while the
+        user was already filling the current request/category.
         """
         clean_chat_id = normalize_message(chat_id)[:120]
         try:
@@ -2926,35 +3117,49 @@ class TicketStore:
 
         with self.connection() as connection:
             canonical = self._canonical_whatsapp_chat_id(connection, clean_chat_id)
-            params: list[Any] = [canonical]
+            # Contextual history is created by queue_contextual_tickets while the
+            # user is filling the chosen category. commit_ticket() assigns the
+            # current ticket_id to that session before this method is called.
+            # Joining through that history prevents unrelated recent screenshots
+            # from being donated to a new ticket merely because they are recent.
+            params: list[Any] = [canonical, safe_ticket_id]
             time_clause = ""
             if safe_before > 0:
                 cutoff = max(0, safe_before - safe_lookback)
-                time_clause = "AND message_timestamp BETWEEN ? AND ?"
+                time_clause = "AND w.message_timestamp BETWEEN ? AND ?"
                 params.extend([cutoff, safe_before])
             else:
-                # A missing provider timestamp is unusual, but should not make the
-                # feature unusable. In that case use the local receive time only.
                 cutoff_iso = (datetime.now(timezone.utc) - timedelta(seconds=safe_lookback)).isoformat()
-                time_clause = "AND created_at >= ?"
+                time_clause = "AND w.created_at >= ?"
                 params.append(cutoff_iso)
             params.append(safe_limit)
-            rows = connection.execute(
-                f"""
-                SELECT id, message_key
-                FROM whatsapp_chat_messages
-                WHERE chat_id = ?
-                  AND from_me = 0
-                  AND ticket_id = 0
-                  AND deleted = 0
-                  AND media_path <> ''
-                  AND (media_mime LIKE 'image/%' OR message_type = 'image')
-                  {time_clause}
-                ORDER BY message_timestamp DESC, id DESC
-                LIMIT ?
-                """,
-                params,
-            ).fetchall()
+            try:
+                rows = connection.execute(
+                    f"""
+                    SELECT DISTINCT w.id, w.message_key, w.message_timestamp
+                    FROM whatsapp_chat_messages AS w
+                    INNER JOIN ticket_context_history AS h
+                      ON h.message_key = w.message_key
+                     AND h.ticket_id = ?
+                     AND h.event_type = 'message_received'
+                    WHERE w.chat_id = ?
+                      AND w.from_me = 0
+                      AND w.ticket_id = 0
+                      AND w.deleted = 0
+                      AND w.media_path <> ''
+                      AND (w.media_mime LIKE 'image/%' OR w.message_type = 'image')
+                      {time_clause}
+                    ORDER BY w.message_timestamp DESC, w.id DESC
+                    LIMIT ?
+                    """,
+                    [safe_ticket_id, canonical, *params[2:]],
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                # On an incomplete/legacy database it is safer to attach nothing
+                # than to fall back to the old broad recent-image behaviour.
+                if "ticket_context_history" in str(exc).casefold():
+                    return []
+                raise
             if not rows:
                 return []
             row_ids = [int(row["id"]) for row in rows]
@@ -2964,7 +3169,6 @@ class TicketStore:
                 f"WHERE ticket_id = 0 AND id IN ({placeholders})",
                 [safe_ticket_id, *row_ids],
             )
-            # Return chronological provider keys for diagnostics/tests.
             return [str(row["message_key"]) for row in reversed(rows)]
 
     def list_ticket_whatsapp_media(
@@ -3005,23 +3209,20 @@ class TicketStore:
     def resolve_whatsapp_message(self, chat_id: str, message_key: str):
         return queue_quote_lookup.resolve(self, chat_id, message_key)
 
+    # QUEUE_1_00_4_POSTRELEASE_CLEANUP: reply-queue calculation removed; only real chat activity remains.
     def chat_activity(self):
         """One indexed lookup per chat, including groups. No per-message SQL."""
         with self.connection() as connection:
             rows = connection.execute("""
-                SELECT m.*, n.from_me AS relevant_from_me, n.message_timestamp AS waiting_since
+                SELECT m.*
                 FROM whatsapp_chats c JOIN whatsapp_chat_messages m ON m.id=(SELECT id FROM whatsapp_chat_messages
                          WHERE chat_id=c.chat_id AND deleted=0 ORDER BY message_timestamp DESC, id DESC LIMIT 1)
-                LEFT JOIN whatsapp_chat_messages n ON n.id=(SELECT id FROM whatsapp_chat_messages
-                    WHERE chat_id=c.chat_id AND deleted=0 AND NOT (from_me=1 AND sender='Система')
-                    ORDER BY message_timestamp DESC, id DESC LIMIT 1)
             """).fetchall()
         return {row["chat_id"]: {
             "last_sender": row["sender"], "last_sender_id": row["sender_id"],
             "last_from_me": bool(row["from_me"]), "last_message": row["body"] or queue_message_identity.media_label(dict(row)),
             "last_ack": int(row["ack"] or 0),
             "timestamp": row["message_timestamp"],
-            "needs_reply": row["relevant_from_me"] == 0, "waiting_since": row["waiting_since"] or 0,
         } for row in rows}
 
     def get_whatsapp_message(self, chat_id: str, message_key: str) -> dict[str, Any] | None:
@@ -3229,6 +3430,38 @@ class TicketStore:
 
     def notification_events(self, limit: int = 12) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
+
+        # QUEUE_1_00_5_REPLY_LIGHT_INSTRUCTION: recognise a real WhatsApp Reply
+        # to one of our outgoing messages. Exact provider ID is preferred; the
+        # stanza fallback covers the same message seen through @lid/@c.us aliases.
+        def quoted_outgoing(connection: sqlite3.Connection, chat_id: str, quoted_key: str):
+            key = normalize_message(str(quoted_key or ""))[:160]
+            if not key:
+                return None
+            row = connection.execute(
+                """SELECT message_key, body, media_name, sender, message_timestamp
+                   FROM whatsapp_chat_messages
+                   WHERE chat_id=? AND from_me=1 AND deleted=0 AND message_key=?
+                   ORDER BY id DESC LIMIT 1""",
+                (chat_id, key),
+            ).fetchone()
+            if row is not None:
+                return row
+            _, stanza = queue_message_identity.parts(key)
+            if len(stanza) < 8:
+                return None
+            candidates = connection.execute(
+                """SELECT message_key, body, media_name, sender, message_timestamp
+                   FROM whatsapp_chat_messages
+                   WHERE chat_id=? AND from_me=1 AND deleted=0 AND substr(message_key, -?)=?
+                   ORDER BY id DESC LIMIT 12""",
+                (chat_id, len(stanza), stanza),
+            ).fetchall()
+            for candidate in candidates:
+                if queue_message_identity.same(str(candidate["message_key"] or ""), key):
+                    return candidate
+            return None
+
         with self.connection() as connection:
             tickets = connection.execute(
                 """SELECT id, sender, phone, category, title, created_at
@@ -3249,7 +3482,9 @@ class TicketStore:
             contacts = connection.execute(
                 """SELECT c.chat_id, COALESCE(NULLIF(m.name,''), c.name, '') AS name,
                           w.body AS last_message, w.message_timestamp AS last_timestamp,
-                          COALESCE(m.phone,'') AS phone, w.message_key
+                          COALESCE(m.phone,'') AS phone, w.message_key,
+                          w.quoted_message_key, w.quoted_body, w.quoted_sender,
+                          w.media_name AS last_media_name
                    FROM whatsapp_chats AS c
                    LEFT JOIN whatsapp_contacts AS m ON m.chat_id = c.chat_id
                    JOIN whatsapp_chat_messages w ON w.id=(SELECT id FROM whatsapp_chat_messages WHERE chat_id=c.chat_id AND from_me=0 AND deleted=0 ORDER BY message_timestamp DESC,id DESC LIMIT 1)
@@ -3266,19 +3501,29 @@ class TicketStore:
                 if source_name.casefold() in {"система", "system", "рабочий whatsapp"}:
                     source_name = ""
                 source_phone = str(row["phone"] or "").strip() or (f"+{fallback_phone}" if fallback_phone.isdigit() else "")
+                quoted = quoted_outgoing(connection, chat_id, str(row["quoted_message_key"] or ""))
+                is_reply = quoted is not None
+                reply_text = str(row["last_message"] or row["last_media_name"] or "Новое сообщение")
+                quoted_context = ""
+                if quoted is not None:
+                    quoted_context = str(quoted["body"] or quoted["media_name"] or row["quoted_body"] or "Сообщение")[:500]
+                event_prefix = "reply" if is_reply else "contact"
                 events.append({
-                    "id": f"contact:{chat_id}:{row['message_key']}",
+                    "id": f"{event_prefix}:{chat_id}:{row['message_key']}",
                     "chat_id": chat_id, "message_key": row["message_key"],
                     "kind": "contact",
-                    "title": "Новое сообщение WhatsApp",
-                    "detail": str(row["last_message"] or "Новое сообщение"),
+                    "reply_to_our_message": is_reply,
+                    "title": "Ответ на ваше сообщение" if is_reply else "Новое сообщение WhatsApp",
+                    "detail": reply_text,
+                    "context": quoted_context,
                     "source": " · ".join(part for part in [source_name, source_phone] if part) or "WhatsApp",
-                    "href": f"/whatsapp?chat_id={chat_id}",
+                    "href": f"/whatsapp?chat_id={chat_id}&message_id={row['message_key']}",
                     "timestamp": int(row["last_timestamp"] or 0),
                 })
             groups = connection.execute(
                 """SELECT c.chat_id, g.name, w.body AS last_message, w.message_timestamp AS last_timestamp,
-                          w.message_key, w.notify
+                          w.message_key, w.notify, w.quoted_message_key, w.quoted_body, w.quoted_sender,
+                          w.media_name AS last_media_name
                    FROM whatsapp_chats AS c
                    INNER JOIN whatsapp_groups AS g ON g.chat_id = c.chat_id
                    JOIN whatsapp_chat_messages w ON w.id=(
@@ -3293,15 +3538,24 @@ class TicketStore:
             ).fetchall()
             for row in groups:
                 mentioned = bool(row["notify"])
+                group_chat_id = str(row["chat_id"] or "")
+                quoted = quoted_outgoing(connection, group_chat_id, str(row["quoted_message_key"] or ""))
+                is_reply = quoted is not None
+                quoted_context = str(quoted["body"] or quoted["media_name"] or row["quoted_body"] or "Сообщение")[:500] if quoted is not None else ""
+                title = "Ответ на ваше сообщение в группе" if is_reply else ("Упоминание в группе" if mentioned else "Новое сообщение в группе")
+                detail = str(row["last_message"] or row["last_media_name"] or ("Вас упомянули" if mentioned else "Новое сообщение"))
+                event_prefix = "group-reply" if is_reply else "group"
                 events.append({
-                    "id": f"group:{row['chat_id']}:{row['message_key']}",
-                    "chat_id": row["chat_id"], "message_key": row["message_key"],
+                    "id": f"{event_prefix}:{group_chat_id}:{row['message_key']}",
+                    "chat_id": group_chat_id, "message_key": row["message_key"],
                     "kind": "group",
                     "mentioned": mentioned,
-                    "title": "Упоминание в группе" if mentioned else "Новое сообщение в группе",
-                    "detail": str(row["last_message"] or ("Вас упомянули" if mentioned else "Новое сообщение")),
+                    "reply_to_our_message": is_reply,
+                    "title": title,
+                    "detail": detail,
+                    "context": quoted_context,
                     "source": str(row["name"] or "Группа WhatsApp"),
-                    "href": f"/groups?chat_id={row['chat_id']}",
+                    "href": f"/groups?chat_id={group_chat_id}&message_id={row['message_key']}",
                     "timestamp": int(row["last_timestamp"] or 0),
                 })
         events.sort(key=lambda item: int(item.get("timestamp", 0) or 0), reverse=True)
@@ -3546,27 +3800,30 @@ class TicketStore:
         return None
 
     def enable_manual_chat_mode(self, chat_id: str, actor: str, minutes: int = 30) -> bool:
-        """Выключить автоответчик явным действием сотрудника.
-
-        Параметр ``minutes`` оставлен только для совместимости со старым кодом.
-        Начиная с 3.3.25 состояние не истекает по таймеру: автоответчик остаётся
-        выключенным, пока сотрудник сам не включит его обратно.
-        """
+        """Employee opt-outs persist; automatic review pauses expire."""
         chat_id = normalize_message(chat_id)[:120]
         if not chat_id or chat_id.endswith("@g.us"):
             return False
         now = datetime.now(timezone.utc).replace(microsecond=0)
         # Существующая таблица требует expires_at. Используем далёкую дату как
         # постоянное состояние, чтобы не менять схему БД при обновлении.
-        expires = "9999-12-31T23:59:59+00:00"
+        automatic = actor == "Бот: нужен разбор"
+        expires = ((now + timedelta(minutes=max(1, min(120, int(minutes))))).isoformat()
+                   if automatic else "9999-12-31T23:59:59+00:00")
         with self.connection() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """INSERT INTO whatsapp_manual_chat_modes(chat_id, expires_at, actor, updated_at)
                    VALUES (?, ?, ?, ?)
-                   ON CONFLICT(chat_id) DO UPDATE SET expires_at = excluded.expires_at, actor = excluded.actor, updated_at = excluded.updated_at""",
+                   ON CONFLICT(chat_id) DO UPDATE SET expires_at = excluded.expires_at, actor = excluded.actor, updated_at = excluded.updated_at
+                   WHERE excluded.actor <> 'Бот: нужен разбор'
+                      OR whatsapp_manual_chat_modes.actor = 'Бот: нужен разбор'""",
                 (chat_id, expires, actor, now.isoformat()),
             )
-            self._audit(connection, "auto_reply", actor, "Автоответчик выключен сотрудником", "chat", chat_id, created_at=now.isoformat())
+            if not cursor.rowcount:
+                return False  # Automatic review must never replace an employee opt-out.
+            self._audit(connection, "auto_reply", actor,
+                        "Автоответчик приостановлен для разбора" if automatic else "Автоответчик выключен сотрудником",
+                        "chat", chat_id, created_at=now.isoformat())
         return True
 
     def disable_manual_chat_mode(self, chat_id: str, actor: str = "") -> bool:
@@ -3585,10 +3842,28 @@ class TicketStore:
             return None
         with self.connection() as connection:
             row = connection.execute(
-                "SELECT chat_id, expires_at, actor FROM whatsapp_manual_chat_modes WHERE chat_id = ?",
+                "SELECT chat_id, expires_at, actor, updated_at FROM whatsapp_manual_chat_modes WHERE chat_id = ?",
                 (chat_id,),
             ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        result = {key: row[key] for key in ("chat_id", "expires_at", "actor")}
+        if row["actor"] == "Бот: нужен разбор":
+            try:
+                # Legacy automatic pauses used the employee's infinite sentinel.
+                legacy = str(row["expires_at"]).startswith("9999-")
+                expires = datetime.fromisoformat(str(row["updated_at"] if legacy else row["expires_at"]))
+                if expires.tzinfo is None:
+                    expires = expires.replace(tzinfo=timezone.utc)
+                if legacy:
+                    expires += timedelta(minutes=30)
+                if expires <= datetime.now(timezone.utc):
+                    return None
+                result["expires_at"] = expires.isoformat()
+            except (ValueError, TypeError, OverflowError):
+                # Keep a malformed record blocked for explicit operator review.
+                pass
+        return result
 
     def allow_auto_reply(self, contact_key: str, reply_kind: str, seconds: int = 45) -> bool:
         contact_key = normalize_message(contact_key)[:120]
@@ -3958,7 +4233,8 @@ class TicketStore:
         request_id = str(request_id or "")[:120]
         now = utc_now()
         with self.connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            if not connection.in_transaction:
+                connection.execute("BEGIN IMMEDIATE")
             if request_id:
                 existing = connection.execute("SELECT * FROM outbound_requests WHERE request_id=?", (request_id,)).fetchone()
                 if existing:
@@ -4501,3 +4777,211 @@ class TicketStore:
                 "SELECT * FROM template_errors ORDER BY id DESC"
             ).fetchall()
         return [dict(row) for row in rows]
+
+# ---------------------------------------------------------------------------
+# 1.00.6.12 bilingual ordinary-user output
+# Parsing remains tolerant to both Russian and Kazakh. User-facing replies are
+# selected per request through queue_user_locale's thread-local language.
+# ---------------------------------------------------------------------------
+from queue_user_locale import tr, user_menu_label
+
+REQUEST_FIELD_LABELS_RU = {
+    "bin_old": "старый БИН",
+    "bin_number": "БИН компании",
+    "bin_new": "новый БИН",
+    "ats_number": "номер АТС / ТС",
+    "company": "название компании",
+    "company_old": "текущее название компании",
+    "company_new": "новое название компании",
+    "email": "электронную почту",
+    "contact_phone": "контактный номер телефона",
+    "country": "страну",
+    "fio": "ФИО",
+    "post": "пост",
+    "reference": "номер / идентификатор",
+    "problem": "описание проблемы",
+}
+REQUEST_FIELD_LABELS_KZ = {
+    "bin_old": "ескі БИН",
+    "bin_number": "компанияның БИН-ін",
+    "bin_new": "жаңа БИН",
+    "ats_number": "АТС / КҚ нөмірін",
+    "company": "компания атауын",
+    "company_old": "компанияның қазіргі атауын",
+    "company_new": "компанияның жаңа атауын",
+    "email": "электрондық поштаны",
+    "contact_phone": "байланыс телефон нөмірін",
+    "country": "елді",
+    "fio": "Аты-жөнін",
+    "post": "постты",
+    "reference": "нөмір / идентификаторды",
+    "problem": "мәселенің сипаттамасын",
+}
+# Keep the historical exported mapping Russian for admin/internal consumers.
+REQUEST_FIELD_LABELS = REQUEST_FIELD_LABELS_RU
+
+
+def request_field_label(key: str) -> str:
+    return tr(
+        REQUEST_FIELD_LABELS_RU.get(key, key),
+        REQUEST_FIELD_LABELS_KZ.get(key, REQUEST_FIELD_LABELS_RU.get(key, key)),
+    )
+
+
+def build_missing_bin_reply(missing: list[str]) -> str:
+    missing_block = ", ".join(missing)
+    return tr(
+        f"Почти готово. Не хватает: {missing_block}.\n"
+        "Отправьте только недостающие данные, уже полученные поля повторять не нужно.",
+        f"Жетіспейтін мәліметтер: {missing_block}.\n"
+        "Тек жетіспейтін деректерді жіберіңіз, бұрын берілген мәліметтерді қайталаудың қажеті жоқ.",
+    )
+
+
+def build_missing_request_reply(category: str | list[str], missing_keys: list[str] | None = None) -> str:
+    # Compatibility with the old bin_company_name branch which historically
+    # called this helper with only the list of missing keys.
+    if missing_keys is None and isinstance(category, list):
+        missing_keys = category
+        category = ""
+    missing_keys = list(missing_keys or [])
+    labels = [request_field_label(key) for key in missing_keys]
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        question = tr(f"Укажите, пожалуйста, {labels[0]}.", f"{labels[0]} көрсетіңіз.")
+    else:
+        question = tr(
+            "Не хватает только: " + ", ".join(labels) + ".",
+            "Қосымша көрсету қажет: " + ", ".join(labels) + ".",
+        )
+    return tr(
+        f"{question}\nОстальные данные уже запомнил, повторять их не нужно. Можно ответить обычным текстом.",
+        f"{question}\nҚалған мәліметтер сақталды, оларды қайталаудың қажеті жоқ. Қарапайым мәтінмен жауап беруге болады.",
+    )
+
+
+def request_detail_issues(text: str, category: str) -> list[str]:
+    normalized = normalize_message(text)
+    lower = normalized.casefold()
+    if not normalized:
+        return [tr("Сообщение пустое", "Хабарлама бос")]
+
+    problem_described = bool(
+        re.search(
+            r"(?:\bне\s+\w+|проблем\w*|ошиб\w*|сбой\w*|завис\w*|"
+            r"откр\w*|закр\w*|видит\w*|выходит\w*|отображ\w*|"
+            r"работа\w*|пропал\w*|отсутств\w*|добав\w*|измен\w*|"
+            r"коррект\w*|сломан\w*|требуется\w*|мәсел\w*|қате\w*|"
+            r"жұмыс\s+істем\w*|ашылмай\w*|көрінб\w*|шықпай\w*|қос\w*|өзгерт\w*)",
+            lower,
+        )
+    )
+    has_identifier = bool(
+        re.search(r"\d{3,}", lower)
+        or re.search(r"\b[a-zа-яёәіңғүұқөһ]{1,5}[-/]?\d{2,}[a-zа-яёәіңғүұқөһ0-9/-]*\b", lower)
+    )
+
+    issues: list[str] = []
+    if category == "general":
+        if not problem_described:
+            issues.append(tr("Не описано, что именно не работает", "Нақты не жұмыс істемейтіні сипатталмаған"))
+        return issues
+    if category == "support":
+        return []
+
+    identifier_labels_ru = {
+        "seal": "Не указан номер НП или пломбы",
+        "transport": "Не указан номер перевозки, ТС или ТД",
+        "keden": "Не указан номер перевозки, которую не видит Keden",
+        "package": "Не указан номер пакета, перевозки или ТД",
+    }
+    identifier_labels_kz = {
+        "seal": "НП немесе пломба нөмірі көрсетілмеген",
+        "transport": "Тасымалдау, КҚ немесе ТД нөмірі көрсетілмеген",
+        "keden": "Keden көрмейтін тасымалдау нөмірі көрсетілмеген",
+        "package": "Пакет, тасымалдау немесе ТД нөмірі көрсетілмеген",
+    }
+    if category in identifier_labels_ru and not has_identifier:
+        issues.append(tr(identifier_labels_ru[category], identifier_labels_kz[category]))
+    if not problem_described:
+        issues.append(tr(
+            "Не описано, что нужно сделать или что именно не работает",
+            "Не істеу керектігі немесе нақты не жұмыс істемейтіні сипатталмаған",
+        ))
+    return issues
+
+
+def request_detail_error_reply(text: str, category: str) -> str:
+    issues = request_detail_issues(text, category)
+    issue_block = "\n".join(f"• {issue}" for issue in issues)
+    fallback = CATEGORIES.get(category, category)
+    label = user_menu_label(category, fallback)
+    return tr(
+        f"Заявку пока нельзя создать. В теме «{label}» не хватает данных:\n"
+        f"{issue_block}\n\n"
+        "Дополните, пожалуйста, недостающие данные. Их можно прислать несколькими сообщениями.\n\n"
+        f"{category_prompt(category)}",
+        f"Өтінімді әзірге тіркеу мүмкін емес. «{label}» санатында мәліметтер жетіспейді:\n"
+        f"{issue_block}\n\n"
+        "Жетіспейтін мәліметтерді толықтырыңыз. Оларды бірнеше хабарламамен жіберуге болады.\n\n"
+        f"{category_prompt(category)}",
+    )
+
+
+def category_prompt(category: str) -> str:
+    if category == "bin_company_name":
+        return tr(
+            "Вы выбрали операцию «Изменение названия компании».\n\n"
+            "Для регистрации заявки необходимо предоставить:\n"
+            "• БИН компании;\n"
+            "• текущее название компании;\n"
+            "• новое название компании.\n\n"
+            "Данные можно направить одним сообщением или поочерёдно. Система сохранит полученную информацию и запросит только отсутствующие сведения.\n"
+            "При необходимости приложите подтверждающий файл или скриншот.\n\n"
+            "Для возврата в главное меню отправьте 0.",
+            "Сіз «Компания атауын өзгерту» операциясын таңдадыңыз.\n\n"
+            "Өтінімді тіркеу үшін мыналарды ұсыну қажет:\n"
+            "• компанияның БИН-і;\n"
+            "• компанияның қазіргі атауы;\n"
+            "• компанияның жаңа атауы.\n\n"
+            "Мәліметтерді бір хабарламамен немесе кезекпен жіберуге болады. Жүйе алынған ақпаратты сақтап, тек жетіспейтін мәліметтерді сұрайды.\n"
+            "Қажет болған жағдайда растаушы файлды немесе скриншотты тіркеңіз.\n\n"
+            "Негізгі мәзірге оралу үшін 0 жіберіңіз.",
+        )
+    if category == "bin":
+        return tr(
+            "Вы выбрали раздел «Корректировка БИН».\n\n"
+            "Уточните необходимое действие:\n"
+            "1. Изменить название компании\n"
+            "2. Получить инструкцию по другой операции с БИН\n\n"
+            "Заявка создаётся только для операции «Изменить название компании». По остальным операциям система предоставит инструкцию без регистрации заявки.\n\n"
+            "Отправьте номер 1 или 2. Для возврата в главное меню отправьте 0.",
+            "Сіз «БИН-ді түзету» бөлімін таңдадыңыз.\n\n"
+            "Қажетті әрекетті таңдаңыз:\n"
+            "1. Компания атауын өзгерту\n"
+            "2. БИН бойынша басқа операцияға нұсқаулық алу\n\n"
+            "Өтінім тек «Компания атауын өзгерту» операциясы үшін жасалады. Қалған операциялар бойынша жүйе өтінімді тіркемей, нұсқаулық береді.\n\n"
+            "1 немесе 2 нөмірін жіберіңіз. Негізгі мәзірге оралу үшін 0 жіберіңіз.",
+        )
+    prompts_ru = {
+        "seal": "Выбрана тема: Навигационная пломба.\nУкажите номер НП или пломбы и напишите, что нужно сделать или что не работает. Пример: НП 398423874 не открывается.\nФото или скриншот можно приложить к этому же сообщению, если это поможет разобраться. Это необязательно.\n0 — вернуться в главное меню",
+        "transport": "Выбрана тема: Перевозка.\nУкажите номер перевозки, ТС, пломбу или ТД и подробно опишите проблему.\nФото или скриншот можно приложить к этому же сообщению, если это поможет разобраться. Это необязательно.\n0 — вернуться в главное меню",
+        "keden": "Если у вас проблема с кеденом, не видят нашу перевозку (НП), напишите в техподдержку КЕДЕН. Они отправят пакеты по этим ТД.",
+        "package": "Выбрана тема: Пакеты.\nУкажите номер пакета, перевозки или ТД и подробно опишите проблему.\nФото или скриншот можно приложить к этому же сообщению, если это поможет разобраться. Это необязательно.\n0 — вернуться в главное меню",
+        "database": "Выбрана тема: База данных.\nНапишите, какая именно у вас проблема, и предоставьте почту пользователя: свою или другого.\nФото или скриншот можно приложить к этому же сообщению, если это поможет разобраться. Это необязательно.\n0 — вернуться в главное меню",
+        "mobile": "Выбрана тема: Мобилка.\nНапишите, какой раздел мобилки не работает, что вы нажимаете и какая ошибка появляется.\nФото или скриншот можно приложить к этому же сообщению, если это поможет разобраться. Это необязательно.\n0 — вернуться в главное меню",
+        "general": "Выбрана тема: Другой запрос.\nНапишите, если что-то выше не совпадает с вашей проблемой.\nФото или скриншот можно приложить к этому же сообщению, если это поможет разобраться. Это необязательно.\n0 — вернуться в главное меню",
+        "support": "Выбрана тема: Вопрос в поддержку.\nНапишите свой вопрос в поддержку свободным текстом. Специальный шаблон не нужен. Если запрос относится к одной из категорий выше, он может быть отклонён.\nФото или скриншот можно приложить к этому же сообщению, если это поможет разобраться. Это необязательно.\n0 — вернуться в главное меню",
+    }
+    prompts_kz = {
+        "seal": "Тақырып таңдалды: Навигациялық пломба.\nНП немесе пломба нөмірін көрсетіп, не істеу керектігін немесе не жұмыс істемейтінін жазыңыз. Мысал: НП 398423874 ашылмайды.\nЕгер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n0 — негізгі мәзірге оралу",
+        "transport": "Тақырып таңдалды: Тасымалдау.\nТасымалдау нөмірін, КҚ, пломба немесе ТД нөмірін көрсетіп, мәселені толық сипаттаңыз.\nЕгер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n0 — негізгі мәзірге оралу",
+        "keden": "Егер КЕДЕН біздің тасымалдауды (НП) көрмесе, КЕДЕН техникалық қолдау қызметіне жазыңыз. Олар осы ТД бойынша пакеттерді қайта жібереді.",
+        "package": "Тақырып таңдалды: Пакеттер.\nПакет, тасымалдау немесе ТД нөмірін көрсетіп, мәселені толық сипаттаңыз.\nЕгер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n0 — негізгі мәзірге оралу",
+        "database": "Тақырып таңдалды: Дерекқор.\nҚандай мәселе туындағанын жазыңыз және өзіңіздің немесе басқа пайдаланушының электрондық поштасын көрсетіңіз.\nЕгер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n0 — негізгі мәзірге оралу",
+        "mobile": "Тақырып таңдалды: TRANSIT мобильді қосымшасы.\nМобильді қосымшаның қай бөлімі жұмыс істемейтінін, нені басатыныңызды және қандай қате шығатынын жазыңыз.\nЕгер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n0 — негізгі мәзірге оралу",
+        "general": "Тақырып таңдалды: Басқа өтінім.\nЕгер жоғарыдағы санаттардың ешқайсысы мәселеңізге сәйкес келмесе, мәселені сипаттап жазыңыз.\nЕгер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n0 — негізгі мәзірге оралу",
+        "support": "Тақырып таңдалды: Қолдау қызметіне сұрақ.\nСұрағыңызды еркін түрде жазыңыз. Арнайы үлгі қажет емес. Егер өтініш жоғарыдағы санаттардың біріне қатысты болса, ол қабылданбауы мүмкін.\nЕгер мәселені анықтауға көмектессе, фото немесе скриншотты осы хабарламаға тіркеуге болады. Бұл міндетті емес.\n0 — негізгі мәзірге оралу",
+    }
+    return tr(prompts_ru.get(category, "Опишите проблему.\n0 — вернуться в главное меню"), prompts_kz.get(category, "Мәселені сипаттап жазыңыз.\n0 — негізгі мәзірге оралу"))

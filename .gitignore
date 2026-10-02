@@ -1,55 +1,54 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-
-# Node.js
-node_modules/
-
-# Runtime/application data
-data/
-*.db
-*.sqlite
-*.sqlite3
-*.log
-chat-media/
-outbound-media/
-uploads/
-
-# WhatsApp runtime/session
-.wwebjs_auth/
-.wwebjs_cache/
-.connector_token
-
-# Local caches/config
-.cache/
-.local/
-.config/
-
-# Secrets
+# Secrets / environment
 .env
 .env.*
 !.env.example
 secrets.env
-secret.env
-credentials*.json
-service-account*.json
 *.pem
 *.key
 *.p12
 *.pfx
 
-# Backups / release artifacts
-*.bak
-*.old
-*.tar
-*.tar.gz
-*.tgz
-*.zip
+# Runtime databases
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
 
-# OS / editors
-.DS_Store
-Thumbs.db
+# WhatsApp / browser sessions
+whatsapp-auth/
+.wwebjs_auth/
+.wwebjs_cache/
+user-data-dir/
+chromium-profile/
+
+# User/runtime data
+media/
+uploads/
+data/
+storage/
+logs/
+backups/
+*.log
+*.session
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# IDE / OS
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
+
+# Local archives
+*.tar.gz
+*.zip

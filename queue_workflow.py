@@ -523,6 +523,7 @@ def merge_tickets(store, source_id: int, target_id: int, actor: str, note: str =
         raise ValueError("Одна из заявок не найдена")
     now = utc_now()
     with store.connection() as db:
+        db.execute("UPDATE tickets SET updated_at=? WHERE id=?", (now, target_id))
         db.execute("UPDATE whatsapp_chat_messages SET ticket_id=? WHERE ticket_id=?", (target_id, source_id))
         db.execute("UPDATE outbound_messages SET ticket_id=? WHERE ticket_id=?", (target_id, source_id))
         db.execute("UPDATE tickets SET status='invalid',updated_at=?,closed_at=? WHERE id=?", (now, now, source_id))
@@ -554,6 +555,7 @@ def split_ticket(store, source_id: int, actor: str, title: str, summary: str, ca
     new_id = int(store.create_ticket(payload))
     now = utc_now()
     with store.connection() as db:
+        db.execute("UPDATE tickets SET updated_at=? WHERE id=?", (now, int(source_id)))
         db.execute("INSERT INTO workflow_ticket_relations(source_ticket_id,target_ticket_id,relation_type,actor,note,created_at) VALUES(?,?,?,?,?,?)", (int(source_id), new_id, "split", clean(actor,120), clean(summary,1200), now))
         db.execute("INSERT INTO events(ticket_id,action,actor,created_at) VALUES(?,?,?,?)", (int(source_id), f"Из заявки выделена новая #{new_id}", clean(actor,120), now))
         db.execute("INSERT INTO events(ticket_id,action,actor,created_at) VALUES(?,?,?,?)", (new_id, f"Создана разделением заявки #{source_id}", clean(actor,120), now))

@@ -171,6 +171,9 @@
       const sep=document.createElement("div");sep.className="message-context-separator productivity-context";menu.append(sep);
       const add=(label,icon,fn)=>{const b=document.createElement("button");b.type="button";b.className="message-context-item productivity-context";b.innerHTML=`<span class="message-context-icon">${icon}</span><span>${escapeHtml(label)}</span>`;b.onclick=e=>{e.stopPropagation();menu.remove();fn();};menu.append(b);};
       add("Закладка","★",()=>toggleBookmark(chatId,messageId)); add("Создать заявку","＋",()=>openCreateTicket(chatId,messageId)); add("Привязать к заявке","🔗",()=>openLinkTicket(chatId,messageId));
+      if (typeof window.QueueClampFloatingPanel === "function") {
+        window.QueueClampFloatingPanel(menu, event.clientX + 2, event.clientY + 2, 8);
+      }
     },0);
   }
   document.addEventListener("contextmenu",augmentMessageContext,true);
@@ -256,7 +259,10 @@
   observer.observe(document.documentElement,{subtree:true,childList:true});
   enhanceDelivery(); installChatTools(); installTicketReminderButton(); autoTranscribe();
 
-  // Update selected-chat-dependent contact badge even when only hidden input value changes.
-  setInterval(()=>{installChatTools();enhanceDelivery();autoTranscribe();},1600);
+  // EO_PERFORMANCE_20260930: MutationObserver handles normal UI changes.
+  // Keep only a low-frequency safety scan, and pause it in background tabs.
+  const productivitySafetyScan=()=>{installChatTools();enhanceDelivery();autoTranscribe();};
+  setInterval(()=>{if(!document.hidden)productivitySafetyScan();},10000);
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)productivitySafetyScan();});
   document.documentElement.dataset.productivityBuild=BUILD;
 })();

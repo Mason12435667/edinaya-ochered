@@ -41,7 +41,7 @@ def _human_bytes(app, value: int) -> str:
 
 
 def _recent_page(handler, app):
-    rows = qw.recent_chats(app.STORE, app.active_employee(), 30)
+    rows = qw.recent_chats(app.STORE, app.work_actor(), 30)
     cards = []
     for row in rows:
         chat_id = str(row.get("chat_id") or "")
@@ -160,7 +160,7 @@ def get(handler, app):
         data = _ticket_details(app, ticket_id)
         handler.json_response(data or {"error":"Заявка не найдена"}, 200 if data else 404)
     elif path == "/api/workflow-handover":
-        handler.json_response(qw.handover_summary(app.STORE, app.active_employee()))
+        handler.json_response(qw.handover_summary(app.STORE, app.work_actor()))
     elif path == "/api/workflow-export":
         chat_id = _value(query, "chat_id")[:120]
         fmt = _value(query, "format", "txt").lower()
@@ -181,7 +181,7 @@ def get(handler, app):
     return True
 
 
-def post(handler, app):
+def _post_impl(handler, app):
     path = urlparse(handler.path).path
     known = {
         "/api/workflow-recent-open", "/api/workflow-presence", "/api/workflow-internal-note",
@@ -197,20 +197,22 @@ def post(handler, app):
         return True
     try:
         if path == "/api/workflow-recent-open":
-            qw.record_recent(app.STORE, form.get("chat_id", ""), app.active_employee())
+            qw.record_recent(app.STORE, form.get("chat_id", ""), app.work_actor())
             handler.json_response({"updated": True})
         elif path == "/api/workflow-presence":
-            qw.presence_update(app.STORE, form.get("chat_id", ""), form.get("client_id", ""), app.active_employee(), form.get("state", "viewing"))
+            qw.presence_update(app.STORE, form.get("chat_id", ""), form.get("client_id", ""), app.work_actor(), form.get("state", "viewing"))
             handler.json_response({"updated": True, "presence": qw.presence_state(app.STORE, form.get("chat_id", ""), form.get("client_id", ""))})
         elif path == "/api/workflow-internal-note":
-            note_id = qw.add_internal_note(app.STORE, int(form.get("ticket_id", "0") or 0), app.active_employee(), form.get("note", ""))
-            handler.json_response({"created": True, "id": note_id})
+            ticket_id = int(form.get("ticket_id", "0") or 0)
+            actor = app.work_actor() if hasattr(app, "work_actor") else app.work_actor()
+            note_id = qw.add_internal_note(app.STORE, ticket_id, actor, form.get("note", ""))
+            handler.json_response({"created": True, "id": note_id, "ticket_id": ticket_id, "actor": actor})
         elif path == "/api/workflow-ticket-quick":
             ticket_id = int(form.get("ticket_id", "0") or 0)
             ticket = app.STORE.get_ticket(ticket_id)
             if not ticket:
                 raise ValueError("Заявка не найдена")
-            actor = app.active_employee()
+            actor = app.work_actor()
             priority = form.get("priority", "")
             employee = form.get("employee", "")
             status = form.get("status", "")
@@ -232,24 +234,23 @@ def post(handler, app):
                 )
                 if not updated:
                     raise ValueError("Не удалось изменить статус")
-                qw.record_close_meta(app.STORE, ticket_id, status, reason, comment, actor)
                 changed = True
             handler.json_response({"updated": changed, "ticket": app.STORE.get_ticket(ticket_id)})
         elif path == "/api/workflow-transfer":
-            ok = qw.transfer_ticket(app.STORE, int(form.get("ticket_id", "0") or 0), form.get("employee", ""), form.get("reason", ""), app.active_employee())
+            ok = qw.transfer_ticket(app.STORE, int(form.get("ticket_id", "0") or 0), form.get("employee", ""), form.get("reason", ""), app.work_actor())
             handler.json_response({"updated": ok}, 200 if ok else 404)
         elif path == "/api/workflow-ticket-merge":
-            ok = qw.merge_tickets(app.STORE, int(form.get("source_id", "0") or 0), int(form.get("target_id", "0") or 0), app.active_employee(), form.get("note", ""))
+            ok = qw.merge_tickets(app.STORE, int(form.get("source_id", "0") or 0), int(form.get("target_id", "0") or 0), app.work_actor(), form.get("note", ""))
             handler.json_response({"updated": ok})
         elif path == "/api/workflow-ticket-split":
-            new_id = qw.split_ticket(app.STORE, int(form.get("source_id", "0") or 0), app.active_employee(), form.get("title", ""), form.get("summary", ""), form.get("category", ""), form.get("priority", ""))
+            new_id = qw.split_ticket(app.STORE, int(form.get("source_id", "0") or 0), app.work_actor(), form.get("title", ""), form.get("summary", ""), form.get("category", ""), form.get("priority", ""))
             handler.json_response({"created": True, "ticket_id": new_id, "href": f"/ticket?id={new_id}"})
         elif path == "/api/workflow-bulk":
             try:
                 ids = sorted({int(x) for x in json.loads(form.get("ticket_ids", "[]")) if int(x) > 0})[:200]
             except Exception:
                 ids = []
-            actor = app.active_employee(); updated = failed = 0
+            actor = app.work_actor(); updated = failed = 0
             status = form.get("status", ""); priority = form.get("priority", ""); employee = form.get("employee", "")
             reason = form.get("reason", ""); comment = form.get("comment", "")
             for ticket_id in ids:
@@ -268,7 +269,7 @@ def post(handler, app):
                             allow_reopen=handler.is_admin(), close_reason=reason, close_comment=comment,
                         )
                         if not ok: raise ValueError("status")
-                        qw.record_close_meta(app.STORE, ticket_id, status, reason, comment, actor); changed = True
+                        changed = True
                     updated += int(changed)
                 except Exception:
                     failed += 1
@@ -293,4 +294,54 @@ def post(handler, app):
             handler.redirect("/admin/workflow?notice=" + quote("Ошибка: " + str(exc)[:220]))
         else:
             handler.json_response({"error": str(exc)[:300]}, 400)
+    return True
+
+
+def post(handler, app):
+    # Delay the response until the whole mutation has committed.
+    guarded = {"/api/workflow-ticket-quick", "/api/workflow-transfer",
+               "/api/workflow-ticket-merge", "/api/workflow-ticket-split", "/api/workflow-bulk"}
+    path = urlparse(handler.path).path
+    if path not in guarded:
+        return _post_impl(handler, app)
+    form = handler.read_form()
+    if not _csrf(handler, app, form):
+        return True
+    from queue_operations import Conflict
+    read_form, respond = handler.read_form, handler.json_response
+    replies = []
+    try:
+        revisions = json.loads(form.get("revisions", "{}"))
+        if not isinstance(revisions, dict): raise ValueError("Некорректные версии заявок")
+        if path.endswith("-bulk"):
+            ids = sorted({int(x) for x in json.loads(form.get("ticket_ids", "[]"))})
+            if not ids or len(ids) > 200: raise ValueError("Выберите от 1 до 200 заявок")
+        elif path.endswith("-merge"):
+            ids = [int(form.get("source_id", 0)), int(form.get("target_id", 0))]
+        else:
+            ids = [int(form.get("source_id") or form.get("ticket_id") or 0)]
+        with app.STORE.atomic_inbound():
+            for tid in ids:
+                ticket = app.STORE.get_ticket(tid)
+                if not ticket: raise ValueError("Заявка не найдена")
+                if int(revisions.get(str(tid), -1)) != ticket["revision"]:
+                    raise Conflict("Заявку уже изменили. Обновите страницу и проверьте актуальные данные")
+            handler.read_form = lambda: form
+            handler.json_response = lambda data, status=200: replies.append((data, status))
+            _post_impl(handler, app)
+            if not replies: raise RuntimeError("No operation response")
+            data, status = replies[-1]
+            if status >= 400 or data.get("failed"):
+                raise ValueError(data.get("error") or "Не все заявки доступны для изменения. Изменения отменены для всей группы")
+        app.queue_realtime.notify('ticket')
+        app.queue_realtime.notify_outbound()
+    except Conflict as error:
+        data, status = {"error": str(error)}, 409
+    except (ValueError, TypeError) as error:
+        data, status = {"error": str(error)}, 400
+    except Exception:
+        data, status = {"error": "Изменения не сохранены. Повторите позже"}, 503
+    finally:
+        handler.read_form, handler.json_response = read_form, respond
+    respond(data, status)
     return True

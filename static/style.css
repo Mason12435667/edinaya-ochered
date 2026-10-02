@@ -686,21 +686,18 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
 .chat-bubble { position: relative; }
 .chat-message-body { white-space: pre-wrap; }
 .chat-inline-mention {
-  display: inline-block;
-  padding: 1px 5px 2px;
-  border: 1px solid color-mix(in srgb, var(--blue) 42%, transparent);
+  display: inline;
+  padding: 1px 4px 2px;
   border-radius: 5px;
-  background: var(--blue-soft);
+  background: rgba(36, 99, 171, .12);
   color: var(--blue);
   font-weight: 800;
-  line-height: 1.25;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 .chat-inline-mention.mention-highlighted {
-  background: var(--blue-soft);
+  background: rgba(83, 189, 235, .18);
   color: var(--blue);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 18%, transparent);
 }
 .chat-reactions { display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-top:2px; }
 .chat-reaction-chip {
@@ -765,6 +762,9 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
   z-index: 1880;
   min-width: 190px;
   max-width: min(260px, calc(100vw - 16px));
+  max-height: min(420px, calc(100vh - 16px));
+  overflow-y: auto;
+  contain: layout paint;
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -945,13 +945,14 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
 .chat-inline-link{color:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px;font-weight:650;overflow-wrap:anywhere;word-break:break-word}
 .chat-inline-link:hover{text-decoration-thickness:2px}
 
-
-/* 1.00.3: right-click/context-menu horizontal overflow guard. */
-.chat-shell,
-.chat-main,
-.chat-messages { min-width: 0; max-width: 100%; }
-.chat-messages { overflow-x: hidden; }
-.message-context-menu {
-  box-sizing: border-box;
-  max-width: min(260px, calc(100vw - 16px));
-}
+/* Bookmark restore: isolated to message list, modal and starred chat list. */
+.queue-bookmarks-overlay{position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px}
+.queue-bookmarks-panel{display:flex;flex-direction:column;gap:14px;width:min(620px,100%);max-height:min(82vh,800px);padding:20px;border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--text);box-shadow:var(--shadow)}
+.queue-bookmarks-panel header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.queue-bookmarks-panel h2{font-size:18px;margin:0}
+.queue-bookmarks-list{display:flex;flex-direction:column;gap:8px;overflow:auto;min-height:60px}
+.queue-bookmark-entry{display:flex;flex-direction:column;gap:5px;padding:12px;border:1px solid var(--line);border-radius:10px;text-decoration:none;color:var(--text);background:var(--surface-subtle);overflow-wrap:anywhere}
+.queue-bookmark-entry:hover{border-color:var(--green);background:var(--surface-hover)}
+.queue-bookmark-entry span{font-size:13px;color:var(--muted)}
+.message-bookmark{white-space:nowrap}
+.chat-favorite-toggle{cursor:pointer}

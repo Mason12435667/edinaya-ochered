@@ -16,7 +16,7 @@ DANGEROUS_EXTENSIONS = {
 }
 
 CONNECTOR_PATHS = {
-    '/api/media-stage','/api/whatsapp','/api/template-error-delivery','/api/outbound/claim',
+    '/api/inbound-recovery-reply','/api/media-stage','/api/whatsapp','/api/template-error-delivery','/api/outbound/claim',
     '/api/outbound/heartbeat','/api/outbound/begin','/api/outbound/result','/api/chat-list-sync',
     '/api/group-list-sync','/api/presence-sync','/api/group-participants-sync','/api/group-message-identities-sync',
     '/api/contact-list-sync','/api/avatar-sync','/api/contact-profile-sync','/api/group-refresh-check',

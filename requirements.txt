@@ -1,3 +1,0 @@
-# Core backend uses only the Python standard library.
-# Optional voice transcription dependencies:
-#   pip install -r requirements-voice.txt
