@@ -1,0 +1,5 @@
+/* 3.3.107 performance helpers, PC-only. No phone/mobile layout overrides. */
+.uq-performance-cards-107{margin-top:12px}
+.uq-performance-cards-107 .reliability-card strong{font-variant-numeric:tabular-nums}
+.uq-friendly-error-107{display:grid;gap:4px}
+.uq-friendly-error-107 span{color:var(--muted,#a6b7b1)}

@@ -1,0 +1,57 @@
+/* BEGIN EO_CONTEXTUAL_TICKETS_1_00_6 */
+.context-fields-panel,
+.context-history-panel{
+  margin-top:1rem;
+  padding:1rem;
+  border-radius:14px;
+}
+.context-field-list{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  gap:.65rem;
+}
+.context-field-row{
+  display:flex;
+  flex-direction:column;
+  gap:.2rem;
+  padding:.72rem .78rem;
+  border:1px solid rgba(128,180,160,.22);
+  border-radius:10px;
+  background:rgba(19,135,95,.06);
+  min-width:0;
+}
+.context-field-row span,
+.context-field-row small{opacity:.78}
+.context-field-row strong,
+.context-history-text,
+.context-history-media{overflow-wrap:anywhere;word-break:break-word}
+.context-history-list{display:flex;flex-direction:column;gap:.6rem;max-height:620px;overflow:auto;padding-right:.25rem}
+.context-history-card{
+  padding:.72rem .78rem;
+  border:1px solid rgba(128,180,160,.20);
+  border-radius:10px;
+  background:rgba(0,0,0,.08);
+}
+.context-history-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.8rem;margin-bottom:.4rem}
+.context-history-head small{text-align:right;opacity:.72}
+.context-history-card p{margin:.3rem 0;white-space:pre-wrap}
+.context-history-actions{display:flex;gap:.45rem;flex-wrap:wrap;margin-top:.55rem}
+.context-history-apply{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:0}
+.context-history-apply select{min-width:150px;max-width:230px}
+:root:not([data-theme="dark"]) .context-field-row{
+  background:#f3faf7;
+  border-color:#cfe2da;
+}
+:root:not([data-theme="dark"]) .context-history-card{
+  background:#fbfdfc;
+  border-color:#d4e3de;
+}
+:root:not([data-theme="dark"]) .context-history-apply select{
+  background:#fff;color:#17241f;border-color:#b9d1c8;color-scheme:light;
+}
+@media (max-width:1366px){
+  .context-field-list{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .context-history-head{flex-direction:column;gap:.2rem}
+  .context-history-head small{text-align:left}
+}
+/* END EO_CONTEXTUAL_TICKETS_1_00_6 */

@@ -1,0 +1,82 @@
+/* BEGIN EO_UI_HOTFIX_1_00_5_2
+ * Единая очередь 1.00.5.2
+ * Светлая тема: статус WhatsApp + панель массовых действий.
+ * Только визуальные изменения, бизнес-логика не затрагивается.
+ */
+
+/* Статус WhatsApp в светлой теме */
+[data-theme="light"] .workflow-connection-pill,
+body.light-theme .workflow-connection-pill {
+  background: #f7fcfa !important;
+  color: #29473e !important;
+  border: 1px solid #c9ddd6 !important;
+  box-shadow: 0 1px 3px rgba(24, 70, 57, .08) !important;
+}
+
+[data-theme="light"] .workflow-connection-pill.ok,
+body.light-theme .workflow-connection-pill.ok {
+  background: #edf9f4 !important;
+  color: #0b7d5e !important;
+  border-color: #b7ddcf !important;
+}
+
+[data-theme="light"] .workflow-connection-pill.delay,
+body.light-theme .workflow-connection-pill.delay {
+  background: #fff8e8 !important;
+  color: #8a6218 !important;
+  border-color: #ead7a4 !important;
+}
+
+[data-theme="light"] .workflow-connection-pill.down,
+body.light-theme .workflow-connection-pill.down {
+  background: #fff1f1 !important;
+  color: #ad3f3f !important;
+  border-color: #e8c0c0 !important;
+}
+
+/* Панель «0 выбрано / Массовое действие» в светлой теме */
+[data-theme="light"] .workflow-bulk-bar,
+body.light-theme .workflow-bulk-bar {
+  min-height: 48px !important;
+  padding: .55rem .75rem !important;
+  background: #fbfdfc !important;
+  color: #17211e !important;
+  border: 1px solid #cfdfd9 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 8px rgba(25, 74, 60, .07) !important;
+}
+
+[data-theme="light"] .workflow-bulk-bar strong,
+[data-theme="light"] .workflow-bulk-bar span,
+body.light-theme .workflow-bulk-bar strong,
+body.light-theme .workflow-bulk-bar span {
+  color: #1d2d28 !important;
+}
+
+[data-theme="light"] .workflow-bulk-bar .button.primary,
+[data-theme="light"] .workflow-bulk-bar button.primary,
+body.light-theme .workflow-bulk-bar .button.primary,
+body.light-theme .workflow-bulk-bar button.primary {
+  background: #0d8f68 !important;
+  color: #ffffff !important;
+  border-color: #0d8f68 !important;
+  box-shadow: 0 2px 6px rgba(13, 143, 104, .18) !important;
+}
+
+[data-theme="light"] .workflow-bulk-bar .button.primary:hover,
+[data-theme="light"] .workflow-bulk-bar button.primary:hover,
+body.light-theme .workflow-bulk-bar .button.primary:hover,
+body.light-theme .workflow-bulk-bar button.primary:hover {
+  background: #0a7d5b !important;
+  border-color: #0a7d5b !important;
+}
+
+@media (max-width: 1366px) {
+  [data-theme="light"] .workflow-bulk-bar,
+  body.light-theme .workflow-bulk-bar {
+    gap: .65rem !important;
+    padding: .5rem .7rem !important;
+  }
+}
+
+/* END EO_UI_HOTFIX_1_00_5_2 */
