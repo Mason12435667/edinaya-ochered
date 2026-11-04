@@ -90,6 +90,27 @@ class BotDialogTests(unittest.TestCase):
         self.assertTrue(second.json().get("duplicate"))
         self.assertEqual(len(user.tickets()), 1)
 
+    def test_redelivered_menu_digit_does_not_reset_the_draft(self):
+        user = WhatsAppUser()
+        user.register_profile()
+        self.assertEqual(user.send("1", external_id="redeliver-menu-1").json().get("category"), "general")
+        user.say("Не работает сканер в бухгалтерии")
+        # the connector delivers the old "1" again after the user moved on
+        again = user.send("1", external_id="redeliver-menu-1").json()
+        self.assertTrue(again.get("duplicate"))
+        done = user.send("Готово")
+        self.assertEqual(done.status, 201, done.text[:300])
+        self.assertIn("Не работает сканер в бухгалтерии", user.tickets()[0]["summary"])
+
+    def test_redelivered_zero_does_not_reopen_the_menu(self):
+        user = WhatsAppUser()
+        user.register_profile()
+        user.send("0", external_id="redeliver-zero-1")
+        user.say("1")
+        user.say("Нужен доступ к папке")
+        self.assertTrue(user.send("0", external_id="redeliver-zero-1").json().get("duplicate"))
+        self.assertEqual(user.send("Готово").status, 201)
+
     def test_zero_reopens_menu_after_ticket(self):
         user = WhatsAppUser()
         user.register_profile()

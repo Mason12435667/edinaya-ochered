@@ -345,6 +345,12 @@ class WhatsAppHandlerMixin:
 
     def _process_api_message(self, payload) -> None:
         key = valid_chat_id(str(payload.get("chat_id", ""))) or normalize_phone(str(payload.get("phone", "")))
+        # A repeated delivery is dropped before anything changes the dialog state.
+        # The claim is part of the inbound transaction, so a failed attempt can be retried.
+        external_id = str(payload.get("external_id", ""))
+        if external_id and not app.STORE.claim_inbound_message(external_id, key):
+            self._inbound_json_response({"created": False, "duplicate": True})
+            return
         text = normalize_message(str(payload.get("text", "")))
         phone = normalize_phone(str(payload.get("phone", "")))
         state = queue_dialog_flow.load(app.STORE, key)
@@ -401,21 +407,18 @@ class WhatsAppHandlerMixin:
         if eligible and (intent or (active and not pending_context_category(context)
                 and str(context.get("pending_category", "")) in {"", app.ACTIVE_TICKET_FOLLOWUP_CONTEXT}
                 and queue_dialog_flow.other_topic(text, str(active.get("category", ""))))):
-            mid = str(payload.get("external_id", ""))
-            if mid and not app.STORE.claim_inbound_message(mid,key):
-                self._inbound_json_response({"created":False,"duplicate":True});return
             if intent and command in {"дополнение", "қосымша"}:
                 state.pop("topic",None);state.pop("topic_attempts",None);queue_dialog_flow.save(app.STORE,key,state)
-                self._process_api_message_core({**payload, **intent, "chat_id":key, "phone":phone}, replay=True)
+                self._process_api_message_core({**payload, **intent, "chat_id":key, "phone":phone})
                 return
             if intent and command in {"новая", "жаңа", "0"}:
                 state.pop("topic",None);state.pop("topic_attempts",None);queue_dialog_flow.save(app.STORE,key,state)
                 queue_dialog_flow.remember(app.STORE,key,intent)
-                self._process_api_message_core({**payload,"text":"0"}, replay=True)
+                self._process_api_message_core({**payload,"text":"0"})
                 return
             if command in {"0","00","отмена","бас тарту"}:
                 state.pop("topic",None);state.pop("topic_attempts",None);queue_dialog_flow.save(app.STORE,key,state)
-                self._process_api_message_core(payload,replay=True);return
+                self._process_api_message_core(payload);return
             if not intent:
                 state['topic'] = {k:payload.get(k,'') for k in ('text','attachment_name','external_id','media_mime')}
             state['topic_attempts'] = int(state.get('topic_attempts',0)) + 1
@@ -447,9 +450,10 @@ class WhatsAppHandlerMixin:
             # manual review merely because the user needed more than two turns.
             pass
 
-    def _process_api_message_core(self, payload, replay=False) -> None:
+    def _process_api_message_core(self, payload) -> None:
         # Each step handles the message (returns True) or passes it on.
-        msg = InboundMessage(payload=payload, replay=replay)
+        # Duplicates were already dropped by _process_api_message.
+        msg = InboundMessage(payload=payload)
         for step in (
             self._inbound_parse,
             self._inbound_store_chat_message,
@@ -470,7 +474,7 @@ class WhatsAppHandlerMixin:
                 return
 
     def _inbound_parse(self, msg) -> bool:
-        # Read the payload, stage media and drop duplicate deliveries.
+        # Read the payload and stage media.
         msg.external_id = str(msg.payload.get("external_id", ""))
         msg.phone = normalize_phone(str(msg.payload.get("phone", "")))
         msg.sender = str(msg.payload.get("sender", "")).strip() or "Неизвестный отправитель"
@@ -485,9 +489,6 @@ class WhatsAppHandlerMixin:
             msg.media_path = app.save_media_payload(msg.chat_id, msg.external_id, media_base64, msg.media_mime, msg.media_name)
         if msg.payload.get("media_receipt"):
             msg.media_path = queue_inbound_media.resolve(app.MEDIA_DIR, msg.chat_id, msg.external_id, msg.payload["media_receipt"]) or msg.media_path
-        if not msg.replay and msg.external_id and not app.STORE.claim_inbound_message(msg.external_id, msg.contact_key):
-            self._inbound_json_response({"created": False, "duplicate": True})
-            return True
         return False
 
     def _inbound_store_chat_message(self, msg) -> bool:
