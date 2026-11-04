@@ -1,4 +1,5 @@
 """Ticket operations with explicit dependencies, revision checks and handoff history."""
+import hashlib
 import html
 import secrets
 from urllib.parse import urlparse,quote
@@ -64,22 +65,24 @@ def get(handler,app):
 class Conflict(ValueError):pass
 
 
+def inbound_recovery_reply(handler,app):
+    """POST /api/inbound-recovery-reply (connector): queue the bot reply to a message
+    that was delivered from the connector's spool after an outage. Idempotent per message."""
+    payload=handler.read_authorized_json(150000)
+    if payload is None:return
+    chat=app.valid_chat_id(str(payload.get('chat_id','')))
+    external=str(payload.get('external_id',''))
+    if not chat or not external:handler.json_response({'error':'invalid_identity'},400);return
+    if not app.global_auto_reply_enabled() or app.STORE.manual_chat_mode(chat) or app.STORE.manual_whatsapp_contact(chat,'') or app.queue_productivity.auto_reply_blocked(app.STORE,chat):
+        handler.json_response({'suppressed':True});return
+    request_id='inbound-recovery:'+hashlib.sha256(external.encode()).hexdigest()
+    message=app.STORE.queue_direct_message(chat,str(payload.get('reply',''))[:32000],'Система',request_id=request_id)
+    if message:app.queue_realtime.notify_outbound()
+    handler.json_response({'queued':bool(message),'message_id':message},200 if message else 400)
+
+
 def post(handler,app):
     path=urlparse(handler.path).path
-    if path=='/api/inbound-recovery-reply':
-        payload=handler.read_authorized_json(150000)
-        if payload is None:return True
-        chat=app.valid_chat_id(str(payload.get('chat_id','')))
-        external=str(payload.get('external_id',''))
-        if not chat or not external:handler.json_response({'error':'invalid_identity'},400);return True
-        if not app.global_auto_reply_enabled() or app.STORE.manual_chat_mode(chat) or app.STORE.manual_whatsapp_contact(chat,'') or app.queue_productivity.auto_reply_blocked(app.STORE,chat):
-            handler.json_response({'suppressed':True});return True
-        import hashlib
-        request_id='inbound-recovery:'+hashlib.sha256(external.encode()).hexdigest()
-        message=app.STORE.queue_direct_message(chat,str(payload.get('reply',''))[:32000],'Система',request_id=request_id)
-        if message:app.queue_realtime.notify_outbound()
-        handler.json_response({'queued':bool(message),'message_id':message},200 if message else 400)
-        return True
     if path not in {'/status','/quick-status','/quick-priority','/classification','/handoff'}:return False
     form=handler.read_form()
     if not secrets.compare_digest(form.get('csrf_token',''),app.csrf_token()):

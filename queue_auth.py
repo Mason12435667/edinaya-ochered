@@ -23,6 +23,11 @@ ROLES = {"admin", "employee"}
 _THREAD_CONTEXT = threading.local()
 
 
+def self_registration_enabled() -> bool:
+    """Open sign-up on /register; off by default (accounts are created by an administrator)."""
+    return os.getenv("QUEUE_ALLOW_SELF_REGISTRATION", "0") == "1"
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -384,6 +389,8 @@ class AuthStore:
         display_name: str,
         password: str,
     ) -> tuple[bool, str, int]:
+        if not self_registration_enabled():
+            return False, "Самостоятельная регистрация отключена. Обратитесь к администратору", 0
         username = _normalize_username(username)
         display_name = str(display_name or "").strip()
         if not USERNAME_RE.fullmatch(username):

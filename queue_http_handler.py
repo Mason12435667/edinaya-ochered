@@ -21,6 +21,7 @@ import queue_dialog_flow
 import queue_feature_http
 import queue_generic_profile
 import queue_inbound_media
+import queue_operations
 import queue_performance_http
 import queue_productivity_http
 import queue_realtime
@@ -300,6 +301,7 @@ class QueueHTTPHandlerMixin:
             "/api/whatsapp-action/claim",
             "/api/whatsapp-action/result",
             "/api/chat-control",
+            "/api/inbound-recovery-reply",
         }
 
     def _session_cookie_header(self, name: str, value: str, *, max_age: int | None = None) -> str:
@@ -591,10 +593,8 @@ class QueueHTTPHandlerMixin:
             sessions = self.saved_account_sessions(touch=False)
             self.html_response(queue_ticket_views.render_account_switcher(query, show_admin, sessions, self.current_auth_slot()))
         elif parsed.path == "/register":
-            # 1.00.6.84: регистрация доступна с любого устройства и также
-            # из уже авторизованного браузера. Новый вход будет добавлен в
-            # мультиаккаунтный сеанс через start_app_session().
-            self.html_response(app.render_register())
+            status = HTTPStatus.OK if queue_auth.self_registration_enabled() else HTTPStatus.FORBIDDEN
+            self.html_response(app.render_register(), status)
         elif parsed.path == "/forgot-password":
             if self.effective_user():
                 self.redirect("/account")
@@ -1033,7 +1033,10 @@ class QueueHTTPHandlerMixin:
         self.start_app_session(str(result["token"]), next_path)
 
     def _post_register(self, parsed) -> None:
-        # POST /register
+        # POST /register (only with QUEUE_ALLOW_SELF_REGISTRATION=1; the account then waits for approval)
+        if not queue_auth.self_registration_enabled():
+            self.html_response(app.render_register(), HTTPStatus.FORBIDDEN)
+            return
         form = self.read_form()
         password = form.get("password", "")
         if password != form.get("password2", ""):
@@ -1300,6 +1303,10 @@ class QueueHTTPHandlerMixin:
     def _post_api_chat_control(self, parsed) -> None:
         # POST /api/chat-control
         self.handle_chat_control()
+
+    def _post_api_inbound_recovery_reply(self, parsed) -> None:
+        # POST /api/inbound-recovery-reply (connector spool after an outage)
+        queue_operations.inbound_recovery_reply(self, app)
 
     def _post_instruction_sync(self, parsed, form) -> None:
         # POST /instruction/sync
@@ -2126,6 +2133,7 @@ class QueueHTTPHandlerMixin:
         "/api/whatsapp-action/claim": _post_api_whatsapp_action_claim,
         "/api/whatsapp-action/result": _post_api_whatsapp_action_result,
         "/api/chat-control": _post_api_chat_control,
+        "/api/inbound-recovery-reply": _post_api_inbound_recovery_reply,
     }
 
     # form posts that are not written to the admin form audit
