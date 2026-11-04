@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import os
@@ -276,6 +277,7 @@ class QueueHTTPHandlerMixin:
         return path in {
             "/api/media-stage",
             "/api/whatsapp",
+            "/api/inbound-recovery-reply",
             "/api/template-error-delivery",
             "/api/outbound/claim",
             "/api/outbound/heartbeat",
@@ -590,10 +592,8 @@ class QueueHTTPHandlerMixin:
             sessions = self.saved_account_sessions(touch=False)
             self.html_response(queue_ticket_views.render_account_switcher(query, show_admin, sessions, self.current_auth_slot()))
         elif parsed.path == "/register":
-            # 1.00.6.84: регистрация доступна с любого устройства и также
-            # из уже авторизованного браузера. Новый вход будет добавлен в
-            # мультиаккаунтный сеанс через start_app_session().
-            self.html_response(app.render_register())
+            # Public registration is an explicit deployment opt-in.
+            self.html_response(app.render_register(), HTTPStatus.OK if queue_auth.self_registration_enabled() else HTTPStatus.FORBIDDEN)
         elif parsed.path == "/forgot-password":
             if self.effective_user():
                 self.redirect("/account")
@@ -1004,7 +1004,11 @@ class QueueHTTPHandlerMixin:
         audit_admin_form_submission(parsed.path, form, self.effective_user())
         route = self.AUDITED_FORM_POST_ROUTES.get(parsed.path)
         if route:
-            route(self, parsed, form)
+            if parsed.path in {"/admin/categories", "/admin/menu"}:
+                with app.MENU_CONFIG.lock:
+                    route(self, parsed, form)
+            else:
+                route(self, parsed, form)
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -1033,6 +1037,9 @@ class QueueHTTPHandlerMixin:
 
     def _post_register(self, parsed) -> None:
         # POST /register
+        if not queue_auth.self_registration_enabled():
+            self.html_response(app.render_register("Аккаунты создаёт администратор"), HTTPStatus.FORBIDDEN)
+            return
         form = self.read_form()
         password = form.get("password", "")
         if password != form.get("password2", ""):
@@ -1204,6 +1211,24 @@ class QueueHTTPHandlerMixin:
     def _post_api_outbound_claim(self, parsed) -> None:
         # POST /api/outbound/claim
         self.handle_outbound_claim()
+
+    def _post_inbound_recovery_reply(self, parsed) -> None:
+        payload = self.read_authorized_json(120_000)
+        if payload is None:
+            return
+        external_id = str(payload.get("external_id", "")).strip()
+        chat_id = valid_chat_id(str(payload.get("chat_id", "")))
+        reply = str(payload.get("reply", "")).strip()
+        if not external_id or not chat_id or not reply or len(reply) > 32000:
+            self.json_response({"error": "invalid_recovery_reply"}, HTTPStatus.BAD_REQUEST)
+            return
+        if not app.global_auto_reply_enabled() or app.STORE.manual_chat_mode(chat_id):
+            self.json_response({"queued": False, "silent": True})
+            return
+        request_id = "inbound-recovery:" + hashlib.sha256(external_id.encode()).hexdigest()
+        message_id = app.STORE.queue_direct_message(chat_id, reply, "Бот", request_id=request_id)
+        queue_realtime.notify_outbound()
+        self.json_response({"queued": bool(message_id), "message_id": message_id})
 
     def _post_api_outbound_heartbeat(self, parsed) -> None:
         # POST /api/outbound/heartbeat, /api/outbound/begin
@@ -1721,9 +1746,11 @@ class QueueHTTPHandlerMixin:
         if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
             self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
             return
+        options = [dict(row) for row in app.MENU_OPTIONS]
+        archive = dict(app.CATEGORY_ARCHIVE)
         action = form.get("action", "save")
         if action == "add":
-            if len(app.MENU_OPTIONS) >= app.MAX_MENU_OPTIONS:
+            if len(options) >= app.MAX_MENU_OPTIONS:
                 self.redirect(
                     f"/admin/categories?notice={quote(f'Можно добавить не больше {app.MAX_MENU_OPTIONS} пунктов меню и категорий суммарно')}"
                 )
@@ -1732,13 +1759,12 @@ class QueueHTTPHandlerMixin:
             if not label:
                 self.redirect(f"/admin/categories?notice={quote('Укажите название категории')}")
                 return
-            key = f"custom_{secrets.token_hex(5)}"
-            app.CATEGORIES[key] = label
-            app.MENU_OPTIONS.append(
+            key = f"custom_c{secrets.token_hex(5)}"
+            options.append(
                 {
                     "key": key,
                     "label": label,
-                    "prompt": category_prompt(key),
+                    "prompt": "Опишите проблему или вопрос",
                     "enabled": True,
                     "action": app.MENU_ACTION_TICKET,
                 }
@@ -1749,12 +1775,12 @@ class QueueHTTPHandlerMixin:
                 count = int(form.get("row_count", "0"))
             except ValueError:
                 count = 0
-            if count != len(app.MENU_OPTIONS):
+            if count != len(options):
                 self.redirect(f"/admin/categories?notice={quote('Категории изменились, обновите страницу и повторите')}")
                 return
             updated_options: list[dict[str, object]] = []
             enabled_ticket_count = 0
-            for index, current in enumerate(app.MENU_OPTIONS, start=1):
+            for index, current in enumerate(options, start=1):
                 if str(current.get("action", app.MENU_ACTION_TICKET)) != app.MENU_ACTION_TICKET:
                     updated_options.append(current)
                     continue
@@ -1769,8 +1795,7 @@ class QueueHTTPHandlerMixin:
                 if form.get(f"delete_{index}") == "1":
                     # Keep the label for historical tickets, but remove the category
                     # from all new-ticket selectors and from the WhatsApp request menu.
-                    app.CATEGORY_ARCHIVE[key] = label
-                    app.CATEGORIES[key] = label
+                    archive[key] = label
                     continue
                 enabled = form.get(f"enabled_{index}") == "1"
                 old_label = str(current.get("label", ""))
@@ -1778,23 +1803,20 @@ class QueueHTTPHandlerMixin:
                 updated = dict(current)
                 updated["label"] = label
                 updated["enabled"] = enabled
-                app.CATEGORIES[key] = label
                 # If the prompt is still the automatically generated one, keep
                 # its heading in sync with a renamed category. Hand-edited prompts
                 # from the menu editor are left untouched.
                 if old_prompt.startswith(f"Вы выбрали: {old_label}."):
-                    updated["prompt"] = category_prompt(key)
+                    updated["prompt"] = f"Вы выбрали: {label}." + old_prompt[len(f"Вы выбрали: {old_label}."):]
                 updated_options.append(updated)
                 if enabled:
                     enabled_ticket_count += 1
             if enabled_ticket_count < 1:
                 self.redirect(f"/admin/categories?notice={quote('Оставьте хотя бы одну активную категорию для заявок')}")
                 return
-            app.MENU_OPTIONS[:] = updated_options
-            notice = "Категории сохранены. Нумерация меню для пользователей обновлена автоматически"
-        app.apply_menu_labels()
-        app.STORE.set_setting("request_menu_json", json.dumps(app.MENU_OPTIONS, ensure_ascii=False))
-        app.STORE.set_setting("request_category_archive_json", json.dumps(app.CATEGORY_ARCHIVE, ensure_ascii=False))
+            options[:] = updated_options
+            notice = "Категории сохранены. Меню бота обновлено"
+        app.MENU_CONFIG.save(options, archive)
         self.redirect(f"/admin/categories?notice={quote(notice)}")
 
     def _post_admin_menu(self, parsed, form) -> None:
@@ -1805,9 +1827,11 @@ class QueueHTTPHandlerMixin:
         if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
             self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
             return
+        options = [dict(row) for row in app.MENU_OPTIONS]
+        archive = dict(app.CATEGORY_ARCHIVE)
         action = form.get("action", "save")
         if action == "add":
-            if len(app.MENU_OPTIONS) >= app.MAX_MENU_OPTIONS:
+            if len(options) >= app.MAX_MENU_OPTIONS:
                 self.redirect(
                     f"/admin/menu?notice={quote(f'Можно добавить не больше {app.MAX_MENU_OPTIONS} вариантов')}"
                 )
@@ -1820,9 +1844,9 @@ class QueueHTTPHandlerMixin:
             if not label or not prompt:
                 self.redirect(f"/admin/menu?notice={quote('Заполните название и подсказку')}")
                 return
-            app.MENU_OPTIONS.append(
+            options.append(
                 {
-                    "key": f"custom_{secrets.token_hex(5)}",
+                    "key": f"custom_c{secrets.token_hex(5)}",
                     "label": label,
                     "prompt": prompt,
                     "enabled": True,
@@ -1834,11 +1858,11 @@ class QueueHTTPHandlerMixin:
                 count = int(form.get("row_count", "0"))
             except ValueError:
                 count = 0
-            if count != len(app.MENU_OPTIONS):
+            if count != len(options):
                 self.redirect(f"/admin/menu?notice={quote('Меню изменилось, обновите страницу и повторите')}")
                 return
             updated_options: list[dict[str, object]] = []
-            for index, current in enumerate(app.MENU_OPTIONS, start=1):
+            for index, current in enumerate(options, start=1):
                 key = form.get(f"key_{index}", "")
                 if key != current["key"]:
                     self.send_error(HTTPStatus.BAD_REQUEST, "Invalid menu row")
@@ -1863,10 +1887,9 @@ class QueueHTTPHandlerMixin:
             if not any(bool(item["enabled"]) for item in updated_options):
                 self.redirect(f"/admin/menu?notice={quote('Оставьте включённым хотя бы один вариант')}")
                 return
-            app.MENU_OPTIONS[:] = updated_options
-        app.apply_menu_labels()
-        app.STORE.set_setting("request_menu_json", json.dumps(app.MENU_OPTIONS, ensure_ascii=False))
-        self.redirect(f"/admin/menu?notice={quote('Меню обращений сохранено. Нумерация видимых пунктов обновлена автоматически')}")
+            options[:] = updated_options
+        app.MENU_CONFIG.save(options, archive)
+        self.redirect(f"/admin/menu?notice={quote('Меню обращений сохранено. Номера существующих пунктов сохранены')}")
 
     def _post_active_employee(self, parsed, form) -> None:
         # POST /active-employee
@@ -2245,6 +2268,7 @@ class QueueHTTPHandlerMixin:
         "/api/system-warning-action": _post_api_system_warning_action,
         "/api/media-stage": _post_api_media_stage,
         "/api/whatsapp": _post_api_whatsapp,
+        "/api/inbound-recovery-reply": _post_inbound_recovery_reply,
         "/api/template-error-delivery": _post_api_template_error_delivery,
         "/api/outbound/claim": _post_api_outbound_claim,
         "/api/outbound/heartbeat": _post_api_outbound_heartbeat,

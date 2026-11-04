@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+import queue_auth
+
 
 # Bump on every change to static/; appended as ?v= to bust browser caches.
 ASSET_VERSION = "143.2"
@@ -71,7 +73,7 @@ def render_login(
         <label>Пароль<input type="password" name="password" autocomplete="current-password" maxlength="256" required></label>
         <button class="auth-primary" type="submit">Войти</button>
       </form>
-      <div class="auth-links"><a href="/register">Создать аккаунт</a><span>•</span><a href="/forgot-password">Восстановить пароль</a></div>
+      <div class="auth-links">{'<a href="/register">Создать аккаунт</a><span>•</span>' if queue_auth.self_registration_enabled() else ""}<a href="/forgot-password">Восстановить пароль</a></div>
       <small class="auth-foot">Сеанс автоматически истекает через {int(session_hours)} ч.</small>
     </section>
   </main>
@@ -88,7 +90,9 @@ def render_register(
     escape: Callable[[Any], str],
 ) -> str:
     error_html = f'<div class="auth-error">{escape(error)}</div>' if error else ""
-    if auth.enabled_admin_count() < 1:
+    if not queue_auth.self_registration_enabled():
+        form_html = '<p class="auth-hint">Аккаунты сотрудников создаёт администратор в разделе «Доступ».</p>'
+    elif auth.enabled_admin_count() < 1:
         form_html = '<div class="auth-hint">Сначала должен быть создан администратор системы. После этого можно регистрировать аккаунты сотрудников.</div>'
     else:
         form_html = '''<form method="post" action="/register" class="auth-form" autocomplete="on">
@@ -137,7 +141,7 @@ def render_forgot_password(
       <label>Логин<input name="username" autocomplete="username" maxlength="32" required autofocus></label>
       <button class="auth-primary" type="submit">Отправить запрос</button>
     </form>
-    <div class="auth-links"><a href="/login">Вернуться ко входу</a><span>•</span><a href="/register">Создать аккаунт</a></div>
+    <div class="auth-links"><a href="/login">Вернуться ко входу</a>{'<span>•</span><a href="/register">Создать аккаунт</a>' if queue_auth.self_registration_enabled() else ""}</div>
   </section></main>
   {_script()}
 </body></html>'''

@@ -21,11 +21,21 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install connector dependencies
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+
+      - name: Connector imports and JavaScript tests
+        run: |
+          npm run check:connector
+          npm test
+
       - name: Python tests
         run: python -m unittest discover -s tests -t . -v
 
       - name: JavaScript syntax
         run: |
-          for file in static/*.js whatsapp_qr_connector.js; do
+          for file in static/*.js *.js scripts/*.js; do
             node --check "$file"
           done

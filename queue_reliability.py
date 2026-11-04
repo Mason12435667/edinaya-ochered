@@ -161,28 +161,37 @@ def cancel_scheduled(store, schedule_id: int) -> bool:
 
 
 def dispatch_due(store, limit: int = 25) -> int:
-    now = utc_now(); moved = 0
-    with store.connection() as db:
-        rows = db.execute("SELECT * FROM reliability_scheduled_messages WHERE status='scheduled' AND due_at<=? ORDER BY due_at,id LIMIT ?",
-                          (now,int(limit))).fetchall()
-    for raw in rows:
-        row = dict(raw)
+    moved = 0
+    for _ in range(max(0, int(limit))):
+        schedule_id = None
         try:
-            # Queueing and marking the schedule as queued commit together; the
-            # request id additionally makes a repeated pass reuse the same message.
-            with store.atomic():
-                outbound_id = int(store.queue_direct_message(
-                    row['chat_id'], row['body'], row['actor'], request_id=f"scheduled:{int(row['id'])}") or 0)
+            with store.atomic() as db:
+                row = db.execute(
+                    "SELECT * FROM reliability_scheduled_messages "
+                    "WHERE status='scheduled' AND due_at<=? ORDER BY due_at,id LIMIT 1",
+                    (utc_now(),),
+                ).fetchone()
+                if row is None:
+                    break
+                schedule_id = int(row['id'])
+                outbound_id = store.queue_direct_message(
+                    row['chat_id'], row['body'], row['actor'],
+                    request_id=f"scheduled:{schedule_id}",
+                )
                 if outbound_id <= 0:
                     raise RuntimeError('Не удалось поставить сообщение во внутреннюю очередь WhatsApp')
-                with store.connection() as db:
-                    db.execute("UPDATE reliability_scheduled_messages SET status='queued',outbound_id=?,last_error='' WHERE id=? AND status='scheduled'",
-                               (outbound_id,int(row['id'])))
+                db.execute(
+                    "UPDATE reliability_scheduled_messages SET status='queued',outbound_id=?,last_error='' "
+                    "WHERE id=? AND status='scheduled'", (outbound_id, schedule_id),
+                )
             moved += 1
         except Exception as exc:
-            with store.connection() as db:
-                db.execute("UPDATE reliability_scheduled_messages SET last_error=? WHERE id=? AND status='scheduled'",
-                           (str(exc)[:300],int(row['id'])))
+            if schedule_id is not None:
+                with store.connection() as db:
+                    db.execute("UPDATE reliability_scheduled_messages SET last_error=? WHERE id=? AND status='scheduled'",
+                               (str(exc)[:300], schedule_id))
+            log_suppressed("queue_reliability.dispatch_due")
+            break  # Retry later; do not spin on the same failing item.
     return moved
 
 

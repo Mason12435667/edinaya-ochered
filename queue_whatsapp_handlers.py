@@ -330,7 +330,12 @@ class WhatsAppHandlerMixin:
         language = queue_user_locale.current_language()
         try:
             with app.STORE.atomic_inbound():
-                self._process_api_message(payload)
+                external_id = str(payload.get("external_id", ""))
+                contact = valid_chat_id(str(payload.get("chat_id", ""))) or normalize_phone(str(payload.get("phone", "")))
+                if external_id and not app.STORE.claim_inbound_message(external_id, contact):
+                    self._inbound_json_response({"created": False, "duplicate": True})
+                else:
+                    self._process_api_message(payload)
                 if self._inbound_result is None:
                     raise RuntimeError("Inbound response missing")
         except Exception as error:
@@ -401,9 +406,6 @@ class WhatsAppHandlerMixin:
         if eligible and (intent or (active and not pending_context_category(context)
                 and str(context.get("pending_category", "")) in {"", app.ACTIVE_TICKET_FOLLOWUP_CONTEXT}
                 and queue_dialog_flow.other_topic(text, str(active.get("category", ""))))):
-            mid = str(payload.get("external_id", ""))
-            if mid and not app.STORE.claim_inbound_message(mid,key):
-                self._inbound_json_response({"created":False,"duplicate":True});return
             if intent and command in {"дополнение", "қосымша"}:
                 state.pop("topic",None);state.pop("topic_attempts",None);queue_dialog_flow.save(app.STORE,key,state)
                 self._process_api_message_core({**payload, **intent, "chat_id":key, "phone":phone}, replay=True)
@@ -470,7 +472,7 @@ class WhatsAppHandlerMixin:
                 return
 
     def _inbound_parse(self, msg) -> bool:
-        # Read the payload, stage media and drop duplicate deliveries.
+        # Parse an already claimed message; deduplication precedes all state changes.
         msg.external_id = str(msg.payload.get("external_id", ""))
         msg.phone = normalize_phone(str(msg.payload.get("phone", "")))
         msg.sender = str(msg.payload.get("sender", "")).strip() or "Неизвестный отправитель"
@@ -485,9 +487,6 @@ class WhatsAppHandlerMixin:
             msg.media_path = app.save_media_payload(msg.chat_id, msg.external_id, media_base64, msg.media_mime, msg.media_name)
         if msg.payload.get("media_receipt"):
             msg.media_path = queue_inbound_media.resolve(app.MEDIA_DIR, msg.chat_id, msg.external_id, msg.payload["media_receipt"]) or msg.media_path
-        if not msg.replay and msg.external_id and not app.STORE.claim_inbound_message(msg.external_id, msg.contact_key):
-            self._inbound_json_response({"created": False, "duplicate": True})
-            return True
         return False
 
     def _inbound_store_chat_message(self, msg) -> bool:
