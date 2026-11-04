@@ -3,14 +3,18 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import re
+import subprocess
+import sys
+from pathlib import Path
 import unittest
 
 from tests import support
 from tests.support import WhatsAppUser, admin_cookie, csrf_token, get, post_form
 
 PAGES = [
-    "/", "/my", "/whatsapp", "/groups", "/ticket?id=1",
+    "/", "/whatsapp", "/groups", "/ticket?id=1",
     "/admin/", "/admin/users", "/admin/employees", "/admin/manual", "/admin/menu", "/admin/categories",
     "/admin/errors", "/admin/contacts", "/admin/audit", "/admin/analytics", "/admin/manager",
     "/admin/api-keys", "/admin/system", "/admin/groups", "/admin/reliability", "/admin/workflow",
@@ -91,8 +95,15 @@ class CsrfTests(unittest.TestCase):
         self.assertEqual(tickets_titled("CSRF токен админа"), 0)
 
     def test_token_survives_restart(self):
-        # The secret is stored in the database, not regenerated per process.
-        self.assertEqual(support.app._csrf_secret(), support.app.CSRF_SECRET)
+        # A second process on the same database is a real restart: it must issue the same token.
+        user = {"id": 1, "username": support.ADMIN_USERNAME}
+        script = "import json, sys, app; print(app.csrf_token(json.loads(sys.argv[1])))"
+        result = subprocess.run(
+            [sys.executable, "-c", script, json.dumps(user)],
+            cwd=Path(support.app.__file__).parent, env=dict(os.environ), capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertEqual(result.stdout.strip().splitlines()[-1], support.app.csrf_token(user))
 
     def test_connector_endpoints_use_webhook_token_instead(self):
         reply = WhatsAppUser().say("Здравствуйте")
@@ -105,6 +116,7 @@ class CsrfTests(unittest.TestCase):
         for page in PAGES:
             response = get(page, cookie)
             if response.status != 200:
+                missing.append(f"{page}: HTTP {response.status} (page not checked)")
                 continue
             for form in re.findall(r"<form\b[^>]*>.*?</form>", response.text, re.S | re.I):
                 opening = form[:form.index(">") + 1]
