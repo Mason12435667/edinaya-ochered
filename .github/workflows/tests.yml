@@ -26,6 +26,16 @@ jobs:
 
       - name: JavaScript syntax
         run: |
-          for file in static/*.js whatsapp_qr_connector.js; do
+          for file in static/*.js *.js; do
             node --check "$file"
           done
+
+      # Clean install from package-lock.json, as on a new server (no browser download).
+      - name: Install connector dependencies
+        run: npm ci --no-audit --no-fund
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "1"
+
+      # Includes a check that every module the connector requires can be loaded.
+      - name: Connector tests
+        run: node --test tests/*.test.js
