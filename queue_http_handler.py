@@ -592,10 +592,8 @@ class QueueHTTPHandlerMixin:
             sessions = self.saved_account_sessions(touch=False)
             self.html_response(queue_ticket_views.render_account_switcher(query, show_admin, sessions, self.current_auth_slot()))
         elif parsed.path == "/register":
-            # 1.00.6.84: регистрация доступна с любого устройства и также
-            # из уже авторизованного браузера. Новый вход будет добавлен в
-            # мультиаккаунтный сеанс через start_app_session().
-            self.html_response(app.render_register())
+            status = HTTPStatus.OK if queue_auth.self_registration_enabled() else HTTPStatus.FORBIDDEN
+            self.html_response(app.render_register(), status)
         elif parsed.path == "/forgot-password":
             if self.effective_user():
                 self.redirect("/account")
@@ -1034,7 +1032,10 @@ class QueueHTTPHandlerMixin:
         self.start_app_session(str(result["token"]), next_path)
 
     def _post_register(self, parsed) -> None:
-        # POST /register
+        # POST /register (only with QUEUE_ALLOW_SELF_REGISTRATION=1; the account then waits for approval)
+        if not queue_auth.self_registration_enabled():
+            self.html_response(app.render_register(), HTTPStatus.FORBIDDEN)
+            return
         form = self.read_form()
         password = form.get("password", "")
         if password != form.get("password2", ""):

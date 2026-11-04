@@ -12,19 +12,23 @@ const {InboundSpool, MIN_AGE_MS} = require('../queue_inbound_spool');
 const largeMedia = require('../queue_large_media');
 const avatars = require('../queue_avatars');
 
-test('every module the connector requires can be resolved', () => {
-  const source = fs.readFileSync(path.join(ROOT, 'whatsapp_qr_connector.js'), 'utf8');
-  const names = [...new Set([...source.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]))];
-  const missing = [];
+test('every module the connector requires loads', () => {
+  // Loading (not just resolving) also catches modules that throw at import time.
+  // No WhatsApp client or browser is started by requiring them.
+  const entry = path.join(ROOT, 'whatsapp_qr_connector.js');
+  const load = require('node:module').createRequire(entry);
+  const source = fs.readFileSync(entry, 'utf8');
+  // window.require('WAWeb…') runs inside the WhatsApp Web page, not in Node
+  const names = [...new Set([...source.matchAll(/(?<![\w.])require\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]))];
+  const failed = [];
   for (const name of names) {
-    if (/^WAWeb/.test(name)) continue; // resolved inside the WhatsApp Web page, not by Node
     try {
-      require.resolve(name.startsWith('.') ? path.join(ROOT, name) : name, {paths: [ROOT]});
-    } catch (_) {
-      missing.push(name);
+      load(name);
+    } catch (error) {
+      failed.push(`${name}: ${String(error && error.message).split('\n')[0]}`);
     }
   }
-  assert.deepEqual(missing, [], 'run `npm ci` first if only npm packages are listed');
+  assert.deepEqual(failed, [], 'run `npm ci` first if only npm packages are listed');
 });
 
 function fakeClient(behaviour) {

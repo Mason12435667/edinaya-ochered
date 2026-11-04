@@ -652,7 +652,7 @@ def render_account_switcher(
         cards.append('<div class="panel empty">Сохранённых аккаунтов нет</div>')
     content = f'''
       <section class="page-heading"><div><p class="eyebrow">Общий компьютер</p><h1>Аккаунты на этом устройстве</h1><p>Можно сохранить несколько входов в одном браузере и переключаться между ними без выхода из остальных аккаунтов.</p></div>
-        <div class="instruction-live-actions"><a class="button primary" href="/login?add=1&next=/accounts">Добавить существующий</a><a class="button ghost" href="/register">Создать новый аккаунт</a></div>
+        <div class="instruction-live-actions"><a class="button primary" href="/login?add=1&next=/accounts">Добавить существующий</a>{'<a class="button ghost" href="/register">Создать новый аккаунт</a>' if queue_auth.self_registration_enabled() else ''}</div>
       </section>
       {notice_html}
       <section class="my-account-grid">{''.join(cards)}</section>
