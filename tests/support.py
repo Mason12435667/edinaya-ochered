@@ -48,7 +48,6 @@ os.environ.update({
     "QUEUE_PROFILE": "generic",
 })
 os.environ.pop("QUEUE_ALLOW_LAN", None)
-os.environ.pop("QUEUE_INSTRUCTION_SOURCE_URL", None)
 
 import app  # noqa: E402  (must follow the environment setup above)
 

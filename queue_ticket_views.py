@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -45,10 +44,7 @@ def layout(
         ("tickets", "/", "Заявки", ""),
         ("whatsapp", "/whatsapp", "WhatsApp", ""),
         ("groups", "/groups", "Группы", ""),
-        ("instruction", app.INSTRUCTION_URL, "Инструкция", ""),
     ]
-    if os.getenv('QUEUE_PROFILE', 'generic').strip().lower() == 'generic':
-        nav_items = [item for item in nav_items if item[0] != 'instruction']
     auth_user = queue_auth.current_user() or {}
     if show_admin:
         nav_items.append(("admin", "/admin/", "Админка", ""))
@@ -121,13 +117,6 @@ def layout(
 </html>"""
 
 
-def render_instruction(show_admin: bool = False, query: dict[str, list[str]] | None = None) -> str:
-    """Generic profile: per-organization knowledge base is not bundled."""
-    return layout(
-        "База знаний",
-        '<section class="card"><h1>База знаний</h1><p>Материалы пока не настроены.</p></section>',
-        show_admin=show_admin,
-    )
 
 
 

@@ -54,13 +54,12 @@
         box = document.createElement('section'); box.className = 'reliability-grid uq-performance-cards-107'; box.dataset.performance107Cards = '1';
         mount.insertAdjacentElement('afterend', box);
       }
-      const c = data.connector || {}, sql = data.sql || {}, voice = data.voice_queue || {};
+      const c = data.connector || {}, sql = data.sql || {};
       box.innerHTML = `
         <article class="panel reliability-card"><span>RAM WhatsApp</span><strong>${Number(c.rss_mb||0).toFixed(0)} МБ</strong><small>автопорог: ${c.ram_restart_mb ? c.ram_restart_mb+' МБ' : 'выключен'}</small></article>
         <article class="panel reliability-card"><span>RAM сайта</span><strong>${Number(data.server_rss_mb||0).toFixed(0)} МБ</strong><small>Python-процесс</small></article>
         <article class="panel reliability-card"><span>Медиа-очередь</span><strong>${Number(c.pending_media||0)}</strong><small>${Number(data.media_workers||0)} обработчика · chunk ${Math.round(Number(data.chunk_size||0)/1024)} КБ</small></article>
-        <article class="panel reliability-card"><span>SQLite</span><strong class="${sql.ok===false?'system-bad':'system-ok'}">${sql.ok===false?'Проверить':'OK'}</strong><small>индексов ${Number(sql.indexes||0)} · медленных ${Array.isArray(sql.slow)?sql.slow.length:0}</small></article>
-        <article class="panel reliability-card"><span>Голосовые</span><strong>${Number(voice.queued||0)} в очереди</strong><small>1 ограниченный worker · готовые не пересчитываются</small></article>`;
+        <article class="panel reliability-card"><span>SQLite</span><strong class="${sql.ok===false?'system-bad':'system-ok'}">${sql.ok===false?'Проверить':'OK'}</strong><small>индексов ${Number(sql.indexes||0)} · медленных ${Array.isArray(sql.slow)?sql.slow.length:0}</small></article>`;
     } catch (_) {}
   };
   render(); setInterval(render, 15000);

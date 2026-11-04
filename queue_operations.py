@@ -1,9 +1,7 @@
 """Ticket operations with explicit dependencies, revision checks and handoff history."""
 import hashlib
 import html
-import secrets
-from urllib.parse import urlparse,quote
-from queue_core import log_suppressed
+from urllib.parse import urlparse
 
 
 def initialize(store):
@@ -80,49 +78,4 @@ def inbound_recovery_reply(handler,app):
     if message:app.queue_realtime.notify_outbound()
     handler.json_response({'queued':bool(message),'message_id':message},200 if message else 400)
 
-
-def post(handler,app):
-    path=urlparse(handler.path).path
-    if path not in {'/status','/quick-status','/quick-priority','/classification','/handoff'}:return False
-    form=handler.read_form()
-    if not secrets.compare_digest(form.get('csrf_token',''),app.csrf_token()):
-        handler.json_response({'error':'Обновите страницу: сессия формы устарела'},403);return True
-    try:
-        tid=int(form.get('ticket_id','0'));revision=int(form.get('revision','-1'))
-        actor=app.work_actor();message_id=0
-        with app.STORE.atomic_inbound():
-            ticket=app.STORE.get_ticket(tid)
-            if not ticket:raise ValueError('Заявка не найдена')
-            if revision<0 or ticket['revision']!=revision:raise Conflict('Заявку уже изменили. Обновите страницу и проверьте актуальные данные')
-            if path in {'/status','/quick-status'}:
-                status=form.get('status','');reason=form.get('close_reason','');comment=form.get('close_comment','')
-                valid,error=app.queue_workflow.validate_close(app.STORE,tid,status,reason,comment)
-                if not valid:raise ValueError(error)
-                assignee=form.get('employee','') if path=='/status' else (actor if status=='in_progress' else ticket['assigned_to'])
-                if assignee not in app.assignment_names():assignee=ticket['assigned_to'] or actor
-                updated,message_id=app.update_ticket_status(tid,status,actor,assignee,allow_reopen=handler.is_admin(),close_reason=reason,close_comment=comment)
-                if not updated:raise ValueError('Изменение статуса недоступно')
-            elif path=='/handoff':
-                accept=form.get('action')=='accept';note=form.get('handoff_note','').strip()[:2000]
-                if accept and not ticket['shift_handoff']:raise Conflict('Заявка уже принята или не передавалась')
-                if not accept and ticket['shift_handoff']:raise Conflict('Заявка уже передана смене')
-                if not accept and not note:raise ValueError('Укажите, что сделано и что осталось')
-                if not app.STORE.set_ticket_handoff(tid,not accept,actor):raise ValueError('Закрытую заявку нельзя передать')
-                with app.STORE.connection() as db:
-                    if accept:db.execute("UPDATE ticket_handoffs SET accepted_by=?,accepted_at=CURRENT_TIMESTAMP WHERE ticket_id=? AND accepted_by=''",(actor,tid))
-                    else:db.execute('INSERT INTO ticket_handoffs(ticket_id,actor,note) VALUES(?,?,?)',(tid,actor,note))
-            else:
-                if not app.STORE.update_priority(tid,form.get('priority',''),actor):raise ValueError('Неверный приоритет')
-        app.queue_realtime.notify('ticket')
-        if message_id:app.queue_realtime.notify_outbound()
-        if path.startswith('/quick-'):handler.json_response({'updated':True,'ticket_id':tid,'notification_queued':bool(message_id)})
-        else:handler.redirect('/shift-handoff' if form.get('next')=='/shift-handoff' else f'/ticket?id={tid}')
-    except (ValueError,TypeError) as error:
-        code=409 if isinstance(error,Conflict) else 400
-        if path.startswith('/quick-'):handler.json_response({'updated':False,'error':str(error)},code)
-        else:handler.html_response(app.layout('Изменение не сохранено','<section class="panel"><h1>Изменение не сохранено</h1><p>'+app.e(str(error))+'</p><a href="/ticket?id='+str(handler.form_int(form,'ticket_id'))+'">Открыть актуальную заявку</a></section>',show_admin=handler.is_admin()),code)
-    except Exception:
-        log_suppressed("queue_operations.post")
-        handler.json_response({'updated':False,'error':'Не удалось сохранить изменение. Данные не изменены, повторите позже'},503)
-    return True
 

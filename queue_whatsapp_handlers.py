@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 from datetime import datetime, timezone
@@ -960,22 +959,6 @@ class WhatsAppHandlerMixin:
 
             app.STORE.clear_conversation_draft(msg.contact_key)
             queue_contextual_tickets.reset_context(app.STORE, msg.contact_key, msg.chosen_category)
-            if app.configured_category_action(msg.chosen_category) == app.MENU_ACTION_INSTRUCTION:
-                app.STORE.set_conversation_context(
-                    msg.contact_key,
-                    app.MENU_CONTEXT,
-                    msg.active_ticket_id,
-                    bool(msg.active_ticket),
-                )
-                self._inbound_json_response(
-                    {
-                        "created": False,
-                        "instruction_only": True,
-                        "category": msg.chosen_category,
-                        "reply": app.configured_category_prompt(msg.chosen_category),
-                    }
-                )
-                return True
             if msg.chosen_category == "support":
                 app.STORE.set_conversation_context(
                     msg.contact_key,

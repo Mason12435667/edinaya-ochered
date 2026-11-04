@@ -173,25 +173,6 @@ def suppress_inbound_auto_reply(payload: dict[str, object]) -> dict[str, object]
     return result
 MAX_MEDIA_BYTES = max(1, min(256, int(os.getenv("QUEUE_MAX_MEDIA_MB", "12")))) * 1024 * 1024
 UPLOADS = queue_uploads.Uploads(OUTBOUND_MEDIA_DIR / "uploads", STORE)
-class DisabledVoiceJobs:
-    """Compatibility object: voice transcription is intentionally disabled."""
-
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        self.states: dict[tuple[str, str], dict[str, str]] = {}
-
-    def submit(self, chat_id: str, message_id: str) -> dict[str, str]:
-        key = (str(chat_id), str(message_id))
-        state = {
-            "status": "error",
-            "reason": "Расшифровка голосовых отключена администратором",
-        }
-        with self.lock:
-            self.states[key] = dict(state)
-        return state
-
-
-VOICE_JOBS = DisabledVoiceJobs()
 RETENTION_DAYS = max(1, min(3650, int(os.getenv("QUEUE_RETENTION_DAYS", "20"))))
 # Фото, присланные непосредственно перед текстом заявки, можно автоматически
 # прикрепить к создаваемой заявке. Окно ограничено, чтобы старые скриншоты не
@@ -221,9 +202,6 @@ def connector_token() -> str:
 
 
 WEBHOOK_TOKEN = connector_token()
-INSTRUCTION_URL = "/instruction"
-INSTRUCTION_SOURCE_URL = os.getenv("QUEUE_INSTRUCTION_SOURCE_URL", "").strip()
-INSTRUCTION_DATA_PATH = ROOT / "instruction_data.json"
 DEFAULT_EMPLOYEES = [f"Сотрудник {number}" for number in range(1, 6)]
 ADMIN_USER = os.getenv("QUEUE_ADMIN_USER", "queueadmin").strip().casefold()
 ADMIN_SESSION_TOKEN = secrets.token_urlsafe(48)
@@ -234,8 +212,7 @@ AUTH_SESSION_MAX_AGE = queue_auth.SESSION_HOURS * 60 * 60
 MAX_EMPLOYEES = 50
 MAX_MENU_OPTIONS = 30
 MENU_ACTION_TICKET = "ticket"
-MENU_ACTION_INSTRUCTION = "instruction"
-MENU_ACTIONS = {MENU_ACTION_TICKET, MENU_ACTION_INSTRUCTION}
+MENU_ACTIONS = {MENU_ACTION_TICKET}
 SUPPORT_MODE_CONTEXT = "__support_mode__"
 ERROR_REPORT_CONTEXT = "__error_report__"
 ACTIVE_TICKETS_CONTEXT = "__active_tickets__"
@@ -1308,7 +1285,6 @@ update_ticket_status = TICKET_SERVICE.update_status
 
 # Ticket views retain their existing interface.
 layout = queue_ticket_views.layout
-render_instruction = queue_ticket_views.render_instruction
 render_dashboard = queue_ticket_views.render_dashboard
 render_ticket = queue_ticket_views.render_ticket
 render_my_page = queue_ticket_views.render_my_page
@@ -1676,7 +1652,7 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
         if os.getenv("QUEUE_PROFILE", "generic").strip().lower() != "generic":
             return False
         path = urlparse(self.path).path.lower()
-        return path.rstrip("/") == "/instruction" or path.startswith(('/приложения', '/api/приложения', '/admin/приложения', '/api/внешнего сервиса', '/admin/внешнего сервиса', '/static/приложения-'))
+        return path.startswith(('/приложения', '/api/приложения', '/admin/приложения', '/api/внешнего сервиса', '/admin/внешнего сервиса', '/static/приложения-'))
 
     def do_GET(self):
         if self._generic_domain_path():

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import secrets
-from datetime import datetime, timezone
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import queue_workflow as qw
@@ -11,13 +9,6 @@ from queue_core import log_suppressed
 
 def _value(query, key, default=""):
     return query.get(key, [default])[0]
-
-
-def _csrf(handler, app, form) -> bool:
-    if secrets.compare_digest(str(form.get("csrf_token", "")), str(app.csrf_token())):
-        return True
-    handler.json_response({"error": "Обновите страницу и попробуйте снова"}, 403)
-    return False
 
 
 def _send_bytes(handler, body: bytes, content_type: str, filename: str):
@@ -196,8 +187,6 @@ def _post_impl(handler, app):
     if path == "/admin/workflow" and not handler.require_admin():
         return True
     form = handler.read_form()
-    if not _csrf(handler, app, form):
-        return True
     try:
         if path == "/api/workflow-recent-open":
             qw.record_recent(app.STORE, form.get("chat_id", ""), app.work_actor())
@@ -310,8 +299,6 @@ def post(handler, app):
     if path not in guarded:
         return _post_impl(handler, app)
     form = handler.read_form()
-    if not _csrf(handler, app, form):
-        return True
     from queue_operations import Conflict
     read_form, respond = handler.read_form, handler.json_response
     replies = []
