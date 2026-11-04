@@ -160,9 +160,9 @@ html[data-theme="light"] .auth-profile-password input { background:#f7fbf9; colo
 /* 1.00.6.26: compact WhatsApp workspace */
 body:has([data-conversation-page]) main.page {
   width: calc(100% - 24px) !important;
-  max-width: none !important;
-  margin: 0 auto !important;
-  padding: 10px 0 8px !important;
+  max-width: none;
+  margin: 0 auto;
+  padding: 10px 0 8px;
   box-sizing: border-box;
 }
 body:has([data-conversation-page]) footer { display: none !important; }
@@ -171,44 +171,44 @@ body:has([data-conversation-page]) .whatsapp-heading {
 }
 body:has([data-conversation-page]) .chat-shell {
   width: 100% !important;
-  max-width: none !important;
-  height: calc(100vh - 82px) !important;
-  min-height: 620px !important;
-  gap: 12px !important;
-  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) !important;
+  max-width: none;
+  height: calc(100vh - 82px);
+  min-height: 620px;
+  gap: 12px;
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
 }
 body:has([data-conversation-page]) .chat-sidebar,
 body:has([data-conversation-page]) .chat-main {
-  height: 100% !important;
-  min-height: 0 !important;
+  height: 100%;
+  min-height: 0;
 }
 body:has([data-conversation-page]) .chat-main {
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: column;
 }
 body:has([data-conversation-page]) .chat-header {
-  flex: 0 0 auto !important;
-  min-height: 0 !important;
-  padding-top: 8px !important;
-  padding-bottom: 8px !important;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 body:has([data-conversation-page]) .chat-header-actions {
-  gap: 6px !important;
-  align-items: center !important;
+  gap: 6px;
+  align-items: center;
 }
 body:has([data-conversation-page]) .chat-messages {
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 body:has([data-conversation-page]) .chat-composer {
-  flex: 0 0 auto !important;
+  flex: 0 0 auto;
 }
 body:has([data-conversation-page]) .chat-memory-note { display: none !important; }
 @media (max-width: 900px) {
   body:has([data-conversation-page]) main.page { width: calc(100% - 12px) !important; }
   body:has([data-conversation-page]) .chat-shell {
-    height: auto !important;
-    min-height: calc(100vh - 76px) !important;
+    height: auto;
+    min-height: calc(100vh - 76px);
   }
 }
 
@@ -216,27 +216,27 @@ body:has([data-conversation-page]) .chat-memory-note { display: none !important;
 /* 1.00.6.26: arrange chat/group functions like the approved mockup */
 body:has([data-conversation-page]) .chat-header {
   display: grid !important;
-  grid-template-columns: minmax(0, 1fr) auto !important;
-  align-items: start !important;
-  gap: 10px 16px !important;
-  padding: 14px 18px 12px !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px 16px;
+  padding: 14px 18px 12px;
 }
 body:has([data-conversation-page]) .chat-header > div:first-child {
-  min-width: 0 !important;
+  min-width: 0;
 }
 body:has([data-conversation-page]) .chat-header h2 {
-  margin: 0 !important;
-  line-height: 1.15 !important;
+  margin: 0;
+  line-height: 1.15;
 }
 body:has([data-conversation-page]) .chat-header-actions {
-  justify-self: end !important;
+  justify-self: end;
   display: flex !important;
-  flex-wrap: wrap !important;
-  justify-content: flex-end !important;
-  align-items: center !important;
-  gap: 8px !important;
-  max-width: min(62vw, 900px) !important;
-  margin: 0 !important;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  max-width: min(62vw, 900px);
+  margin: 0;
 }
 body:has([data-conversation-page]) .chat-header-actions .button,
 body:has([data-conversation-page]) .chat-header-actions .icon-button,
@@ -245,18 +245,18 @@ body:has([data-conversation-page]) .chat-header-actions summary {
   padding: 0 14px !important;
   border-radius: 14px !important;
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   justify-content: center !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
 }
 body:has([data-conversation-page]) .chat-header-actions .button.primary {
   box-shadow: 0 8px 20px rgba(53, 209, 161, 0.12) !important;
 }
 body:has([data-conversation-page]) .participants-details {
-  margin: 0 !important;
+  margin: 0;
 }
 body:has([data-conversation-page]) .participants-details summary {
-  list-style: none !important;
+  list-style: none;
 }
 body:has([data-conversation-page]) .participants-details summary::-webkit-details-marker {
   display: none !important;
@@ -275,12 +275,12 @@ body:has([data-conversation-page]) .participants-details[open] .participants-lis
 }
 @media (max-width: 1120px) {
   body:has([data-conversation-page]) .chat-header {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: 1fr;
   }
   body:has([data-conversation-page]) .chat-header-actions {
-    justify-self: stretch !important;
-    justify-content: flex-start !important;
-    max-width: none !important;
+    justify-self: stretch;
+    justify-content: flex-start;
+    max-width: none;
   }
 }
 
@@ -288,70 +288,70 @@ body:has([data-conversation-page]) .participants-details[open] .participants-lis
 /* 1.00.6.26: real DOM toolbar fix + overflow menu */
 body:has([data-conversation-page]) .chat-header {
   display: grid !important;
-  grid-template-columns: minmax(240px, 1fr) auto !important;
-  align-items: center !important;
-  padding: 12px 16px !important;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  align-items: center;
+  padding: 12px 16px;
 }
 body:has([data-conversation-page]) .chat-header-actions {
-  justify-self: end !important;
+  justify-self: end;
   width: auto !important;
-  max-width: none !important;
+  max-width: none;
   display: flex !important;
-  flex-wrap: nowrap !important;
-  align-items: center !important;
-  justify-content: flex-end !important;
-  gap: 8px !important;
-  margin-left: auto !important;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
 }
 body:has([data-conversation-page]) .chat-header-actions > .button,
 body:has([data-conversation-page]) .chat-header-actions > .icon-button,
 body:has([data-conversation-page]) .chat-toolbar-overflow > summary {
-  min-height: 38px !important;
-  height: 38px !important;
-  padding: 0 14px !important;
+  min-height: 38px;
+  height: 38px;
+  padding: 0 14px;
   border-radius: 12px !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  align-items: center;
+  justify-content: center;
 }
 body:has([data-conversation-page]) .chat-toolbar-overflow {
-  position: relative !important;
-  margin: 0 !important;
+  position: relative;
+  margin: 0;
 }
 body:has([data-conversation-page]) .chat-toolbar-overflow > summary {
-  list-style: none !important;
+  list-style: none;
   width: 46px !important;
-  min-width: 46px !important;
-  padding: 0 !important;
-  font-size: 22px !important;
-  cursor: pointer !important;
+  min-width: 46px;
+  padding: 0;
+  font-size: 22px;
+  cursor: pointer;
 }
 body:has([data-conversation-page]) .chat-toolbar-overflow > summary::-webkit-details-marker {
   display: none !important;
 }
 body:has([data-conversation-page]) .chat-toolbar-overflow-menu {
-  position: absolute !important;
+  position: absolute;
   right: 0 !important;
   top: calc(100% + 8px) !important;
-  z-index: 80 !important;
-  min-width: 230px !important;
-  padding: 8px !important;
-  border-radius: 14px !important;
-  background: var(--panel, #101c19) !important;
-  border: 1px solid rgba(80, 212, 170, .22) !important;
-  box-shadow: 0 18px 46px rgba(0,0,0,.38) !important;
+  z-index: 80;
+  min-width: 230px;
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--panel, #101c19);
+  border: 1px solid rgba(80, 212, 170, .22);
+  box-shadow: 0 18px 46px rgba(0,0,0,.38);
 }
 body:has([data-conversation-page]) .chat-toolbar-overflow-menu > * {
   width: 100% !important;
-  min-height: 40px !important;
-  justify-content: flex-start !important;
-  text-align: left !important;
-  margin: 0 0 4px !important;
-  border-radius: 10px !important;
+  min-height: 40px;
+  justify-content: flex-start;
+  text-align: left;
+  margin: 0 0 4px;
+  border-radius: 10px;
 }
 body:has([data-conversation-page]) .chat-toolbar-overflow-menu > *:last-child {
-  margin-bottom: 0 !important;
+  margin-bottom: 0;
 }
 /* The wrappers from productivity/workflow are JS containers, not visual toolbar groups. */
 body:has([data-conversation-page]) .chat-header-actions > .productivity-chat-tools,
@@ -360,14 +360,14 @@ body:has([data-conversation-page]) .chat-header-actions > .workflow-chat-tools {
 }
 @media (max-width: 1180px) {
   body:has([data-conversation-page]) .chat-header {
-    grid-template-columns: 1fr !important;
-    align-items: start !important;
+    grid-template-columns: 1fr;
+    align-items: start;
   }
   body:has([data-conversation-page]) .chat-header-actions {
-    justify-self: stretch !important;
-    justify-content: flex-start !important;
-    flex-wrap: wrap !important;
-    margin-left: 0 !important;
+    justify-self: stretch;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-left: 0;
   }
 }
 
@@ -386,46 +386,46 @@ body:has([data-conversation-page]) .productivity-chat-tools > .toolbar-overflow-
 body:has([data-conversation-page]) .chat-toolbar-overflow-proxy {
   display: flex !important;
   width: 100% !important;
-  min-height: 40px !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  text-align: left !important;
+  min-height: 40px;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
 }
 
 
 /* 1.00.6.26 fix2: push the toolbar fully to the right edge */
 body:has([data-conversation-page]) .chat-header {
   display: flex !important;
-  align-items: flex-start !important;
-  justify-content: space-between !important;
-  gap: 16px !important;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   width: 100% !important;
 }
 body:has([data-conversation-page]) .chat-header > div:first-child {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 body:has([data-conversation-page]) .chat-header-actions {
-  flex: 0 0 auto !important;
-  margin-left: auto !important;
-  justify-content: flex-end !important;
-  align-self: flex-start !important;
+  flex: 0 0 auto;
+  margin-left: auto;
+  justify-content: flex-end;
+  align-self: flex-start;
 }
 @media (max-width: 1120px) {
   body:has([data-conversation-page]) .chat-header {
     display: grid !important;
-    grid-template-columns: 1fr !important;
+    grid-template-columns: 1fr;
   }
 }
 
 
 /* 1.00.6.26 fix1: active sidebar category */
 body:has([data-conversation-page]) .chat-sidebar .queue-filter-active {
-  color: #58e4b4 !important;
-  border-color: #36d3a0 !important;
-  background: linear-gradient(180deg, rgba(31, 151, 116, 0.24), rgba(20, 93, 74, 0.16)) !important;
-  box-shadow: inset 0 0 0 1px rgba(77, 231, 184, 0.08), 0 0 0 1px rgba(41, 196, 151, 0.06) !important;
-  font-weight: 700 !important;
+  color: #58e4b4;
+  border-color: #36d3a0;
+  background: linear-gradient(180deg, rgba(31, 151, 116, 0.24), rgba(20, 93, 74, 0.16));
+  box-shadow: inset 0 0 0 1px rgba(77, 231, 184, 0.08), 0 0 0 1px rgba(41, 196, 151, 0.06);
+  font-weight: 700;
 }
 body:has([data-conversation-page]) .chat-sidebar .queue-filter-active:hover {
   border-color: #52e3b4 !important;
@@ -481,25 +481,25 @@ html[data-theme="light"] .auth-create-user .auth-field-error { color:#b33945; }
 
 /* 1.00.6.31 fix4: chat sidebar regression fix. */
 body:has([data-conversation-page]) .chat-sidebar {
-  grid-template-rows: auto auto auto minmax(0, 1fr) !important;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 body:has([data-conversation-page]) .uq-chat-tabs {
   display: flex !important;
-  align-items: center !important;
-  align-self: start !important;
-  min-height: 0 !important;
-  height: auto !important;
-  max-height: 54px !important;
-  overflow-x: auto !important;
-  overflow-y: hidden !important;
-  padding: 7px 0 5px !important;
+  align-items: center;
+  align-self: start;
+  min-height: 0;
+  height: auto;
+  max-height: 54px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 7px 0 5px;
 }
 body:has([data-conversation-page]) .uq-chat-tabs > button {
-  flex: 0 0 auto !important;
+  flex: 0 0 auto;
   width: auto !important;
-  height: 34px !important;
-  min-height: 34px !important;
-  max-height: 34px !important;
-  padding: 0 12px !important;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  padding: 0 12px;
 }
 body:has([data-conversation-page]) .reply-queue-toggle { display: none !important; }

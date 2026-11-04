@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from queue_core import log_suppressed
 
 
 CACHE_DIR = Path(os.getenv("QUEUE_SOURCE_CACHE_DIR", "/var/lib/edinaya-ochered/source-cache"))
@@ -42,6 +43,7 @@ def _display_now() -> str:
         from queue_core import LOCAL_TIMEZONE
         return datetime.now(LOCAL_TIMEZONE).strftime("%d.%m.%Y %H:%M")
     except Exception:
+        log_suppressed("queue_source_sync._display_now")
         return datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
 
 

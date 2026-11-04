@@ -75,7 +75,7 @@ def get(handler, app):
         selected = app.STORE.get_setting('shift_announcement_group','')
         options = '<option value="">Не отправлять</option>' + ''.join(f'<option value="{app.e(g["chat_id"])}" {"selected" if selected==g["chat_id"] else ""}>{app.e(g["name"])}</option>' for g in app.STORE.list_whatsapp_groups())
         text = app.STORE.get_setting('shift_announcement_text','На смене: {employee}. По рабочим вопросам обращайтесь в поддержку.')
-        content = f'<h2>Объявление о смене</h2><form method="post" class="panel manual-form"><input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}"><label>Группа<select name="group">{options}</select></label><label>Текст<textarea name="text" maxlength="800" required>{app.e(text)}</textarea></label><p>Используйте {{employee}} для имени сотрудника. Отправка только при изменении сотрудника на смене, не при сохранении настроек.</p><button class="button primary">Сохранить</button></form>'
+        content = f'<h2>Объявление о смене</h2><form method="post" class="panel manual-form"><input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}"><label>Группа<select name="group">{options}</select></label><label>Текст<textarea name="text" maxlength="800" required>{app.e(text)}</textarea></label><p>Используйте {{employee}} для имени сотрудника. Отправка только при изменении сотрудника на смене, не при сохранении настроек.</p><button class="button primary">Сохранить</button></form>'
         handler.html_response(app.admin_layout('Объявление о смене',content,'shift'))
     else:
         return False
@@ -88,7 +88,7 @@ def post(handler, app):
         return False
     if path == '/admin/shift' and not handler.require_admin(): return True
     form = handler.read_form()
-    if not secrets.compare_digest(form.get('csrf_token',''),app.ADMIN_FORM_TOKEN):
+    if not secrets.compare_digest(form.get('csrf_token',''),app.csrf_token()):
         handler.json_response({'error':'Обновите страницу и попробуйте снова'},403)
         return True
     if path == '/voice-transcribe':

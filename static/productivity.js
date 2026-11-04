@@ -110,10 +110,6 @@
     choices.forEach(([mode,label])=>{const b=button(label,"button");b.onclick=async()=>{b.disabled=true;try{await post("/api/chat-mute",{chat_id:chatId,mode});toast(mode==="off"?"Уведомления включены":"Уведомления отключены");closeModal();}catch(err){toast(err.message);}finally{b.disabled=false;}};box.append(b);});
     modal("Уведомления чата",box,{eyebrow:isGroupChat(chatId)?"Группа":"Личный чат"});
   }
-  async function markUnread() {
-    const chatId=selectedChatId(); if (!chatId) return toast("Выберите чат");
-    try { await post("/api/chat-mark-unread",{chat_id:chatId}); sessionStorage.setItem(`queue-manual-unread:${chatId}`,"1"); toast("Чат помечен как непрочитанный"); } catch(err) { toast(err.message); }
-  }
 
   // ----- Media gallery -----
   async function openGallery() {
@@ -214,24 +210,6 @@
     });
   }
 
-  // ----- Optional automatic transcription for short voice messages -----
-  const AUTO_VOICE_KEY="queue-auto-transcribe-short-voice";
-  const autoVoiceSeen=new Set();
-  const autoVoiceEnabled=()=>{try{return localStorage.getItem(AUTO_VOICE_KEY)==="1";}catch(_){return false;}};
-  function autoTranscribe(root=document) {
-    if(!autoVoiceEnabled())return;
-    qsa(".chat-message-row",root).forEach(row=>{
-      const btn=qs(".voice-transcribe",row);const id=row.dataset.messageId;const chatId=selectedChatId();if(!btn||!id||!chatId||autoVoiceSeen.has(`${chatId}|${id}`))return;
-      autoVoiceSeen.add(`${chatId}|${id}`);
-      const audio=new Audio();audio.preload="metadata";let finished=false;
-      const stop=()=>{if(finished)return;finished=true;audio.src="";};
-      const timer=setTimeout(stop,7000);
-      audio.addEventListener("loadedmetadata",()=>{clearTimeout(timer);const duration=Number(audio.duration||0);stop();if(duration>0&&duration<=60&&btn.isConnected&&!btn.disabled){btn.dataset.autoTranscribed="1";btn.click();}},{once:true});
-      audio.addEventListener("error",()=>{clearTimeout(timer);stop();},{once:true});
-      audio.src=`/api/chat-media?chat_id=${encodeURIComponent(chatId)}&message_id=${encodeURIComponent(id)}`;
-    });
-  }
-
   // ----- Chat header productivity buttons -----
   function installChatTools() {
     const page=qs("[data-conversation-page]"); const actions=qs(".chat-header-actions",page||document); if(!page||!actions)return;
@@ -239,11 +217,8 @@
       const wrap=document.createElement("div");wrap.className="productivity-chat-tools";
       const search=button("🔎 Поиск","button compact ghost");search.onclick=openChatSearch;
       const media=button("Медиа","button compact ghost");media.onclick=openGallery;
-      const unread=button("Непрочитано","button compact ghost");unread.onclick=markUnread;
       const mute=button("🔕 Уведомления","button compact ghost");mute.onclick=openMuteMenu;
-      const autoVoice=button(autoVoiceEnabled()?"🎙 Авто-голос: вкл":"🎙 Авто-голос: выкл","button compact ghost");
-      autoVoice.dataset.autoVoiceToggle="1";autoVoice.onclick=()=>{const enabled=!autoVoiceEnabled();try{localStorage.setItem(AUTO_VOICE_KEY,enabled?"1":"0");}catch(_){}autoVoice.textContent=enabled?"🎙 Авто-голос: вкл":"🎙 Авто-голос: выкл";if(enabled){autoVoiceSeen.clear();autoTranscribe();}toast(enabled?"Авторасшифровка коротких голосовых включена":"Авторасшифровка выключена");};
-      wrap.append(search,media,unread,mute,autoVoice);
+      wrap.append(search,media,mute);
       if(page.hasAttribute("data-whatsapp-page")){const meta=button("Теги / заметка","button compact ghost");meta.onclick=openContactMeta;wrap.append(meta);}
       actions.prepend(wrap);
     }
@@ -253,15 +228,15 @@
 
   // Generic observer because the legacy chat UI re-renders rows every few seconds.
   const observer=new MutationObserver(records=>{
-    for(const rec of records){for(const node of rec.addedNodes){if(node.nodeType===1){enhanceDelivery(node);autoTranscribe(node);}}}
+    for(const rec of records){for(const node of rec.addedNodes){if(node.nodeType===1)enhanceDelivery(node);}}
     installChatTools();
   });
   observer.observe(document.documentElement,{subtree:true,childList:true});
-  enhanceDelivery(); installChatTools(); installTicketReminderButton(); autoTranscribe();
+  enhanceDelivery(); installChatTools(); installTicketReminderButton();
 
   // EO_PERFORMANCE_20260930: MutationObserver handles normal UI changes.
   // Keep only a low-frequency safety scan, and pause it in background tabs.
-  const productivitySafetyScan=()=>{installChatTools();enhanceDelivery();autoTranscribe();};
+  const productivitySafetyScan=()=>{installChatTools();enhanceDelivery();};
   setInterval(()=>{if(!document.hidden)productivitySafetyScan();},10000);
   document.addEventListener("visibilitychange",()=>{if(!document.hidden)productivitySafetyScan();});
   document.documentElement.dataset.productivityBuild=BUILD;

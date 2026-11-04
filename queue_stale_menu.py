@@ -13,6 +13,7 @@ import os
 import time
 from datetime import datetime, timezone
 from typing import Any
+from queue_core import log_suppressed
 
 DEFAULT_MINUTES = 30
 DEFAULT_SCAN_SECONDS = 60
@@ -189,7 +190,7 @@ def recover_once(app: Any, now_epoch: int | None = None) -> int:
         try:
             app.queue_realtime.notify_outbound()
         except Exception:
-            pass
+            log_suppressed("queue_stale_menu.recover_once")
         sent += 1
         print(
             f"[STALE MENU] восстановлен автоответ chat={chat_id} "

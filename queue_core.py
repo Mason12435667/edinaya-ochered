@@ -1,14 +1,43 @@
 from __future__ import annotations
 
 import html
+import logging
 import os
 import re
 import shutil
+import sys
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent
+
+LOGGER = logging.getLogger("queue")
+_SUPPRESSED_LOCK = threading.Lock()
+_SUPPRESSED: dict[tuple[str, str], list[float]] = {}  # (where, error type) -> [last logged at, repeats since]
+SUPPRESSED_LOG_INTERVAL = 600.0
+
+
+def log_suppressed(where: str) -> None:
+    """Call inside an `except` block that deliberately carries on, so the error is not lost.
+
+    Logs the current exception with its traceback; the same error in the same place is
+    logged at most once per SUPPRESSED_LOG_INTERVAL seconds (with a count of repeats).
+    """
+    error_type = type(sys.exc_info()[1]).__name__
+    key = (where, error_type)
+    now = time.monotonic()
+    with _SUPPRESSED_LOCK:
+        entry = _SUPPRESSED.get(key)
+        if entry and now - entry[0] < SUPPRESSED_LOG_INTERVAL:
+            entry[1] += 1
+            return
+        repeats = entry[1] if entry else 0
+        _SUPPRESSED[key] = [now, 0]
+    suffix = f" (repeated {repeats} more times since the last report)" if repeats else ""
+    LOGGER.warning("Ignored error in %s%s", where, suffix, exc_info=True)
 
 
 def _local_timezone():
@@ -19,7 +48,7 @@ def _local_timezone():
             from zoneinfo import ZoneInfo
             return ZoneInfo(name)
         except Exception:
-            pass
+            log_suppressed("queue_core._local_timezone")
     try:
         hours = float(str(os.getenv("QUEUE_UTC_OFFSET_HOURS", "5") or "5").strip())
     except ValueError:

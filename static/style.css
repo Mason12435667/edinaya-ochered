@@ -522,7 +522,7 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
 
 
 /* 3.3.32 hotfix e: force full-width composer regardless of earlier grid rules */
-.chat-composer{display:block!important;width:100%!important;box-sizing:border-box!important}
+.chat-composer{display:block!important;width:100%!important;box-sizing:border-box}
 .chat-composer .composer-input-row{display:flex!important;align-items:flex-end!important;gap:10px!important;width:100%!important;min-width:0!important;box-sizing:border-box!important}
 .chat-composer .composer-input-row>.composer-tools{display:flex!important;flex:0 0 auto!important;grid-column:auto!important;align-items:center!important;gap:7px!important}
 .chat-composer .composer-input-row>textarea{display:block!important;flex:1 1 0%!important;grid-column:auto!important;width:0!important;min-width:0!important;max-width:none!important;box-sizing:border-box!important}
@@ -536,17 +536,17 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
    so they no longer consume horizontal space. */
 .chat-composer{
   display:grid!important;
-  grid-template-columns:minmax(0,1fr) auto!important;
+  grid-template-columns:minmax(0,1fr) auto;
   align-items:end!important;
   gap:10px!important;
   width:100%!important;
-  position:relative!important;
-  box-sizing:border-box!important;
+  position:relative;
+  box-sizing:border-box;
 }
 .chat-composer>.reply-preview{
   grid-column:1/-1!important;
   width:100%!important;
-  min-width:0!important;
+  min-width:0;
   margin:0!important;
 }
 .chat-composer>.composer-file-name{
@@ -576,8 +576,8 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
 }
 .chat-composer>.composer-send{
   grid-column:2!important;
-  height:46px!important;
-  min-height:46px!important;
+  height:46px;
+  min-height:46px;
   align-self:end!important;
   white-space:nowrap!important;
 }
@@ -597,9 +597,9 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
   left:13px!important;
 }
 @media(max-width:760px){
-  .chat-composer{grid-template-columns:minmax(0,1fr) auto!important}
+  .chat-composer{grid-template-columns:minmax(0,1fr) auto}
   .chat-composer>.composer-message-input{grid-column:1!important}
-  .chat-composer>.composer-send{grid-column:2!important;width:auto!important;margin:0!important}
+  .chat-composer>.composer-send{grid-column:2!important;width:auto!important;margin:0}
 }
 
 
@@ -679,7 +679,7 @@ code { padding: 2px 5px; border-radius: 5px; background: var(--code-bg); color: 
 .chat-media-zoom:hover { box-shadow:0 7px 24px rgba(0,0,0,.13); }
 .media-lightbox { animation:media-appear .16s ease-out; }
 @keyframes media-appear { from { opacity:0; } to { opacity:1; } }
-@media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none; transition:none; scroll-behavior:auto; } }
 
 /* 3.3.45: WhatsApp-like mentions, reactions and larger emoji picker */
 .chat-bubble { position: relative; }

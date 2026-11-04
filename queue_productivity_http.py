@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import queue_productivity as qp
+from queue_core import log_suppressed
 
 
 def _value(query, key, default=""):
@@ -17,7 +18,7 @@ def _bool(query, key):
 
 
 def _csrf(handler, app, form) -> bool:
-    if secrets.compare_digest(str(form.get("csrf_token", "")), str(app.ADMIN_FORM_TOKEN)):
+    if secrets.compare_digest(str(form.get("csrf_token", "")), str(app.csrf_token())):
         return True
     handler.json_response({"error": "Обновите страницу и попробуйте снова"}, 403)
     return False
@@ -98,7 +99,7 @@ def _search_page(handler, app, query):
         <label>Вложение<select name="attachment"><option value="">Любое</option><option value="image" {'selected' if filters['attachment']=='image' else ''}>Фото</option><option value="video" {'selected' if filters['attachment']=='video' else ''}>Видео</option><option value="audio" {'selected' if filters['attachment']=='audio' else ''}>Голосовое</option><option value="file" {'selected' if filters['attachment']=='file' else ''}>Файл</option></select></label>
         <label class="check"><input type="checkbox" name="mentions_only" value="1" {'checked' if filters['mentions_only'] else ''}> Только упоминания</label>
         <label class="check"><input type="checkbox" name="voice_only" value="1" {'checked' if filters['voice_only'] else ''}> Только голосовые</label>
-        <div class="productivity-search-actions"><button class="button primary">Найти</button><a class="button ghost" href="/search">Сбросить</a><a class="button ghost" href="/bookmarks">Закладки</a></div>
+        <div class="productivity-search-actions"><button class="button primary">Найти</button><a class="button ghost" href="/search">Сбросить</a></div>
       </form>
       <section class="search-results">{''.join(cards) or '<p class="search-empty">Ничего не найдено. Можно использовать фильтры даже без текста поиска.</p>'}</section>
       <nav class="search-pages">{previous}{more}</nav>
@@ -142,11 +143,11 @@ def _backups_page(handler, app, query):
     for row in qp.list_backups(app.DATA_DIR):
         size=app.human_bytes(row['size']) if hasattr(app,'human_bytes') else f"{row['size']} Б"
         status='Исправна' if row['ok'] else 'Ошибка'
-        cards.append(f"""<tr class="backup-row"><td><div class="backup-name"><span class="backup-icon">DB</span><strong>{app.e(row['name'])}</strong></div></td><td>{app.e(size)}</td><td><span class="backup-status {'ok' if row['ok'] else 'error'}"><i></i>{status}</span></td><td><span class="backup-detail">{app.e(row['detail'])}</span></td><td><form method="post" action="/admin/backups" data-backup-restore-form><input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}"><input type="hidden" name="action" value="restore"><input type="hidden" name="name" value="{app.e(row['name'])}"><button class="button compact backup-restore" {'disabled' if not row['ok'] else ''}>Восстановить</button></form></td></tr>""")
+        cards.append(f"""<tr class="backup-row"><td><div class="backup-name"><span class="backup-icon">DB</span><strong>{app.e(row['name'])}</strong></div></td><td>{app.e(size)}</td><td><span class="backup-status {'ok' if row['ok'] else 'error'}"><i></i>{status}</span></td><td><span class="backup-detail">{app.e(row['detail'])}</span></td><td><form method="post" action="/admin/backups" data-backup-restore-form><input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}"><input type="hidden" name="action" value="restore"><input type="hidden" name="name" value="{app.e(row['name'])}"><button class="button compact backup-restore" {'disabled' if not row['ok'] else ''}>Восстановить</button></form></td></tr>""")
     content=f"""
       {f'<div class="notice">{app.e(notice)}</div>' if notice else ''}
       <section class="page-heading backup-heading"><div><p class="eyebrow">Надёжность</p><h1>Резервные копии базы</h1><p>Создание, проверка целостности и безопасное восстановление SQLite</p></div>
-      <form method="post" action="/admin/backups" class="backup-create-form"><input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}"><input type="hidden" name="action" value="create"><button class="button primary backup-create"><span>＋</span> Создать копию сейчас</button></form></section>
+      <form method="post" action="/admin/backups" class="backup-create-form"><input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}"><input type="hidden" name="action" value="create"><button class="button primary backup-create"><span>＋</span> Создать копию сейчас</button></form></section>
       <section class="backup-summary"><article class="panel backup-summary-card"><span class="backup-summary-icon">◫</span><div><small>Хранилище</small><strong>SQLite</strong><span>Локальные резервные копии</span></div></article><article class="panel backup-summary-card"><span class="backup-summary-icon">✓</span><div><small>Проверка</small><strong>Автоматическая</strong><span>Целостность каждой копии</span></div></article><article class="panel backup-summary-card"><span class="backup-summary-icon">↶</span><div><small>Восстановление</small><strong>Со страховкой</strong><span>Перед откатом создаётся копия</span></div></article></section>
       <section class="panel table-panel backup-table-panel"><div class="section-heading backup-section-heading"><div><h2>Доступные копии</h2><p>Восстанавливать можно только копии, прошедшие проверку</p></div></div><div class="table-scroll"><table class="backup-table"><thead><tr><th>Копия</th><th>Размер</th><th>Проверка</th><th>Результат</th><th></th></tr></thead><tbody>{''.join(cards) or '<tr><td colspan="5" class="empty">Копий пока нет</td></tr>'}</tbody></table></div></section>
     """
@@ -180,6 +181,7 @@ def get(handler, app):
         try:
             categories=[[str(key),str(label)] for key,label in app.active_ticket_category_items()]
         except Exception:
+            log_suppressed("queue_productivity_http.get")
             categories=[["general","Другая проблема"],["support","Поддержка"]]
         handler.json_response({"categories":categories})
     elif path=="/api/open-tickets": handler.json_response({"tickets":qp.open_tickets(app.STORE,150)})

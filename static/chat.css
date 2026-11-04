@@ -1,8 +1,9 @@
+/* ---- formerly interface105.css ---- */
 /* 3.3.106: additive chat workspace layer + sidebar/queue/context-menu hotfix. */
 :root{--uq-sidebar-width:330px}
 .uq-scale-control{display:inline-flex;align-items:center;margin-left:auto}.uq-scale-control select{min-width:68px;height:34px;border:1px solid var(--border,#29443d);border-radius:10px;background:var(--panel,#13221e);color:var(--text,#eef7f2);padding:0 8px;font:inherit}
 [data-theme="light"] .uq-scale-control select{background:#fff;color:#17211e}
-.uq-interface-105 [data-conversation-page]{position:relative;grid-template-columns:minmax(240px,var(--uq-sidebar-width)) minmax(0,1fr)!important}
+.uq-interface-105 [data-conversation-page]{position:relative;grid-template-columns:minmax(240px,var(--uq-sidebar-width)) minmax(0,1fr)}
 .uq-view-controls{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}.uq-view-button{padding-inline:9px!important}
 .uq-sidebar-resize{position:absolute;top:0;bottom:0;width:7px;z-index:15;cursor:col-resize;border-radius:7px;transition:background .15s ease}.uq-sidebar-resize:hover,.uq-resizing .uq-sidebar-resize{background:rgba(54,211,159,.28)}.uq-resizing{user-select:none;cursor:col-resize!important}
 .uq-interface-105 [data-conversation-page].uq-sidebar-collapsed{grid-template-columns:0 minmax(0,1fr)!important;gap:0!important}.uq-sidebar-collapsed .chat-sidebar{display:none!important}
@@ -14,7 +15,7 @@
 [data-theme="light"] .uq-chat-info{background:#fff}
 .uq-active-tickets-strip{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:7px 12px;border-top:1px solid var(--border,#29443d);background:rgba(53,211,159,.04);font-size:12px}.uq-active-tickets-strip a{color:#42dba9;text-decoration:none;border:1px solid rgba(53,211,159,.25);border-radius:999px;padding:4px 8px}.uq-active-tickets-strip a:hover{background:rgba(53,211,159,.1)}
 .uq-upload-progress{display:grid;gap:5px;grid-column:1/-1;padding:7px 10px;border:1px solid var(--border,#29443d);border-radius:10px;background:rgba(53,211,159,.04)}.uq-upload-progress-top{display:flex;justify-content:space-between;gap:10px;font-size:11px;color:var(--muted,#9caea8)}.uq-upload-track{height:5px;border-radius:999px;overflow:hidden;background:rgba(127,154,145,.18)}.uq-upload-track i{display:block;width:0;height:100%;border-radius:inherit;background:#35d39f;transition:width .18s ease}.uq-upload-progress.indeterminate .uq-upload-track i{width:35%!important;animation:uqProgress 1s ease-in-out infinite}@keyframes uqProgress{0%{transform:translateX(-120%)}100%{transform:translateX(310%)}}
-@media (max-width:1366px){.page{padding-left:12px!important;padding-right:12px!important}.topbar{gap:8px!important;padding-left:12px!important;padding-right:12px!important}.topbar nav{gap:4px!important}.topbar nav a{padding-inline:8px!important}.uq-interface-105 [data-conversation-page]{--uq-sidebar-width:290px}.chat-header{padding:10px 12px!important}.chat-header-actions{gap:5px!important}.chat-memory-note{display:none!important}.uq-chat-info{top:58px;bottom:78px}.uq-scale-control select{min-width:62px}}
+@media (max-width:1366px){.page{padding-left:12px;padding-right:12px}.topbar{gap:8px;padding-left:12px!important;padding-right:12px!important}.topbar nav{gap:4px}.topbar nav a{padding-inline:8px}.uq-interface-105 [data-conversation-page]{--uq-sidebar-width:290px}.chat-header{padding:10px 12px}.chat-header-actions{gap:5px}.chat-memory-note{display:none!important}.uq-chat-info{top:58px;bottom:78px}.uq-scale-control select{min-width:62px}}
 
 /* 3.3.106: the reply queue is a normal row, never an overlay over chat cards. */
 .uq-interface-105 .reply-queue-toggle.uq-needs-flow{position:relative!important;inset:auto!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;transform:none!important;width:100%!important;max-width:none!important;margin:7px 0 5px!important;z-index:2!important;flex:0 0 auto!important}
@@ -29,20 +30,20 @@
 /* 3.3.110: keep chat names and message previews inside the sidebar. */
 .uq-interface-105 .chat-sidebar,
 .uq-interface-105 .chat-list,
-.uq-interface-105 [data-chat-list]{min-width:0!important;max-width:100%!important;overflow-x:hidden!important}
-.uq-interface-105 .chat-list-item{min-width:0!important;max-width:100%!important;width:100%!important;box-sizing:border-box!important;overflow:hidden!important}
-.uq-interface-105 .chat-list-item>*{min-width:0!important;max-width:100%}
+.uq-interface-105 [data-chat-list]{min-width:0;max-width:100%;overflow-x:hidden}
+.uq-interface-105 .chat-list-item{min-width:0;max-width:100%;width:100%!important;box-sizing:border-box;overflow:hidden}
+.uq-interface-105 .chat-list-item>*{min-width:0;max-width:100%}
 .uq-interface-105 .chat-list-top,
-.uq-interface-105 .chat-list-bottom{min-width:0!important;max-width:100%!important;overflow:hidden!important}
-.uq-interface-105 .chat-list-top strong{min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}
-.uq-interface-105 .chat-list-bottom{white-space:nowrap!important;text-overflow:ellipsis!important}
+.uq-interface-105 .chat-list-bottom{min-width:0;max-width:100%;overflow:hidden}
+.uq-interface-105 .chat-list-top strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.uq-interface-105 .chat-list-bottom{white-space:nowrap;text-overflow:ellipsis}
 .uq-interface-105 .chat-list-bottom span,
 .uq-interface-105 .chat-list-bottom p,
-.uq-interface-105 .chat-list-bottom small{min-width:0!important;max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}
+.uq-interface-105 .chat-list-bottom small{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .uq-interface-105 .chat-messages,
 .uq-interface-105 .chat-message,
 .uq-interface-105 .message-bubble,
-.uq-interface-105 .message-text{min-width:0!important;max-width:100%!important;overflow-wrap:anywhere!important;word-break:break-word!important}
+.uq-interface-105 .message-text{min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word}
 
 
 /* 3.3.111: clamp the full chat workspace so header tools, sidebars and action rows never break layout. */
@@ -71,79 +72,79 @@
 .uq-interface-105 .message-toolbar,
 .uq-interface-105 .message-meta,
 .uq-interface-105 .message-content,
-.uq-interface-105 .message-body{min-width:0!important;max-width:100%!important;box-sizing:border-box!important}
-.uq-interface-105 .chat-header{display:flex!important;align-items:flex-start!important;justify-content:space-between!important;gap:10px!important;flex-wrap:wrap!important;overflow:hidden!important}
-.uq-interface-105 .chat-header>div:first-child{flex:1 1 280px!important;min-width:0!important;max-width:100%!important}
-.uq-interface-105 .chat-header-actions{display:flex!important;flex:1 1 420px!important;min-width:0!important;max-width:100%!important;flex-wrap:wrap!important;align-items:center!important;justify-content:flex-end!important;gap:8px!important;overflow:hidden!important}
+.uq-interface-105 .message-body{min-width:0;max-width:100%;box-sizing:border-box}
+.uq-interface-105 .chat-header{display:flex!important;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;overflow:hidden}
+.uq-interface-105 .chat-header>div:first-child{flex:1 1 280px;min-width:0;max-width:100%}
+.uq-interface-105 .chat-header-actions{display:flex!important;flex:1 1 420px;min-width:0;max-width:100%;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;overflow:hidden}
 .uq-interface-105 .chat-header-actions .button,
 .uq-interface-105 .chat-header-actions button,
 .uq-interface-105 .chat-header-actions summary,
 .uq-interface-105 .workflow-chat-tools .button,
-.uq-interface-105 .workflow-chat-tools button{max-width:100%!important;flex:0 1 auto!important;white-space:normal!important}
-.uq-interface-105 .workflow-chat-tools{display:flex!important;flex-wrap:wrap!important;gap:8px!important;min-width:0!important;max-width:100%!important}
+.uq-interface-105 .workflow-chat-tools button{max-width:100%;flex:0 1 auto;white-space:normal}
+.uq-interface-105 .workflow-chat-tools{display:flex!important;flex-wrap:wrap;gap:8px;min-width:0;max-width:100%}
 .uq-interface-105 .chat-memory-note,
 .uq-interface-105 .contact-profile-summary,
 .uq-interface-105 .manual-mode-state,
-.uq-interface-105 .contact-presence{min-width:0!important;max-width:100%!important;white-space:normal!important;overflow-wrap:anywhere!important;word-break:break-word!important}
-.uq-interface-105 .chat-list-item{display:flex!important;align-items:center!important;gap:10px!important}
-.uq-interface-105 .chat-list-item>:first-child{flex:0 0 auto!important}
-.uq-interface-105 .chat-list-item>:last-child{flex:1 1 auto!important;min-width:0!important;max-width:100%!important;overflow:hidden!important}
-.uq-interface-105 .chat-list-top{display:flex!important;align-items:center!important;gap:8px!important;min-width:0!important;max-width:100%!important}
-.uq-interface-105 .chat-list-top>*{min-width:0!important}
-.uq-interface-105 .chat-list-top time{margin-left:auto!important;flex:0 0 auto!important}
-.uq-interface-105 .chat-list-bottom{display:flex!important;align-items:center!important;gap:6px!important;min-width:0!important;max-width:100%!important;overflow:hidden!important}
-.uq-interface-105 .chat-list-bottom>:first-child{flex:0 0 auto!important}
-.uq-interface-105 .chat-list-bottom>:last-child{flex:1 1 auto!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}
+.uq-interface-105 .contact-presence{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.uq-interface-105 .chat-list-item{display:flex!important;align-items:center;gap:10px}
+.uq-interface-105 .chat-list-item>:first-child{flex:0 0 auto}
+.uq-interface-105 .chat-list-item>:last-child{flex:1 1 auto;min-width:0;max-width:100%;overflow:hidden}
+.uq-interface-105 .chat-list-top{display:flex!important;align-items:center;gap:8px;min-width:0;max-width:100%}
+.uq-interface-105 .chat-list-top>*{min-width:0}
+.uq-interface-105 .chat-list-top time{margin-left:auto;flex:0 0 auto}
+.uq-interface-105 .chat-list-bottom{display:flex!important;align-items:center;gap:6px;min-width:0;max-width:100%;overflow:hidden}
+.uq-interface-105 .chat-list-bottom>:first-child{flex:0 0 auto}
+.uq-interface-105 .chat-list-bottom>:last-child{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .uq-interface-105 .chat-messages,
-.uq-interface-105 [data-chat-messages]{overflow-x:hidden!important}
+.uq-interface-105 [data-chat-messages]{overflow-x:hidden}
 .uq-interface-105 [data-chat-messages] img,
 .uq-interface-105 [data-chat-messages] video,
 .uq-interface-105 [data-chat-messages] audio{max-width:100%!important;height:auto!important}
 .uq-interface-105 .message-actions,
 .uq-interface-105 .message-toolbar,
-.uq-interface-105 .forward-toolbar{display:flex!important;flex-wrap:wrap!important;gap:8px!important;overflow:hidden!important}
+.uq-interface-105 .forward-toolbar{display:flex!important;flex-wrap:wrap;gap:8px;overflow:hidden}
 .uq-interface-105 .forward-toolbar[hidden]{display:none!important}
 .uq-interface-105 .reply-preview span,
-.uq-interface-105 .reply-preview strong{display:block!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}
-@media (max-width:1366px){.uq-interface-105 .chat-header-actions{justify-content:flex-start!important}.uq-interface-105 .workflow-chat-tools{width:100%!important}.uq-interface-105 .chat-memory-note{flex:1 1 220px!important}}
+.uq-interface-105 .reply-preview strong{display:block!important;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:1366px){.uq-interface-105 .chat-header-actions{justify-content:flex-start}.uq-interface-105 .workflow-chat-tools{width:100%!important}.uq-interface-105 .chat-memory-note{flex:1 1 220px!important}}
 
 
 /* 3.3.113: desktop-only chat header/window isolation.
    The chat header owns its own layer; profile/participants/info windows live below it
    and no longer change the header height or cover the composer. */
 .uq-interface-105 .chat-main{
-  position:relative!important;
-  isolation:isolate!important;
+  position:relative;
+  isolation:isolate;
   display:grid!important;
-  grid-template-columns:minmax(0,1fr)!important;
-  grid-template-rows:auto minmax(0,1fr) auto auto auto!important;
-  overflow:hidden!important;
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:auto minmax(0,1fr) auto auto auto;
+  overflow:hidden;
 }
 .uq-interface-105 .chat-header{
-  grid-row:1!important;
-  grid-column:1!important;
-  position:relative!important;
-  z-index:50!important;
-  overflow:visible!important;
-  align-self:start!important;
+  grid-row:1;
+  grid-column:1;
+  position:relative;
+  z-index:50;
+  overflow:visible;
+  align-self:start;
 }
 .uq-interface-105 .chat-header>div:first-child,
 .uq-interface-105 .chat-header-actions{
-  position:relative!important;
-  overflow:visible!important;
+  position:relative;
+  overflow:visible;
 }
 .uq-interface-105 .chat-messages,
 .uq-interface-105 [data-chat-messages]{
-  grid-row:2!important;
-  grid-column:1!important;
-  position:relative!important;
-  z-index:1!important;
-  min-height:0!important;
-  overflow-x:hidden!important;
+  grid-row:2;
+  grid-column:1;
+  position:relative;
+  z-index:1;
+  min-height:0;
+  overflow-x:hidden;
 }
-.uq-interface-105 .forward-toolbar{grid-row:3!important;grid-column:1!important;position:relative!important;z-index:8!important}
-.uq-interface-105 .uq-active-tickets-strip{grid-row:4!important;grid-column:1!important;position:relative!important;z-index:7!important}
-.uq-interface-105 .chat-composer{grid-row:5!important;grid-column:1!important;position:relative!important;z-index:10!important}
+.uq-interface-105 .forward-toolbar{grid-row:3;grid-column:1;position:relative;z-index:8}
+.uq-interface-105 .uq-active-tickets-strip{grid-row:4;grid-column:1;position:relative;z-index:7}
+.uq-interface-105 .chat-composer{grid-row:5;grid-column:1;position:relative;z-index:10}
 
 /* Profile card is a popup anchored to the left side of the header, not a header row. */
 .uq-interface-105 .contact-profile-summary:not([hidden]){
@@ -165,57 +166,57 @@
 [data-theme="light"] .uq-interface-105 .contact-profile-summary:not([hidden]){background:#fff!important}
 
 /* Group participants open under their own button and above messages only. */
-.uq-interface-105 .participants-details{position:relative!important;z-index:70!important;overflow:visible!important}
+.uq-interface-105 .participants-details{position:relative;z-index:70;overflow:visible}
 .uq-interface-105 .participants-details[open]{z-index:100!important}
 .uq-interface-105 .participants-list{
-  position:absolute!important;
+  position:absolute;
   top:calc(100% + 8px)!important;
   right:0!important;
   left:auto!important;
   bottom:auto!important;
-  z-index:110!important;
+  z-index:110;
   width:min(360px,calc(100vw - 80px))!important;
-  max-width:360px!important;
-  max-height:min(440px,62vh)!important;
-  overflow:auto!important;
-  margin:0!important;
-  border:1px solid var(--border,#29443d)!important;
-  border-radius:14px!important;
-  background:var(--panel,#12211d)!important;
-  box-shadow:0 18px 46px rgba(0,0,0,.38)!important;
+  max-width:360px;
+  max-height:min(440px,62vh);
+  overflow:auto;
+  margin:0;
+  border:1px solid var(--border,#29443d);
+  border-radius:14px;
+  background:var(--panel,#12211d);
+  box-shadow:0 18px 46px rgba(0,0,0,.38);
 }
-[data-theme="light"] .uq-interface-105 .participants-list{background:#fff!important}
+[data-theme="light"] .uq-interface-105 .participants-list{background:#fff}
 
 /* The 3.3.105 info drawer shares only the message row, so it cannot cover the header or composer. */
 .uq-interface-105 .uq-chat-info{
-  grid-row:2!important;
-  grid-column:1!important;
-  position:relative!important;
-  justify-self:end!important;
-  align-self:stretch!important;
+  grid-row:2;
+  grid-column:1;
+  position:relative;
+  justify-self:end;
+  align-self:stretch;
   top:auto!important;
   right:auto!important;
   bottom:auto!important;
   left:auto!important;
-  z-index:40!important;
+  z-index:40;
   width:min(330px,calc(100% - 24px))!important;
-  max-height:calc(100% - 20px)!important;
-  margin:10px!important;
-  overflow:auto!important;
+  max-height:calc(100% - 20px);
+  margin:10px;
+  overflow:auto;
 }
 .uq-interface-105 .uq-floating-date{
-  grid-row:2!important;
-  grid-column:1!important;
+  grid-row:2;
+  grid-column:1;
   top:10px!important;
-  z-index:20!important;
+  z-index:20;
 }
 
 /* PC-only: keep the desktop two-column workspace even on narrow browser windows.
    This intentionally replaces the old 980/720px phone layout. */
 @media (max-width:980px){
-  .uq-interface-105 [data-conversation-page]{display:grid!important;grid-template-columns:minmax(240px,var(--uq-sidebar-width)) minmax(0,1fr)!important}
-  .uq-interface-105 .chat-sidebar{max-height:none!important;margin-bottom:0!important}
-  .uq-interface-105 .chat-main{min-height:0!important}
+  .uq-interface-105 [data-conversation-page]{display:grid!important;grid-template-columns:minmax(240px,var(--uq-sidebar-width)) minmax(0,1fr)}
+  .uq-interface-105 .chat-sidebar{max-height:none;margin-bottom:0}
+  .uq-interface-105 .chat-main{min-height:0}
   .uq-sidebar-resize{display:block!important}
   .uq-scale-control{display:inline-flex!important}
 }
@@ -225,21 +226,21 @@
    space, the action area more room, and trim desktop header/button spacing. */
 @media (min-width:981px){
   .uq-interface-105 .chat-header{
-    padding:9px 12px!important;
-    gap:7px!important;
+    padding:9px 12px;
+    gap:7px;
   }
   .uq-interface-105 .chat-header>div:first-child{
-    flex:0 1 320px!important;
-    max-width:320px!important;
+    flex:0 1 320px;
+    max-width:320px;
   }
   .uq-interface-105 .chat-header-actions{
-    flex:1 1 640px!important;
-    gap:5px!important;
-    row-gap:5px!important;
-    align-content:flex-start!important;
+    flex:1 1 640px;
+    gap:5px;
+    row-gap:5px;
+    align-content:flex-start;
   }
   .uq-interface-105 .workflow-chat-tools{
-    gap:5px!important;
+    gap:5px;
     width:auto!important;
   }
   .uq-interface-105 .chat-header-actions .button,
@@ -247,11 +248,11 @@
   .uq-interface-105 .chat-header-actions summary,
   .uq-interface-105 .workflow-chat-tools .button,
   .uq-interface-105 .workflow-chat-tools button{
-    min-height:31px!important;
-    padding:5px 9px!important;
-    line-height:1.15!important;
+    min-height:31px;
+    padding:5px 9px;
+    line-height:1.15;
     font-size:12px!important;
-    white-space:nowrap!important;
+    white-space:nowrap;
   }
   .uq-interface-105 .chat-header-actions .chat-memory-note{
     margin:0!important;
@@ -267,12 +268,68 @@
 body:has([data-conversation-page]) .chat-main > .forward-toolbar,
 body:has([data-conversation-page]) .chat-main > .conversation-lock-banner,
 body:has([data-conversation-page]) .chat-main > .uq-active-tickets-strip {
-  flex: 0 0 auto !important;
+  flex: 0 0 auto;
 }
 body:has([data-conversation-page]) .chat-main > .forward-toolbar {
-  height: auto !important; max-height: none !important; overflow: visible !important;
-  align-items: center !important; gap: 8px !important;
+  height: auto; max-height: none; overflow: visible;
+  align-items: center; gap: 8px;
 }
-body:has([data-conversation-page]) .forward-toolbar > [data-forward-count] { flex: 0 0 auto !important; }
-body:has([data-conversation-page]) .forward-toolbar > select { flex: 1 1 200px !important; width: auto !important; }
-body:has([data-conversation-page]) .forward-toolbar > button { flex: 0 0 auto !important; width: auto !important; }
+body:has([data-conversation-page]) .forward-toolbar > [data-forward-count] { flex: 0 0 auto; }
+body:has([data-conversation-page]) .forward-toolbar > select { flex: 1 1 200px; width: auto !important; }
+body:has([data-conversation-page]) .forward-toolbar > button { flex: 0 0 auto; width: auto !important; }
+
+/* ---- formerly performance107.css ---- */
+/* 3.3.107 performance helpers, PC-only. No phone/mobile layout overrides. */
+.uq-performance-cards-107{margin-top:12px}
+.uq-performance-cards-107 .reliability-card strong{font-variant-numeric:tabular-nums}
+.uq-friendly-error-107{display:grid;gap:4px}
+.uq-friendly-error-107 span{color:var(--muted,#a6b7b1)}
+
+/* ---- formerly hotfix10069.css ---- */
+/* 1.00.6.10: attachment tray is mounted immediately above the visible compose-status row. */
+.queue-attachment-preview{
+  grid-column:1/-1;
+  width:100%!important;
+  min-width:0;
+  box-sizing:border-box;
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:stretch;
+  overflow-x:auto;
+  max-width:100%;
+  margin:6px 0 4px;
+  padding:8px;
+  border:1px solid rgba(73,214,160,.22);
+  border-radius:12px;
+  background:rgba(6,25,20,.58);
+  position:relative;
+  z-index:6;
+  visibility:visible!important;
+  opacity:1!important;
+  order:90;
+  scrollbar-width:thin
+}
+.queue-attachment-preview[hidden]{display:none!important}
+.queue-attachment-card{position:relative;flex:0 0 116px;width:116px;min-height:104px;border:1px solid rgba(73,214,160,.36);border-radius:12px;background:rgba(5,24,19,.94);overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.18)}
+.queue-attachment-thumb{display:block;width:116px;height:78px;object-fit:cover;background:#0b1713;cursor:zoom-in}
+.queue-attachment-file{height:78px;display:flex;align-items:center;justify-content:center;font-size:28px;color:#b8c8c1;background:rgba(13,35,28,.86)}
+.queue-attachment-meta{padding:5px 7px 6px;min-width:0}
+.queue-attachment-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:#d8e4df}
+.queue-attachment-size{display:block;margin-top:2px;font-size:10px;color:#8fa79e}
+.queue-attachment-remove{position:absolute;right:5px;top:5px;z-index:10;width:25px;height:25px;padding:0;border:1px solid rgba(255,255,255,.35);border-radius:999px;background:rgba(6,13,11,.92);color:#fff;font-size:19px;line-height:21px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.38)}
+.queue-attachment-remove:hover{background:#8f2e38;border-color:#d96672}
+.queue-attachment-actions{flex:0 0 auto;display:flex;align-items:center;padding:0 4px}
+.queue-attachment-clear{border:1px solid rgba(73,214,160,.42);border-radius:9px;background:rgba(5,24,19,.75);color:#c3d7cf;padding:8px 10px;cursor:pointer;font-size:11px;white-space:nowrap}
+.queue-attachment-clear:hover{color:#e9fff6;border-color:#4bd6a0}
+.queue-preview-modal{position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(0,0,0,.82);backdrop-filter:blur(4px)}
+.queue-preview-modal[hidden]{display:none!important}
+.queue-preview-modal img{display:block;max-width:min(92vw,1600px);max-height:88vh;object-fit:contain;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.queue-preview-close{position:fixed;right:24px;top:20px;width:42px;height:42px;border:1px solid rgba(255,255,255,.25);border-radius:999px;background:rgba(7,16,13,.88);color:#fff;font-size:28px;cursor:pointer}
+html[data-theme="light"] .queue-attachment-preview{background:#f2faf6;border-color:#b7ddd0}
+html[data-theme="light"] .queue-attachment-card{background:#f5fbf8;border-color:#9fd3c1}
+html[data-theme="light"] .queue-attachment-file{background:#e7f3ee;color:#4f635b}
+html[data-theme="light"] .queue-attachment-name{color:#20352d}
+html[data-theme="light"] .queue-attachment-size{color:#667a72}
+html[data-theme="light"] .queue-attachment-clear{color:#35594c;background:#edf8f3;border-color:#9bcaba}
+@media(max-width:900px){.queue-attachment-card{flex-basis:98px;width:98px}.queue-attachment-thumb{width:98px;height:70px}.queue-attachment-file{height:70px}}

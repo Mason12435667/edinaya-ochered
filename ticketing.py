@@ -17,8 +17,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-QUEUE_1_00_6_5_SCOPED_PRE_TICKET_MEDIA = True
-
 
 STATUSES = {
     "new": "Не тронута",
@@ -36,17 +34,9 @@ PRIORITIES = {
     "urgent": "Срочный",
 }
 
-CATEGORY_SIGNALS = {'mobile': ['мобил', 'мобильное приложение'], 'database': ['база', 'доступ', 'система'], 'incident': ['ошиб', 'сбой', 'не работает', 'проблем']}
 
-MENU_CATEGORIES = {'1': 'general'}
 
-REQUEST_MENU = """Бұл өтінімдерді автоматты тіркеу жүйесі.
 
-Өтінімдер мәзірін ашып, қажетті мәселені таңдау үшін 1 санын жіберіңіз.
-
-1 санын жібермейінше, өтінімдер мәзірі ашылмайды және жүйе өтінім сипаттамасын өңдемейді."""
-
-MAIN_MENU = 'Бұл өтініштерді тіркеу жүйесі.\n\nМәзірді ашу үшін 0 жіберіңіз.\n\n1. Жалпы өтініш\n8. Менің белсенді өтінімдерім\n\n00 — тілді өзгерту'
 
 MENU_CONTEXT = "__menu__"
 MENU_GATE_CONTEXT = "__menu_gate__"
@@ -75,26 +65,6 @@ def normalize_message(text: str) -> str:
         text = text.replace(char, "")
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
     return "\n".join(line for line in lines if line)
-
-
-def _clean_numbered_value(value: str) -> str:
-    # Remove only an actual list marker such as "1." or "2)".
-    # A plain numeric line can be an identifier itself and must stay intact.
-    value = re.sub(r"^\s*\d{1,2}\s*[.)-]\s*", "", value)
-    return value.strip(" :-\t")
-
-
-def _find_labeled_value(lines: list[str], labels: list[str]) -> str:
-    label_pattern = "|".join(labels)
-    pattern = re.compile(
-        rf"^\s*(?:\d+\s*[.)-]?\s*)?(?:{label_pattern})(?:\s*[:=\-]\s*|\s+)(.+?)\s*$",
-        re.IGNORECASE,
-    )
-    for line in lines:
-        match = pattern.match(line)
-        if match:
-            return match.group(1).strip()
-    return ""
 
 
 REQUEST_FIELD_LABELS = {
@@ -341,20 +311,6 @@ def apply_expected_request_answer(
     return enriched
 
 
-def build_missing_request_reply(category: str, missing_keys: list[str]) -> str:
-    labels = [REQUEST_FIELD_LABELS.get(key, key) for key in missing_keys]
-    if not labels:
-        return ""
-    if len(labels) == 1:
-        question = f"{labels[0]} көрсетіңіз."
-    else:
-        question = "Қосымша көрсету қажет: " + ", ".join(labels) + "."
-    return (
-        f"{question}\n"
-        "Қалған мәліметтер сақталды, оларды қайталаудың қажеті жоқ. Қарапайым мәтінмен жауап беруге болады."
-    )
-
-
 def request_draft_text(category: str, draft: dict[str, str]) -> str:
     parts: list[str] = []
     if draft.get("fio"):
@@ -382,38 +338,6 @@ def _extract_value(text: str, patterns: list[str]) -> str:
         if match:
             return match.group(1).strip(" .,;:-")
     return ""
-
-
-def _signal_matches(text: str, signal: str) -> bool:
-    signal = normalize_message(signal).casefold().strip()
-    if not signal:
-        return False
-    if " " in signal or len(signal) > 4:
-        return signal in text
-    return bool(re.search(rf"(?<![\wа-яё]){re.escape(signal)}(?![\wа-яё])", text))
-
-
-def identify_category(text: str) -> str:
-    lower = normalize_message(text).casefold()
-    for category in (
-        "mobile",
-        "database",
-        "incident",
-    ):
-        if any(_signal_matches(lower, signal) for signal in CATEGORY_SIGNALS.get(category, [])):
-            return category
-    return ""
-
-
-def is_actionable_message(text: str) -> bool:
-    normalized = normalize_message(text)
-    return bool(identify_category(normalized))
-
-
-def menu_category(text: str) -> str:
-    normalized = normalize_message(text).casefold().strip(" .,!?:;-")
-    match = re.fullmatch(r"(?:пункт\s*)?([1-9])", normalized)
-    return MENU_CATEGORIES.get(match.group(1), "") if match else ""
 
 
 def is_main_menu_command(text: str) -> bool:
@@ -453,113 +377,6 @@ def is_support_trigger_message(text: str) -> bool:
             r"\bошиб\w*|\bсбой\w*|\bпроблем\w*)",
             normalized,
         )
-    )
-
-
-def has_request_details(text: str, category: str) -> bool:
-    normalized = normalize_message(text).casefold()
-    if not normalized:
-        return False
-    category_patterns = {
-        "database": r"\bбаз(?:а|е|ы|у|ой)?\b|база\s+данных",
-        "mobile": r"мобил\w*|мобильн\w*\s+приложен\w*",
-        "incident": r"нештатн\w*|сбой\w*|авари\w*|ошибк\w*|проблем\w*",
-    }
-    without_topic = re.sub(category_patterns.get(category, r"$^"), " ", normalized)
-    words = re.findall(r"[a-zа-яё0-9/-]+", without_topic)
-    filler = {
-        "привет",
-        "здравствуйте",
-        "добрый",
-        "день",
-        "вечер",
-        "утро",
-        "заявка",
-        "запрос",
-        "проблема",
-        "помогите",
-        "помоги",
-        "нужно",
-        "надо",
-        "по",
-        "с",
-        "со",
-        "у",
-        "меня",
-        "там",
-        "пожалуйста",
-    }
-    meaningful = [word for word in words if word not in filler]
-    issue_phrase = bool(
-        re.search(
-            r"(?:не\s+\w+|ошибк|сбой|завис|пропал|сломан|откр|закр|"
-            r"видит|выходит|отображ|работает|номер)",
-            normalized,
-        )
-    )
-    has_reference = any(re.search(r"\d{3,}", word) for word in meaningful)
-    if category == "general":
-        return len(meaningful) >= 2 or issue_phrase
-    return has_reference or issue_phrase or len(meaningful) >= 2
-
-
-def request_detail_issues(text: str, category: str) -> list[str]:
-    normalized = normalize_message(text)
-    lower = normalized.casefold()
-    if not normalized:
-        return ["Сообщение пустое"]
-
-    problem_described = bool(
-        re.search(
-            r"(?:\bне\s+\w+|проблем\w*|ошиб\w*|сбой\w*|завис\w*|"
-            r"откр\w*|закр\w*|видит\w*|выходит\w*|отображ\w*|"
-            r"работа\w*|пропал\w*|отсутств\w*|добав\w*|измен\w*|"
-            r"коррект\w*|сломан\w*|требуется\w*)",
-            lower,
-        )
-    )
-    has_identifier = bool(
-        re.search(r"\d{3,}", lower)
-        or re.search(r"\b[a-zа-яё]{1,5}[-/]?\d{2,}[a-zа-яё0-9/-]*\b", lower)
-    )
-
-    issues: list[str] = []
-    if category == "general":
-        # С 1.00.6 ФИО и подразделение являются полезными, но необязательными полями.
-        if not problem_described:
-            issues.append("Не описано, что именно не работает")
-        return issues
-    if category == "support":
-        return []
-
-    if not problem_described:
-        issues.append("Не істеу керектігі немесе нақты не жұмыс істемейтіні сипатталмаған")
-    return issues
-
-
-def request_detail_error_reply(text: str, category: str) -> str:
-    issues = request_detail_issues(text, category)
-    issue_block = "\n".join(f"• {issue}" for issue in issues)
-    label = {
-        "database": "Жүйеге кіру",
-        "mobile": 'Жүйе мобильді қосымшасы',
-        "general": "Басқа өтінім",
-        "support": "Қолдау қызметіне сұрақ",
-    }.get(category, CATEGORIES.get(category, category))
-    return (
-        f"Өтінімді әзірге тіркеу мүмкін емес. «{label}» санатында мәліметтер жетіспейді:\n"
-        f"{issue_block}\n\n"
-        "Жетіспейтін мәліметтерді толықтырыңыз. Оларды бірнеше хабарламамен жіберуге болады.\n\n"
-        f"{category_prompt(category)}"
-    )
-
-
-def category_prompt(category: str) -> str:
-    """Domain-neutral fallback. Live menu prompts come from config/company.json."""
-    return (
-        "Мәселені немесе сұрақты толық сипаттаңыз. "
-        "Қажет болса, фото немесе құжат тіркеңіз.\n"
-        "0 — негізгі мәзірге оралу"
     )
 
 

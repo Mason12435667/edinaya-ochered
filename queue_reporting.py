@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timezone
 
-from queue_core import LOCAL_TIMEZONE, parse_iso_datetime
+from queue_core import LOCAL_TIMEZONE, log_suppressed, parse_iso_datetime
 
 
 class ReportingService:
@@ -59,6 +59,7 @@ class ReportingService:
                 if events:
                     finished = parse_iso_datetime(events[-1].get("created_at"))
             except Exception:
+                log_suppressed("queue_reporting.ticket_resolution_minutes")
                 finished = None
         return max(0, int((finished - created).total_seconds() // 60)) if finished else None
 
@@ -119,7 +120,7 @@ class ReportingService:
                     "source": "Система",
                 })
         except Exception:
-            pass
+            log_suppressed("queue_reporting.unified_audit_events")
         for item in self.auth.list_audit_events(600):
             actor = str(item.get("actor_display_name") or item.get("actor_username") or "Система")
             action = str(item.get("action") or "")

@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
+from queue_core import log_suppressed
 
 DANGEROUS_EXTENSIONS = {
     '.exe','.com','.scr','.pif','.msi','.msp','.bat','.cmd','.ps1','.psm1','.vbs','.vbe','.js','.jse',
@@ -255,12 +256,12 @@ def request_profile_refresh(app, chat_id: str) -> None:
             presence = app.CHAT_STATE.get('presence')
             if isinstance(presence,dict): presence.pop(chat_id,None)
     except Exception:
-        pass
+        log_suppressed("queue_reliability.request_profile_refresh")
     try:
         path = app.queue_avatars.cache_path(app,chat_id)
         if path.is_file(): path.unlink()
     except Exception:
-        pass
+        log_suppressed("queue_reliability.request_profile_refresh")
 
 
 def database_check(database_path: Path) -> dict[str,Any]:
@@ -305,7 +306,9 @@ def diagnostic_snapshot(app) -> dict[str,Any]:
         usage=shutil.disk_usage(app.DATA_DIR); disk={'total':usage.total,'used':usage.used,'free':usage.free}
     except OSError: disk={'total':0,'used':0,'free':0}
     try: connector=app.connector_state_snapshot()
-    except Exception: connector={}
+    except Exception:
+        log_suppressed("queue_reliability.diagnostic_snapshot")
+        connector={}
     problems=queue_problem_rows(app.STORE,100)
     backups=verify_backups(app.DATA_DIR)
     legacy_secret=app.ROOT/'.connector_token'
@@ -339,6 +342,7 @@ def dismissed_notification_ids(store, event_ids: list[str] | tuple[str,...] | se
             ).fetchall()
         return {str(row['event_id'] if hasattr(row,'keys') else row[0]) for row in rows}
     except Exception:
+        log_suppressed("queue_reliability.dismissed_notification_ids")
         return set()
 
 
@@ -355,7 +359,7 @@ def reconcile_notification_dismissals(store, current_event_ids: list[object], pr
             if stale:
                 db.executemany("DELETE FROM reliability_notification_dismissals WHERE event_id=?",stale)
     except Exception:
-        pass
+        log_suppressed("queue_reliability.reconcile_notification_dismissals")
 
 
 def filter_dismissed_notifications(store, events: list[dict[str,Any]]) -> list[dict[str,Any]]:
@@ -464,7 +468,8 @@ def run_health_checks(app) -> None:
     try:
         conn=app.connector_state_snapshot(); connected=bool(conn.get('connected'))
         _upsert_alert(app.STORE,'connector','whatsapp','critical','WhatsApp-коннектор недоступен',str(conn.get('status') or 'Нет связи'),not connected)
-    except Exception: pass
+    except Exception:
+        log_suppressed("queue_reliability.run_health_checks")
 
 
 def reliability_notification_events(app, limit: int = 20) -> tuple[int,list[dict[str,Any]]]:
@@ -477,7 +482,8 @@ def reliability_notification_events(app, limit: int = 20) -> tuple[int,list[dict
             events.append({'event_id':'reliability:'+str(r['alert_key']),'kind':'system','title':str(r['title']),
                            'detail':str(r['detail'] or ''),'timestamp':int((_parse_dt(r['updated_at']) or datetime.now(timezone.utc)).timestamp()),
                            'level':str(r['level'] or 'warning')})
-    except Exception: pass
+    except Exception:
+        log_suppressed("queue_reliability.reliability_notification_events")
     # SLA warning / overdue events are calculated live, without mutating ticket status.
     if str(app.STORE.get_setting('sla_alerts_enabled','1')).lower() in {'1','true','yes','on'}:
         try:
@@ -490,7 +496,8 @@ def reliability_notification_events(app, limit: int = 20) -> tuple[int,list[dict
                 detail=f"{t.get('title','Заявка')} · {'просрочка' if overdue else 'осталось'} {abs(remain)//60} мин."
                 events.append({'event_id':f'sla:{tid}:{"overdue" if overdue else "warn"}','kind':'sla','title':title,'detail':detail,
                                'timestamp':int(datetime.now(timezone.utc).timestamp()),'level':'critical' if overdue else 'warning'})
-        except Exception: pass
+        except Exception:
+            log_suppressed("queue_reliability.reliability_notification_events")
     events.sort(key=lambda x:int(x.get('timestamp',0) or 0),reverse=True)
     reconcile_notification_dismissals(app.STORE,[e.get('event_id') for e in events],('reliability:','sla:'))
     events=filter_dismissed_notifications(app.STORE,events)
@@ -515,4 +522,5 @@ def worker_loop(app, stop: threading.Event | None = None) -> None:
                     bad=[x for x in backups[:3] if not x.get('ok')]
                     _upsert_alert(app.STORE,'backup-integrity','backup','critical','Проблема резервной копии',
                                   (str(bad[0].get('path')) if bad else ''),bool(bad))
-            except Exception: pass
+            except Exception:
+                log_suppressed("queue_reliability.worker_loop")

@@ -1,37 +1,27 @@
-# EO_GENERIC_DEFAULTS_V137
-# EO_GENERIC_LEGACY_TEXT_V136
 from __future__ import annotations
 
 import base64
 import binascii
-import csv
-import io
 import hashlib
-import html
+import hmac
+import io
 import json
+import logging
 import os
 import re
 import sqlite3
 import secrets
-import shutil
 import threading
 import time
 import webbrowser
 import sys
-import queue_inbound_media
-import queue_names
 import queue_message_identity
 import queue_features
-import queue_feature_http
 import queue_productivity
-import queue_productivity_http
 import queue_contextual_tickets
 import queue_workflow
-import queue_workflow_http
 import queue_reliability
-import queue_reliability_http
 import queue_performance
-import queue_performance_http
 import queue_uploads
 import queue_avatars
 import queue_user_locale
@@ -53,13 +43,12 @@ import queue_work_context
 import queue_ticket_views
 import queue_admin_pages
 from queue_user_locale import tr
-from queue_language import parse_menu_number
+from queue_language import parse_menu_number  # used by queue_generic_profile.activate()
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
-from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import quote, urlparse
 
 from ticketing import (
     CATEGORIES,
@@ -69,56 +58,20 @@ from ticketing import (
     STATUSES,
     TicketStore,
     category_prompt,
-    build_missing_request_reply,
-    apply_expected_request_answer,
-    extract_request_draft,
-    merge_request_draft,
-    missing_request_fields,
-    request_draft_text,
-    is_acknowledgement,
-    is_main_menu_command,
-    is_support_trigger_message,
     normalize_message,
-    process_incoming_message,
-    request_detail_error_reply,
-    request_detail_issues,
 )
+from queue_core import log_suppressed
+
+# Public release from CHANGELOG.md; reported by /api/integration/ping.
+APP_VERSION = "v143"
+
+# Modules split out of app.py read shared services and settings as app.NAME.
+for _module in (queue_chat_state, queue_ticket_views, queue_admin_pages, queue_chat_views,
+                queue_whatsapp_handlers, queue_http_handler):
+    _module.bind(sys.modules[__name__])
 
 
-QUEUE_3_3_111_CHAT_LAYOUT_OVERFLOW_FIX = True
-QUEUE_1_00_4_POSTRELEASE_CLEANUP = True
-QUEUE_1_00_5_REPLY_LIGHT_INSTRUCTION = True
-QUEUE_1_00_6_CONTEXTUAL_TICKETS = True
-QUEUE_1_00_6_1_OFFICIAL_AUTO_REPLY_FLOW = True
-QUEUE_1_00_6_2_GENERIC_GREETING = True
-QUEUE_1_00_6_3_SCREENSHOT_MENU_TEXTS = True
-QUEUE_1_00_6_5_SCOPED_PRE_TICKET_MEDIA = True
-QUEUE_1_00_6_6_VOICE_TRANSCRIPTION_DISABLED = True
-QUEUE_1_00_6_7_GROUP_PREVIEW_MULTI_MEDIA = True
-QUEUE_1_00_6_8_SEQUENTIAL_SCREENSHOTS = True
-QUEUE_1_00_6_9_ATTACHMENT_PREVIEWS = True
-QUEUE_1_00_6_10_VISIBLE_ATTACHMENT_TRAY = True
-QUEUE_1_00_6_11_KZ_USER_WHATSAPP = True
-QUEUE_1_00_6_12_LANGUAGE_GATE = True
-QUEUE_1_00_6_13_UNCERTAIN_LOCAL_MEDIA_RECONCILE = True
-QUEUE_1_00_6_14_GLOBAL_AUTO_REPLY_TOGGLE = True
-QUEUE_1_00_6_15_AUTHORIZATION = True
-QUEUE_1_00_6_16_MULTIUSER_BACKEND = True
-QUEUE_1_00_6_17_REGISTER_RECOVERY = True
-QUEUE_1_00_6_18_ACCESS_OPERATIONS = True
-QUEUE_1_00_6_19_AUTO_SHIFT_CLEAN_AUTH = True
-QUEUE_1_00_6_20_CHAT_CLEANUP = True
-QUEUE_1_00_6_26_FINAL_AUTH_OPERATIONS = True
-QUEUE_1_00_6_27_MODULARIZATION_PHASE1 = True
-QUEUE_1_00_6_28_MODULARIZATION_PHASE2 = True
-QUEUE_1_00_6_29_MODULARIZATION_PHASE3 = True
-QUEUE_1_00_6_30_MODULARIZATION_PHASE4 = True
-QUEUE_1_00_6_31_MODULARIZATION_PHASE5 = True
-QUEUE_1_00_6_32_REALTIME_FASTPATH = True
-QUEUE_1_00_6_33_USER_FLOW_FIXES = True
-QUEUE_1_00_6_34_MEDIA_CONTEXT_FIX = True
-QUEUE_1_00_6_140_STALE_MENU_RECOVERY = True
-ROOT = Path(__file__).resolve().parent
+ROOT =Path(__file__).resolve().parent
 
 # 1.00.6.27: first modularization phase. Keep the historic names in app.py as
 # aliases so existing feature modules can continue receiving app as their context.
@@ -145,6 +98,30 @@ DATA_DIR = resolve_data_dir()
 DATABASE_PATH = prepare_database_path(DATA_DIR)
 STORE = TicketStore(DATABASE_PATH)
 AUTH = queue_auth.AuthStore(DATABASE_PATH)
+
+
+def _csrf_secret() -> bytes:
+    # Kept in the database so pages opened before a restart can still submit.
+    value = STORE.get_setting("csrf_secret", "")
+    if len(value) < 32:
+        value = secrets.token_urlsafe(48)
+        STORE.set_setting("csrf_secret", value)
+    return value.encode("utf-8")
+
+
+CSRF_SECRET = _csrf_secret()
+
+
+def csrf_token(user: dict[str, object] | None = None) -> str:
+    """Form/request token of the signed-in user (defaults to the request's user)."""
+    user = user if user is not None else (queue_auth.current_user() or {})
+    subject = f"{int(user.get('id', 0) or 0)}:{str(user.get('username', '') or '').casefold()}"
+    return hmac.new(CSRF_SECRET, subject.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def csrf_token_valid(value: object, user: dict[str, object] | None = None) -> bool:
+    supplied = str(value or "").encode("utf-8", "surrogateescape")
+    return bool(supplied) and hmac.compare_digest(supplied, csrf_token(user).encode("ascii"))
 queue_operations.initialize(STORE)
 queue_productivity.initialize(STORE)
 queue_contextual_tickets.initialize(STORE)
@@ -165,7 +142,6 @@ scheduled_backup_worker = RUNTIME.scheduled_backup_worker
 process_resource_snapshot = RUNTIME.process_resource_snapshot
 REPORTING = queue_reporting.ReportingService(STORE, AUTH)
 _final_ticket_filter = REPORTING.filter_tickets
-_ticket_resolution_minutes = REPORTING.ticket_resolution_minutes
 _analytics_snapshot = REPORTING.analytics_snapshot
 
 
@@ -250,7 +226,6 @@ INSTRUCTION_SOURCE_URL = os.getenv("QUEUE_INSTRUCTION_SOURCE_URL", "").strip()
 INSTRUCTION_DATA_PATH = ROOT / "instruction_data.json"
 DEFAULT_EMPLOYEES = [f"Сотрудник {number}" for number in range(1, 6)]
 ADMIN_USER = os.getenv("QUEUE_ADMIN_USER", "queueadmin").strip().casefold()
-ADMIN_FORM_TOKEN = secrets.token_urlsafe(32)
 ADMIN_SESSION_TOKEN = secrets.token_urlsafe(48)
 ADMIN_SESSION_COOKIE = "queue_admin_session"
 ADMIN_SESSION_MAX_AGE = 12 * 60 * 60
@@ -287,10 +262,6 @@ USER_CLOSE_REASON_LABELS_KZ = {
     "Другое": "Басқа",
 }
 USER_CATEGORY_PROMPTS_KZ = {'general': 'Мәселені немесе сұрақты сипаттаңыз. Қажет болса, скриншот немесе файл тіркеңіз.\n0 — негізгі мәзірге оралу'}
-
-
-def user_menu_label(category: str, fallback: str = "") -> str:
-    return queue_user_locale.user_menu_label(category, fallback)
 
 
 def user_status_label(status: str, fallback: str = "") -> str:
@@ -420,93 +391,6 @@ def enabled_menu_options() -> list[dict[str, object]]:
     return [item for item in MENU_OPTIONS if bool(item.get("enabled"))]
 
 
-def numbered_enabled_menu_options() -> list[tuple[int, dict[str, object]]]:
-    """Visible WhatsApp menu options with dynamic consecutive numbers.
-
-    Numbers are intentionally never stored in settings. If an administrator hides
-    or removes a category, all remaining visible items are numbered again from 1
-    without gaps, and incoming numeric choices are resolved against this same list.
-    """
-    return list(enumerate(enabled_menu_options(), start=1))
-
-
-def active_ticket_category_items() -> list[tuple[str, str]]:
-    """Categories currently available for new tickets.
-
-    Historical/removed categories remain in CATEGORIES for display and filtering,
-    but do not appear in forms used to create a new ticket. Internal categories
-    that are not represented in the WhatsApp menu keep their previous behavior.
-    """
-    menu_by_key = {str(item.get("key", "")): item for item in MENU_OPTIONS}
-    rows: list[tuple[str, str]] = []
-    for key, label in CATEGORIES.items():
-        if key in CATEGORY_ARCHIVE:
-            continue
-        option = menu_by_key.get(key)
-        if option is not None:
-            if str(option.get("action", MENU_ACTION_TICKET)) != MENU_ACTION_TICKET:
-                continue
-            if not bool(option.get("enabled")):
-                continue
-            label = str(option.get("label", label))
-        rows.append((str(key), str(label)))
-    return rows
-
-
-def error_report_menu_number() -> int:
-    # Служебный пункт с репортами идёт после пользовательских категорий.
-    return len(enabled_menu_options()) + 1
-
-
-def active_tickets_menu_number() -> int:
-    # Активные заявки идут после отдельного пункта «Репорт об ошибке».
-    return len(enabled_menu_options()) + 2
-
-
-def menu_payload() -> list[dict[str, str]]:
-    rows = [
-        {"number": str(index), "label": user_menu_label(str(item["key"]), str(item["label"]))}
-        for index, item in numbered_enabled_menu_options()
-    ]
-    rows.append({
-        "number": str(error_report_menu_number()),
-        "label": tr("Репорт об ошибке", "Қате туралы хабарлама"),
-    })
-    rows.append({
-        "number": str(active_tickets_menu_number()),
-        "label": tr("Мои активные заявки", "Менің белсенді өтінімдерім"),
-    })
-    return rows
-
-
-def is_error_report_command(text: str) -> bool:
-    normalized = normalize_message(text).casefold().strip(" .,!?:;-")
-    return normalized in {
-        "репорт об ошибке", "репорт ошибки", "сообщить об ошибке",
-        "сообщить ошибку", "ошибка в системе", "баг", "report bug",
-        "қате туралы хабарлама", "қате туралы есеп", "қате хабарламасы",
-    }
-
-
-def user_greeting(sender: str) -> str:
-    return tr("Здравствуйте, пользователь.", "Сәлеметсіз бе, пайдаланушы.")
-
-
-def with_user_greeting(sender: str, text: str) -> str:
-    clean = str(text or "").strip()
-    folded = clean.casefold()
-    if folded.startswith("здравствуйте") or folded.startswith("сәлеметсіз"):
-        return clean
-    return f"{user_greeting(sender)}\n\n{clean}"
-
-
-def configured_category_required_fields(category: str) -> list[str]:
-    # Required-field inference remains based on the Russian admin-configured text.
-    # Only ordinary-user output is localized to Kazakh.
-    prompt = configured_category_prompt_internal(category)
-    return queue_contextual_tickets.infer_required_fields(category, prompt)
-
-
 def error_report_prompt() -> str:
     return tr(
         "Вы выбрали категорию «Репорт об ошибке».\n\n"
@@ -529,46 +413,6 @@ def is_active_tickets_command(text: str) -> bool:
     }
 
 
-def configured_menu_category(choice: str) -> str:
-    normalized = normalize_message(choice).casefold().strip(" .,!?:;-")
-    match = re.fullmatch(r"(?:пункт\s*)?(\d{1,2})", normalized)
-    if not match:
-        return ""
-    requested_number = int(match.group(1))
-    for number, option in numbered_enabled_menu_options():
-        if number == requested_number:
-            return str(option["key"])
-    return ""
-
-
-OPTIONAL_PHOTO_NOTE = (
-    "При необходимости к обращению можно приложить фото, скриншот или файл. "
-    "Вложение не является обязательным, если категория не требует его отдельно."
-)
-
-
-def configured_category_prompt_internal(category: str) -> str:
-    # Raw text comes from the Russian admin menu editor and is also used for
-    # required-field inference. Keep it separate from the user-facing locale.
-    option = next((item for item in MENU_OPTIONS if item["key"] == category), None)
-    if option and str(option.get("prompt", "")).strip():
-        prompt = str(option["prompt"]).strip()
-        if re.search(r"(?:скопируйте.*шаблон|не удаляйте названия полей|одним сообщением|шаблон для заполнения)", prompt, re.IGNORECASE | re.DOTALL):
-            prompt = category_prompt(category).strip()
-    else:
-        prompt = category_prompt(category).strip()
-    if (
-        configured_category_action(category) == MENU_ACTION_TICKET
-        and not re.search(r"Фото\s+или\s+скриншот", prompt, re.IGNORECASE)
-    ):
-        prompt = f"{prompt}\n\n{OPTIONAL_PHOTO_NOTE}"
-    return prompt
-
-
-def configured_category_prompt(category: str) -> str:
-    if queue_user_locale.is_kz() and category in queue_user_locale.USER_CATEGORY_PROMPTS_KZ:
-        return queue_user_locale.USER_CATEGORY_PROMPTS_KZ[category]
-    return configured_category_prompt_internal(category)
 
 
 def configured_category_action(category: str) -> str:
@@ -577,67 +421,11 @@ def configured_category_action(category: str) -> str:
     return action if action in MENU_ACTIONS else MENU_ACTION_TICKET
 
 
-def start_menu_prompt() -> str:
-    # Outside an open menu a bare number must not silently select a category.
-    # The single command for returning to/opening the main menu is 0.
-    return tr(
-        "Вы обратились в службу технической поддержки. Чтобы открыть главное меню заявок, отправьте 0.",
-        "Сіз техникалық қолдау қызметіне жүгіндіңіз. Өтінімдердің негізгі мәзірін ашу үшін 0 жіберіңіз.",
-    )
-
-
-def start_menu_reminder() -> str:
-    return tr(
-        "Для продолжения необходимо выбрать категорию обращения.",
-        "Жалғастыру үшін өтінім санатын таңдау қажет.",
-    )
-
-
-def main_menu_text(error: bool = False) -> str:
-    category_rows = [
-        f"{index}. {user_menu_label(str(item['key']), str(item['label']))}"
-        for index, item in numbered_enabled_menu_options()
-    ]
-    category_rows.append(f"{error_report_menu_number()}. {tr('Репорт об ошибке', 'Қате туралы хабарлама')}")
-    category_rows.append(f"{active_tickets_menu_number()}. {tr('Мои активные заявки', 'Менің белсенді өтінімдерім')}")
-    rows = "\n".join(category_rows)
-    if error:
-        intro = tr(
-            "Не удалось определить выбранную категорию.\nПожалуйста, выберите один из доступных пунктов:\n\n",
-            "Таңдалған санатты анықтау мүмкін болмады.\nҚолжетімді тармақтардың бірін таңдаңыз:\n\n",
-        )
-    else:
-        intro = tr(
-            "Главное меню обращений\n\nВыберите категорию обращения:\n\n",
-            "Өтінімдердің негізгі мәзірі\n\nӨтінім санатын таңдаңыз:\n\n",
-        )
-    return (
-        f"{intro}{rows}\n\n"
-        + tr(
-            "В ответ отправьте только номер нужного пункта. После выбора система запросит сведения, необходимые именно для этой категории.\n\n"
-            "Для повторного открытия меню отправьте 0 или слово «меню». Чтобы сменить язык, отправьте слово «язык».",
-            "Жауап ретінде тек қажетті тармақтың нөмірін жіберіңіз. Таңдағаннан кейін жүйе осы санатқа қажетті мәліметтерді сұрайды.\n\n"
-            "Мәзірді қайта ашу үшін 0 немесе «мәзір» сөзін жіберіңіз. Тілді ауыстыру үшін «тіл» сөзін жіберіңіз.",
-        )
-    )
-
-
-def menu_selection_reminder() -> str:
-    return tr(
-        "Для продолжения выберите номер категории из меню. После выбора система запросит сведения, необходимые для регистрации обращения.\n\n"
-        "Чтобы повторно открыть главное меню, отправьте 0 или слово «меню».",
-        "Жалғастыру үшін мәзірден санат нөмірін таңдаңыз. Таңдағаннан кейін жүйе өтінімді тіркеуге қажетті мәліметтерді сұрайды.\n\n"
-        "Негізгі мәзірді қайта ашу үшін 0 немесе «мәзір» сөзін жіберіңіз.",
-    )
-
-
 # ---------------------------------------------------------------------------
 # 1.00.6.98: approved ordinary-user WhatsApp flow ("Текст системы_v3").
 # Staff/admin UI and internal ticket statuses remain Russian. Public menu
 # numbering is fixed to 1-8 so an old request_menu_json cannot change it.
 # ---------------------------------------------------------------------------
-QUEUE_1_00_6_98_USER_FLOW_V3 = True
-QUEUE_1_00_6_99_USER_PROFILE_V3 = True
 
 # Keep staff-facing category names aligned with the new public flow while preserving
 # the existing internal keys and historical ticket records.
@@ -662,12 +450,6 @@ V3_FIELD_LABELS_KZ = {
 V3_CATEGORY_LABELS_KZ = {'general': 'Жалпы өтініш'}
 
 
-def user_menu_label(category: str, fallback: str = "") -> str:
-    if queue_user_locale.is_kz():
-        return V3_CATEGORY_LABELS_KZ.get(str(category), queue_user_locale.user_menu_label(category, fallback))
-    return fallback or str(category)
-
-
 def language_selection_text_v3() -> str:
     return (
         "Здравствуйте! / Сәлеметсіз бе!\n"
@@ -681,80 +463,6 @@ def language_selection_text_v3() -> str:
 
 def active_tickets_menu_number() -> int:
     return 8
-
-
-def error_report_menu_number() -> int:
-    # Separate bug-report mode stays available to staff, but is not a public
-    # numbered item in the v3 WhatsApp flow.
-    return 999
-
-
-def menu_payload() -> list[dict[str, str]]:
-    labels = V3_MENU_LABELS_KZ if queue_user_locale.is_kz() else V3_MENU_LABELS_RU
-    return [{"number": str(number), "label": labels[str(number)]} for number in range(1, 10)]
-
-
-def configured_menu_category(choice: str) -> str:
-    return V3_MENU_CATEGORIES.get(parse_menu_number(choice), "")
-
-
-def main_menu_text(error: bool = False) -> str:
-    if queue_user_locale.is_kz():
-        lead = (
-            'службы поддержки техникалық қолдау қызметіне қош келдіңіз. 🛠\n\n'
-            "Өтінімді жалғастыру үшін өтінім санатын таңдаңыз (санын жіберіңіз):\n"
-        )
-        labels = V3_MENU_LABELS_KZ
-        tail = "\n*(00 — тілді өзгерту)*"
-        if error:
-            lead = "Жалғастыру үшін мәзірден санатты таңдаңыз.\n\n" + lead
-    else:
-        lead = (
-            'Добро пожаловать в техподдержку службы поддержки. 🛠\n\n'
-            "Для продолжения выберите категорию обращения (отправьте её номер):\n"
-        )
-        labels = V3_MENU_LABELS_RU
-        tail = "\n*(00 — сменить язык)*"
-        if error:
-            lead = "Для продолжения выберите категорию из меню.\n\n" + lead
-    rows = "\n".join(f"{number}. {labels[str(number)]}" for number in range(1, 10))
-    return f"{lead}{rows}{tail}"
-
-
-def start_menu_prompt() -> str:
-    return main_menu_text()
-
-
-def start_menu_reminder() -> str:
-    return menu_selection_reminder()
-
-
-def menu_selection_reminder() -> str:
-    return tr(
-        "Для новой заявки сначала выберите категорию: отправьте цифру 1–7 или 9. Пункт 8 — ваши активные заявки.\n*(00 — сменить язык)*",
-        "Жаңа өтінім үшін алдымен санатты таңдаңыз: 1–7 немесе 9 санын жіберіңіз. 8 — белсенді өтінімдеріңіз.\n*(00 — тілді өзгерту)*",
-    )
-
-
-def configured_category_prompt(category: str) -> str:
-    prompts_ru = {
-        "database": "🔑 Напишите email/логин пользователя и требуемое действие (выдать роль, сбросить пароль, снять блокировку).\n*(0 — главное меню)*",
-        "mobile": "📱 Напишите, какой именно раздел приложения не работает, и приложите скриншот экрана с ошибкой.\n*(0 — главное меню)*",
-        "general": "Опишите вашу проблему, задайте вопрос или опишите ошибку свободным текстом. Приложите файлы или скриншоты, если они помогут разобраться.\n*(0 — главное меню)*",
-    }
-    prompts_kz = {
-        "database": "🔑 Пайдаланушының email/логинін және қажетті әрекетті жазыңыз (рөл беру, құпиясөзді қалпына келтіру, бұғаттан шығару).\n*(0 — негізгі мәзір)*",
-        "mobile": "📱 Қосымшаның нақты қай бөлімі жұмыс істемейтінін жазыңыз және қате шыққан экранның скриншотын тіркеңіз.\n*(0 — негізгі мәзір)*",
-        "general": "Мәселеңізді сипаттаңыз, сұрағыңызды қойыңыз немесе қате туралы еркін мәтінмен хабарлаңыз. Түсінуге көмектесетін болса, скриншот немесе файлдар тіркеңіз.\n*(0 — негізгі мәзір)*",
-    }
-    prompts = prompts_kz if queue_user_locale.is_kz() else prompts_ru
-    return prompts.get(category, configured_category_prompt_internal(category))
-
-
-def configured_category_required_fields(category: str) -> list[str]:
-    if category in V3_REQUIRED_FIELDS:
-        return list(V3_REQUIRED_FIELDS[category])
-    return queue_contextual_tickets.infer_required_fields(category, configured_category_prompt_internal(category))
 
 
 def v3_missing_fields_reply(missing_fields) -> str:
@@ -972,10 +680,12 @@ def save_outbound_media_stream(handler, content_length: int, mimetype: str, file
             final_path = OUTBOUND_MEDIA_DIR / f"{secrets.token_hex(24)}{extension}"
             temporary = final_path.with_name(final_path.name + "." + secrets.token_hex(6) + ".tmp")
             remaining = content_length
+            # A small body may already have been read (CSRF check); replay it.
+            source = io.BytesIO(handler.read_body(content_length) or b"") if handler.body_already_read() else handler.rfile
             try:
                 with temporary.open("wb") as stream:
                     while remaining > 0:
-                        chunk = handler.rfile.read(min(1024 * 1024, remaining))
+                        chunk = source.read(min(1024 * 1024, remaining))
                         if not chunk:
                             raise OSError("upload ended before Content-Length")
                         stream.write(chunk)
@@ -1099,6 +809,7 @@ def _outbound_media_matches_observation(
     try:
         queued_body = normalize_message(str(row["body"] or ""))[:1000]
     except Exception:
+        log_suppressed("app._outbound_media_matches_observation")
         queued_body = ""
     current_body = _observed_outbound_body(observed_body, observed_type)
     if queued_body != current_body:
@@ -1107,6 +818,7 @@ def _outbound_media_matches_observation(
     try:
         queued_reply = normalize_message(str(row["reply_to_key"] or ""))[:160]
     except Exception:
+        log_suppressed("app._outbound_media_matches_observation")
         queued_reply = ""
     current_reply = normalize_message(str(observed_reply_to or ""))[:160]
     if bool(queued_reply) != bool(current_reply):
@@ -1142,6 +854,7 @@ def preserved_system_outgoing_media(
             db, sb = queue_message_identity.parts(b)
             return bool(sa and sb and sa == sb and (not da or not db or da == db))
         except Exception:
+            log_suppressed("app.same_provider_id")
             return False
 
     candidates = []
@@ -1161,6 +874,7 @@ def preserved_system_outgoing_media(
                     "WHERE status='sent' AND provider_id<>'' ORDER BY id DESC LIMIT 80"
                 ).fetchall())
     except Exception:
+        log_suppressed("app.preserved_system_outgoing_media")
         return {}
 
     for row in candidates:
@@ -1238,6 +952,7 @@ def reconcile_uncertain_system_outgoing_media(
                 (safe_chat,),
             ).fetchall()
     except Exception:
+        log_suppressed("app.reconcile_uncertain_system_outgoing_media")
         return {}
 
     for row in rows:
@@ -1286,6 +1001,7 @@ def reconcile_uncertain_system_outgoing_media(
         try:
             preserved = queue_uploads.preserve_sent_attachment(sys.modules[__name__], row_id)
         except Exception:
+            log_suppressed("app.reconcile_uncertain_system_outgoing_media")
             preserved = {}
         if preserved:
             media = {
@@ -1343,6 +1059,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                     if phone_digits:
                         participant_by_id[f"{phone_digits}@c.us"] = participant
         except Exception:
+            log_suppressed("app.decorate_chat_messages")
             mention_names = {}
             participant_by_id = {}
 
@@ -1389,7 +1106,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                     )
                     db.commit()
             except Exception:
-                pass
+                log_suppressed("app.decorate_chat_messages")
 
         if item.get("from_me") and not item.get("deleted") and not item.get("media_path"):
             media = {}
@@ -1552,7 +1269,6 @@ READ_MARKED_AT: dict[str, float] = {}
 
 
 # 1.00.6.29: chat state/snapshot logic moved out of app.py.
-queue_chat_state.bind(globals(), sys.modules[__name__])
 lock_owned_by_current_user = queue_chat_state.lock_owned_by_current_user
 conversation_lock_snapshot = queue_chat_state.conversation_lock_snapshot
 flexible_contact_match = queue_chat_state.flexible_contact_match
@@ -1591,7 +1307,6 @@ ticket_status_reply_text = TICKET_SERVICE.status_reply_text
 update_ticket_status = TICKET_SERVICE.update_status
 
 # Ticket views retain their existing interface.
-queue_ticket_views.bind(globals())
 layout = queue_ticket_views.layout
 render_instruction = queue_ticket_views.render_instruction
 render_dashboard = queue_ticket_views.render_dashboard
@@ -1599,7 +1314,6 @@ render_ticket = queue_ticket_views.render_ticket
 render_my_page = queue_ticket_views.render_my_page
 
 
-INSTRUCTION_LINK_RE = re.compile(r"(?i)\b((?:https?://|www\.)[^\s<>]+)")
 
 
 def render_login(query: dict[str, list[str]] | None = None, error: str = "") -> str:
@@ -1622,12 +1336,12 @@ def render_local_setup(error: str = "") -> str:
 
 
 def render_account(query: dict[str, list[str]]) -> str:
-    return queue_auth_views.render_account(query, user=queue_auth.current_user(), escape=e)
+    return queue_auth_views.render_account(query, user=queue_auth.current_user(), escape=e, csrf_token=csrf_token())
 
 
 def render_admin_users(query: dict[str, list[str]]) -> str:
     return queue_admin_views.render_admin_users(
-        query, auth=AUTH, employees=EMPLOYEES, csrf_token=ADMIN_FORM_TOKEN,
+        query, auth=AUTH, employees=EMPLOYEES, csrf_token=csrf_token(),
         escape=e, human_time=human_time, admin_layout_func=admin_layout,
     )
 
@@ -1641,7 +1355,6 @@ def admin_layout(title: str, content: str, active: str) -> str:
 
 
 # 1.00.6.30: phase 4 large modularization (queue_admin_pages).
-queue_admin_pages.bind(globals())
 render_admin_home = queue_admin_pages.render_admin_home
 error_report_status_badge = queue_admin_pages.error_report_status_badge
 render_admin_errors = queue_admin_pages.render_admin_errors
@@ -1672,7 +1385,6 @@ ERROR_REPORT_STATUS_LABELS = {
 
 
 # 1.00.6.29: chat page HTML moved out of app.py.
-queue_chat_views.bind(globals())
 render_groups = queue_chat_views.render_groups
 render_whatsapp = queue_chat_views.render_whatsapp
 
@@ -1701,7 +1413,7 @@ def _language_identities(chat_id: str = "", phone: str = "") -> list[str]:
         try:
             clean_chat = STORE.canonical_whatsapp_chat_id(clean_chat) or clean_chat
         except Exception:
-            pass
+            log_suppressed("app._language_identities")
         identities.append(f"chat:{clean_chat}")
     result: list[str] = []
     for identity in identities:
@@ -1908,21 +1620,14 @@ def apply_contact_profile_to_ticket(ticket: dict[str, object], profile: dict[str
         ticket["original_text"] = f"{profile_block}\n\n{current_original}".strip()
 
 
-def after_language_intro() -> str:
-    return tr(
-        "Вы обратились в службу технической поддержки.",
-        "Сіз техникалық қолдау қызметіне жүгіндіңіз.",
-    )
-
-
-# EO_GENERIC_PUBLIC_PROFILE_V131 (no database mutations)
-# EO_GENERIC_HARDEN_V132
-# EO_GENERIC_SOURCE_CLEANUP_V133
-# EO_GENERIC_DOMAIN_ROUTES_V134
 # This public branch no longer contains the specialized legacy views/assets.
 if os.getenv("QUEUE_PROFILE", "generic").strip().lower() != "generic":
     raise RuntimeError("The public source branch supports only QUEUE_PROFILE=generic")
 import queue_generic_profile
+# Fills the menu tables above from config/company.json and defines the menu
+# functions: main_menu_text, start_menu_prompt, menu_payload, user_menu_label,
+# configured_menu_category, configured_category_prompt,
+# configured_category_required_fields, active_ticket_category_items.
 queue_generic_profile.activate(globals(), ROOT)
 
 # Configure explicit work dependencies after application services are ready.
@@ -1949,15 +1654,9 @@ queue_work_context.configure(queue_work_context.WorkDependencies(
     category_items=active_ticket_category_items,
     connector_snapshot=connector_state_snapshot,
 ))
-queue_ticket_views.bind(globals())
-queue_admin_pages.bind(globals())
 
-# 1.00.6.29: connector/chat HTTP handlers live in a dedicated mixin.
-queue_whatsapp_handlers.bind(globals(), sys.modules[__name__])
-
-# 1.00.6.31: core HTTP routing/session/response handlers moved to a dedicated mixin.
-queue_http_handler.bind(globals(), sys.modules[__name__])
-
+# Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
+# (queue_http_handler) live in dedicated mixins.
 class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_handler.QueueHTTPHandlerMixin, BaseHTTPRequestHandler):
     server_version = "UnifiedQueue/1.00.1"
 
@@ -1981,6 +1680,11 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
 
 
 def main() -> None:
+    # stderr ends up in journald under systemd; QUEUE_LOG_LEVEL=INFO/DEBUG for more detail.
+    logging.basicConfig(
+        level=os.getenv("QUEUE_LOG_LEVEL", "WARNING").upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     cleanup_retention_once()
     threading.Thread(target=retention_worker, name="queue-retention", daemon=True).start()
     threading.Thread(target=scheduled_backup_worker, name="queue-scheduled-backup", daemon=True).start()

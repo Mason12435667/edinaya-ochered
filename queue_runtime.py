@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from queue_core import log_suppressed
 
 
 class RuntimeServices:
@@ -68,7 +69,7 @@ class RuntimeServices:
             try:
                 self.auth.record_audit(None, "backup_created", object_type="database", object_id=target.name, details=str(reason or "scheduled"))
             except Exception:
-                pass
+                log_suppressed("queue_runtime.create_scheduled_backup")
             return True, target.name
         except Exception as error:
             with self._state_lock:
@@ -123,12 +124,14 @@ class RuntimeServices:
             import resource
             usage = resource.getrusage(resource.RUSAGE_SELF)
             result["rss_bytes"] = int(getattr(usage, "ru_maxrss", 0) or 0) * 1024
+        except ImportError:
+            pass  # Unix only; on Windows the metric stays 0
         except Exception:
-            pass
+            log_suppressed("queue_runtime.process_resource_snapshot")
         try:
             if hasattr(os, "getloadavg"):
                 load = os.getloadavg()
                 result["load"] = f"{load[0]:.2f} / {load[1]:.2f} / {load[2]:.2f}"
         except Exception:
-            pass
+            log_suppressed("queue_runtime.process_resource_snapshot")
         return result
