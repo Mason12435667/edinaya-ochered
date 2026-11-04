@@ -1,7 +1,6 @@
 # EO_GENERIC_REGEX_FIX_V1381
 from __future__ import annotations
 
-import json
 import re
 import uuid
 from dataclasses import dataclass
@@ -18,6 +17,7 @@ from ticketing import (
     request_draft_text,
     utc_now,
 )
+from queue_context_repository import ContextRepository
 from queue_user_locale import tr, is_kz
 
 FIELD_LABELS_RU: dict[str, str] = {**REQUEST_FIELD_LABELS_RU}
@@ -74,84 +74,8 @@ OPTIONAL_FIELDS: dict[str, list[str]] = {
 }
 
 
-def _json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
-def _load_json(value: Any, fallback: Any) -> Any:
-    try:
-        parsed = json.loads(str(value or ""))
-    except (ValueError, TypeError, json.JSONDecodeError):
-        return fallback
-    return parsed
-
-
 def initialize(store: Any) -> None:
-    with store.connection() as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS contextual_conversation_state (
-                contact_key TEXT PRIMARY KEY,
-                category TEXT NOT NULL DEFAULT '',
-                session_id TEXT NOT NULL DEFAULT '',
-                field_meta_json TEXT NOT NULL DEFAULT '{}',
-                skipped_json TEXT NOT NULL DEFAULT '[]',
-                last_question_field TEXT NOT NULL DEFAULT '',
-                last_question_text TEXT NOT NULL DEFAULT '',
-                repeat_count INTEGER NOT NULL DEFAULT 0,
-                state TEXT NOT NULL DEFAULT 'idle',
-                last_message_key TEXT NOT NULL DEFAULT '',
-                updated_at TEXT NOT NULL DEFAULT ''
-            );
-            CREATE TABLE IF NOT EXISTS contextual_message_analysis (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL DEFAULT '',
-                contact_key TEXT NOT NULL DEFAULT '',
-                chat_id TEXT NOT NULL DEFAULT '',
-                message_key TEXT NOT NULL DEFAULT '',
-                category TEXT NOT NULL DEFAULT '',
-                raw_text TEXT NOT NULL DEFAULT '',
-                attachment_name TEXT NOT NULL DEFAULT '',
-                parsed_json TEXT NOT NULL DEFAULT '{}',
-                confidence_json TEXT NOT NULL DEFAULT '{}',
-                unresolved_json TEXT NOT NULL DEFAULT '[]',
-                created_at TEXT NOT NULL DEFAULT ''
-            );
-            CREATE INDEX IF NOT EXISTS idx_context_analysis_contact
-                ON contextual_message_analysis(contact_key, id DESC);
-            CREATE TABLE IF NOT EXISTS ticket_context_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL DEFAULT '',
-                ticket_id INTEGER NOT NULL DEFAULT 0,
-                contact_key TEXT NOT NULL DEFAULT '',
-                chat_id TEXT NOT NULL DEFAULT '',
-                event_type TEXT NOT NULL DEFAULT '',
-                field_name TEXT NOT NULL DEFAULT '',
-                old_value TEXT NOT NULL DEFAULT '',
-                new_value TEXT NOT NULL DEFAULT '',
-                message_key TEXT NOT NULL DEFAULT '',
-                text TEXT NOT NULL DEFAULT '',
-                media_name TEXT NOT NULL DEFAULT '',
-                confidence REAL NOT NULL DEFAULT 0,
-                source TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT ''
-            );
-            CREATE INDEX IF NOT EXISTS idx_ticket_context_history_ticket
-                ON ticket_context_history(ticket_id, id DESC);
-            CREATE INDEX IF NOT EXISTS idx_ticket_context_history_session
-                ON ticket_context_history(session_id, id ASC);
-            CREATE TABLE IF NOT EXISTS ticket_context_fields (
-                ticket_id INTEGER NOT NULL,
-                field_name TEXT NOT NULL,
-                value TEXT NOT NULL DEFAULT '',
-                confidence REAL NOT NULL DEFAULT 0,
-                source TEXT NOT NULL DEFAULT '',
-                source_message_key TEXT NOT NULL DEFAULT '',
-                updated_at TEXT NOT NULL DEFAULT '',
-                PRIMARY KEY(ticket_id, field_name)
-            );
-            """
-        )
+    ContextRepository(store).initialize()
 
 
 @dataclass
@@ -299,53 +223,12 @@ class MessageParser:
 class ContextEngine:
     """Объединяет сообщения в один черновик и хранит источник каждого поля."""
 
-    @staticmethod
-    def _state(store: Any, contact_key: str) -> dict[str, Any]:
-        with store.connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM contextual_conversation_state WHERE contact_key = ?",
-                (contact_key,),
-            ).fetchone()
-        if not row:
-            return {}
-        result = dict(row)
-        result["field_meta"] = _load_json(result.get("field_meta_json"), {})
-        result["skipped"] = _load_json(result.get("skipped_json"), [])
-        return result
-
-    @staticmethod
-    def _write_state(store: Any, contact_key: str, state: dict[str, Any]) -> None:
-        with store.connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO contextual_conversation_state
-                    (contact_key, category, session_id, field_meta_json, skipped_json,
-                     last_question_field, last_question_text, repeat_count, state,
-                     last_message_key, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(contact_key) DO UPDATE SET
-                    category=excluded.category, session_id=excluded.session_id,
-                    field_meta_json=excluded.field_meta_json, skipped_json=excluded.skipped_json,
-                    last_question_field=excluded.last_question_field,
-                    last_question_text=excluded.last_question_text,
-                    repeat_count=excluded.repeat_count, state=excluded.state,
-                    last_message_key=excluded.last_message_key, updated_at=excluded.updated_at
-                """,
-                (
-                    contact_key, state.get("category", ""), state.get("session_id", ""),
-                    _json(state.get("field_meta", {})), _json(state.get("skipped", [])),
-                    state.get("last_question_field", ""), state.get("last_question_text", ""),
-                    int(state.get("repeat_count", 0) or 0), state.get("state", "idle"),
-                    state.get("last_message_key", ""), utc_now(),
-                ),
-            )
-
     @classmethod
     def reset(cls, store: Any, contact_key: str, category: str = "") -> str:
         if not contact_key:
             return ""
         session_id = uuid.uuid4().hex
-        cls._write_state(store, contact_key, {
+        ContextRepository(store).write_state(contact_key, {
             "category": category,
             "session_id": session_id,
             "field_meta": {},
@@ -358,39 +241,17 @@ class ContextEngine:
         })
         return session_id
 
-    @staticmethod
-    def _record_history(
-        store: Any, *, session_id: str, ticket_id: int, contact_key: str,
-        chat_id: str, event_type: str, field_name: str = "", old_value: str = "",
-        new_value: str = "", message_key: str = "", text: str = "", media_name: str = "",
-        confidence: float = 0.0, source: str = "WhatsApp",
-    ) -> None:
-        with store.connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO ticket_context_history
-                    (session_id,ticket_id,contact_key,chat_id,event_type,field_name,old_value,new_value,
-                     message_key,text,media_name,confidence,source,created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    session_id, int(ticket_id or 0), contact_key, chat_id, event_type, field_name,
-                    normalize_message(old_value)[:1800], normalize_message(new_value)[:1800],
-                    normalize_message(message_key)[:180], normalize_message(text)[:32000],
-                    normalize_message(media_name)[:240], float(confidence or 0), source[:80], utc_now(),
-                ),
-            )
-
     @classmethod
     def collect(
         cls, store: Any, contact_key: str, category: str, text: str, *,
         attachment_name: str = "", message_key: str = "", chat_id: str = "",
         active_ticket_id: int = 0, required_override: list[str] | None = None,
     ) -> dict[str, Any]:
-        state = cls._state(store, contact_key)
+        repository = ContextRepository(store)
+        state = repository.state(contact_key)
         if not state or state.get("category") != category or not state.get("session_id"):
             cls.reset(store, contact_key, category)
-            state = cls._state(store, contact_key)
+            state = repository.state(contact_key)
         session_id = str(state.get("session_id", ""))
         existing = store.get_conversation_draft(contact_key)
         field_meta = state.get("field_meta") if isinstance(state.get("field_meta"), dict) else {}
@@ -409,17 +270,17 @@ class ContextEngine:
                 state["skipped"] = skipped
                 state["repeat_count"] = 0
                 state["last_message_key"] = message_key
-                cls._record_history(
-                    store, session_id=session_id, ticket_id=active_ticket_id, contact_key=contact_key,
+                repository.record_history(
+                    session_id=session_id, ticket_id=active_ticket_id, contact_key=contact_key,
                     chat_id=chat_id, event_type="field_skipped", field_name=expected,
                     message_key=message_key, text=clean, media_name=attachment_name, source="WhatsApp",
                 )
                 state["last_question_field"] = ""
                 state["last_question_text"] = ""
-                cls._write_state(store, contact_key, state)
+                repository.write_state(contact_key, state)
             else:
                 state["repeat_count"] = int(state.get("repeat_count", 0) or 0) + 1
-                cls._write_state(store, contact_key, state)
+                repository.write_state(contact_key, state)
                 label = _field_label(expected)
                 return {
                     "ready": False, "draft": existing, "missing": [expected], "confidence": {},
@@ -437,24 +298,25 @@ class ContextEngine:
             attachment_name=attachment_name,
         )
         if parsed.unresolved:
-            cls._record_history(store, session_id=session_id,ticket_id=0,contact_key=contact_key,chat_id=chat_id,
-                event_type="message_received",message_key=message_key,text=normalize_message(text),media_name=attachment_name)
+            repository.record_history(
+                session_id=session_id, ticket_id=0, contact_key=contact_key, chat_id=chat_id,
+                event_type="message_received", message_key=message_key,
+                text=normalize_message(text), media_name=attachment_name,
+            )
             detail = parsed.unresolved[0]
             if detail.get("field"):
                 state["last_question_field"] = detail["field"]
-            with store.connection() as connection:
-                connection.execute(
-                    """INSERT INTO contextual_message_analysis
-                       (session_id,contact_key,chat_id,message_key,category,raw_text,attachment_name,parsed_json,confidence_json,unresolved_json,created_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                    (session_id, contact_key, chat_id, message_key, category, clean, attachment_name,
-                     _json(parsed.fields), _json(parsed.confidence), _json(parsed.unresolved), utc_now()),
-                )
+            repository.record_analysis(
+                session_id=session_id, contact_key=contact_key, chat_id=chat_id,
+                message_key=message_key, category=category, text=clean,
+                attachment_name=attachment_name, fields=parsed.fields,
+                confidence=parsed.confidence, unresolved=parsed.unresolved,
+            )
             question = str(parsed.unresolved[0].get("question") or tr("Уточните значение, пожалуйста.", "Сұрақтың мәнін нақтылап жіберіңіз."))
             state["repeat_count"] = int(state.get("repeat_count", 0) or 0) + 1
             state["last_question_text"] = question
             state["last_message_key"] = message_key
-            cls._write_state(store, contact_key, state)
+            repository.write_state(contact_key, state)
             return {
                 "ready": False, "draft": existing, "missing": missing_required(category, existing, required_override),
                 "confidence": parsed.confidence, "reply": question, "clarify": True,
@@ -484,8 +346,8 @@ class ContextEngine:
                 "updated_at": utc_now(),
             }
             field_meta["_last_changed_field"] = key
-            cls._record_history(
-                store, session_id=session_id, ticket_id=active_ticket_id, contact_key=contact_key,
+            repository.record_history(
+                session_id=session_id, ticket_id=active_ticket_id, contact_key=contact_key,
                 chat_id=chat_id, event_type="field_corrected" if old_value else "field_found",
                 field_name=key, old_value=old_value, new_value=new_value,
                 message_key=message_key, text=clean, media_name=attachment_name,
@@ -493,18 +355,16 @@ class ContextEngine:
             )
         store.set_conversation_draft(contact_key, merged)
 
-        with store.connection() as connection:
-            connection.execute(
-                """INSERT INTO contextual_message_analysis
-                   (session_id,contact_key,chat_id,message_key,category,raw_text,attachment_name,parsed_json,confidence_json,unresolved_json,created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (session_id, contact_key, chat_id, message_key, category, clean, attachment_name,
-                 _json(parsed.fields), _json(parsed.confidence), "[]", utc_now()),
-            )
+        repository.record_analysis(
+            session_id=session_id, contact_key=contact_key, chat_id=chat_id,
+            message_key=message_key, category=category, text=clean,
+            attachment_name=attachment_name, fields=parsed.fields,
+            confidence=parsed.confidence, unresolved=parsed.unresolved,
+        )
 
         if clean or attachment_name:
-            cls._record_history(
-                store, session_id=session_id, ticket_id=active_ticket_id, contact_key=contact_key,
+            repository.record_history(
+                session_id=session_id, ticket_id=active_ticket_id, contact_key=contact_key,
                 chat_id=chat_id, event_type="message_received", message_key=message_key,
                 text=clean, media_name=attachment_name, source="WhatsApp",
             )
@@ -521,7 +381,7 @@ class ContextEngine:
         if not missing:
             state["last_question_field"] = ""
             state["last_question_text"] = ""
-            cls._write_state(store, contact_key, state)
+            repository.write_state(contact_key, state)
             return {
                 "ready": True,
                 "draft": merged,
@@ -556,7 +416,7 @@ class ContextEngine:
             if saved_labels:
                 reply = tr(f"Получены сведения: {', '.join(saved_labels)}. ", f"Мәліметтер алынды: {', '.join(saved_labels)}. ") + reply
         state["last_question_text"] = reply
-        cls._write_state(store, contact_key, state)
+        repository.write_state(contact_key, state)
         return {
             "ready": False,
             "draft": merged,
@@ -572,61 +432,49 @@ class TicketEngine:
 
     @staticmethod
     def commit(store: Any, contact_key: str, ticket_id: int, category: str, *, message_key: str = "", source: str = "WhatsApp") -> None:
+        repository = ContextRepository(store)
         if not ticket_id:
             return
-        state = ContextEngine._state(store, contact_key)
+        state = repository.state(contact_key)
         session_id = str(state.get("session_id", ""))
         draft = store.get_conversation_draft(contact_key)
         field_meta = state.get("field_meta") if isinstance(state.get("field_meta"), dict) else {}
         now = utc_now()
-        with store.connection() as connection:
-            if session_id:
-                connection.execute(
-                    "UPDATE ticket_context_history SET ticket_id = ? WHERE session_id = ? AND ticket_id = 0",
-                    (ticket_id, session_id),
-                )
-            for field_name, value in draft.items():
-                if field_name not in ALLOWED_FIELD_NAMES or not normalize_message(value):
-                    continue
-                meta = field_meta.get(field_name, {}) if isinstance(field_meta.get(field_name), dict) else {}
-                connection.execute(
-                    """INSERT INTO ticket_context_fields(ticket_id,field_name,value,confidence,source,source_message_key,updated_at)
-                       VALUES(?,?,?,?,?,?,?)
-                       ON CONFLICT(ticket_id,field_name) DO UPDATE SET
-                         value=excluded.value, confidence=excluded.confidence, source=excluded.source,
-                         source_message_key=excluded.source_message_key, updated_at=excluded.updated_at""",
-                    (ticket_id, field_name, value, float(meta.get("confidence", 0.9) or 0.9),
-                     str(meta.get("source", source)), str(meta.get("message_key", message_key)), now),
-                )
-        ContextEngine._record_history(
-            store, session_id=session_id, ticket_id=ticket_id, contact_key=contact_key,
+        if session_id:
+            repository.link_session(session_id, ticket_id)
+        for field_name, value in draft.items():
+            if field_name not in ALLOWED_FIELD_NAMES or not normalize_message(value):
+                continue
+            meta = field_meta.get(field_name, {}) if isinstance(field_meta.get(field_name), dict) else {}
+            repository.upsert_field(
+                ticket_id, field_name, value, float(meta.get("confidence", 0.9) or 0.9),
+                str(meta.get("source", source)), str(meta.get("message_key", message_key)),
+                updated_at=now,
+            )
+        repository.record_history(
+            session_id=session_id, ticket_id=ticket_id, contact_key=contact_key,
             chat_id="", event_type="ticket_created", message_key=message_key,
             text=f"Контекст обращения закреплён за заявкой #{ticket_id}", source=source,
         )
         if session_id:
-            with store.connection() as connection:
-                messages = connection.execute(
-                    "SELECT DISTINCT chat_id,message_key FROM ticket_context_history WHERE session_id=? AND event_type='message_received' AND message_key<>''",
-                    (session_id,),
-                ).fetchall()
-            for message in messages:
-                if message["chat_id"]:
-                    store.link_whatsapp_message_to_ticket(message["chat_id"], message["message_key"], ticket_id)
+            for chat_id, message_key in repository.session_message_keys(session_id):
+                store.link_whatsapp_message_to_ticket(chat_id, message_key, ticket_id)
         state["state"] = "active"
         state["last_question_field"] = ""
         state["last_question_text"] = ""
-        ContextEngine._write_state(store, contact_key, state)
+        repository.write_state(contact_key, state)
 
     @staticmethod
     def record_followup(
         store: Any, contact_key: str, ticket_id: int, *, chat_id: str = "", message_key: str = "",
         text: str = "", media_name: str = "",
     ) -> None:
+        repository = ContextRepository(store)
         ticket = store.get_ticket(ticket_id)
         if not ticket:
             return
         category = str(ticket.get("category", "general"))
-        state = ContextEngine._state(store, contact_key)
+        state = repository.state(contact_key)
         session_id = str(state.get("session_id", "")) or uuid.uuid4().hex
         existing = {item["field_name"]: item["value"] for item in ticket_fields(store, ticket_id)}
         parsed = MessageParser.parse(
@@ -646,8 +494,8 @@ class TicketEngine:
             old = normalize_message(existing.get(key, ""))
             if value != old:
                 _upsert_ticket_field(store, ticket_id, key, value, confidence, "WhatsApp follow-up", message_key)
-                ContextEngine._record_history(
-                    store, session_id=session_id, ticket_id=ticket_id, contact_key=contact_key,
+                repository.record_history(
+                    session_id=session_id, ticket_id=ticket_id, contact_key=contact_key,
                     chat_id=chat_id, event_type="followup_field_corrected" if old else "followup_field_found",
                     field_name=key, old_value=old, new_value=value, message_key=message_key,
                     text=text, media_name=media_name, confidence=confidence, source="WhatsApp follow-up",
@@ -656,13 +504,11 @@ class TicketEngine:
         if media_name:
             addition += "\nВложение: " + normalize_message(media_name)
         if addition.strip():
-            with store.connection() as connection:
-                connection.execute(
-                    "UPDATE tickets SET original_text=COALESCE(original_text,'') || ?, updated_at=? WHERE id=?",
-                    ("\n\nДополнение пользователя:\n" + addition.strip(), utc_now(), ticket_id),
-                )
-        ContextEngine._record_history(
-            store, session_id=session_id, ticket_id=ticket_id, contact_key=contact_key,
+            repository.append_ticket_text(
+                ticket_id, "\n\nДополнение пользователя:\n" + addition.strip(),
+            )
+        repository.record_history(
+            session_id=session_id, ticket_id=ticket_id, contact_key=contact_key,
             chat_id=chat_id, event_type="followup", message_key=message_key,
             text=text, media_name=media_name, source="WhatsApp follow-up",
         )
@@ -689,7 +535,8 @@ def missing_required(category: str, draft: dict[str, str], override: list[str] |
 
 
 def reset_context(store: Any, contact_key: str, category: str = "") -> str:
-    return ContextEngine.reset(store, contact_key, category)
+    with store.atomic():
+        return ContextEngine.reset(store, contact_key, category)
 
 
 def collect_request(
@@ -697,126 +544,99 @@ def collect_request(
     message_key: str = "", chat_id: str = "", active_ticket_id: int = 0,
     required_fields_override: list[str] | None = None,
 ) -> dict[str, Any]:
-    return ContextEngine.collect(
-        store, contact_key, category, text, attachment_name=attachment_name,
-        message_key=message_key, chat_id=chat_id, active_ticket_id=active_ticket_id,
-        required_override=required_fields_override,
-    )
+    with store.atomic():
+        return ContextEngine.collect(
+            store, contact_key, category, text, attachment_name=attachment_name,
+            message_key=message_key, chat_id=chat_id, active_ticket_id=active_ticket_id,
+            required_override=required_fields_override,
+        )
 
 
 def commit_ticket(store: Any, contact_key: str, ticket_id: int, category: str, *, message_key: str = "", source: str = "WhatsApp") -> None:
-    TicketEngine.commit(store, contact_key, ticket_id, category, message_key=message_key, source=source)
+    with store.atomic():
+        TicketEngine.commit(store, contact_key, ticket_id, category, message_key=message_key, source=source)
 
 
 def record_followup(
     store: Any, contact_key: str, ticket_id: int, *, chat_id: str = "", message_key: str = "",
     text: str = "", media_name: str = "",
 ) -> None:
-    TicketEngine.record_followup(
-        store, contact_key, ticket_id, chat_id=chat_id, message_key=message_key,
-        text=text, media_name=media_name,
-    )
+    with store.atomic():
+        TicketEngine.record_followup(
+            store, contact_key, ticket_id, chat_id=chat_id, message_key=message_key,
+            text=text, media_name=media_name,
+        )
 
 
 def _upsert_ticket_field(store: Any, ticket_id: int, field_name: str, value: str, confidence: float, source: str, message_key: str) -> None:
     if field_name not in ALLOWED_FIELD_NAMES or not normalize_message(value):
         return
-    with store.connection() as connection:
-        connection.execute(
-            """INSERT INTO ticket_context_fields(ticket_id,field_name,value,confidence,source,source_message_key,updated_at)
-               VALUES(?,?,?,?,?,?,?)
-               ON CONFLICT(ticket_id,field_name) DO UPDATE SET
-                 value=excluded.value, confidence=excluded.confidence, source=excluded.source,
-                 source_message_key=excluded.source_message_key, updated_at=excluded.updated_at""",
-            (ticket_id, field_name, normalize_message(value)[:1800], float(confidence or 0), source[:80], message_key[:180], utc_now()),
-        )
+    ContextRepository(store).upsert_field(
+        ticket_id, field_name, normalize_message(value)[:1800],
+        float(confidence or 0), source[:80], message_key[:180],
+    )
 
 
 def ticket_fields(store: Any, ticket_id: int) -> list[dict[str, Any]]:
-    with store.connection() as connection:
-        rows = connection.execute(
-            "SELECT * FROM ticket_context_fields WHERE ticket_id = ? ORDER BY field_name",
-            (int(ticket_id),),
-        ).fetchall()
-    return [dict(row) for row in rows]
+    return ContextRepository(store).ticket_fields(ticket_id)
 
 
 def ticket_history(store: Any, ticket_id: int, limit: int = 200) -> list[dict[str, Any]]:
-    safe_limit = max(1, min(int(limit or 200), 500))
-    with store.connection() as connection:
-        rows = connection.execute(
-            "SELECT * FROM ticket_context_history WHERE ticket_id = ? ORDER BY id DESC LIMIT ?",
-            (int(ticket_id), safe_limit),
-        ).fetchall()
-    return [dict(row) for row in rows]
+    return ContextRepository(store).ticket_history(ticket_id, limit)
 
 
 def apply_history_item(
     store: Any, ticket_id: int, history_id: int, field_name: str, actor: str, mode: str = "field",
 ) -> tuple[bool, str]:
-    with store.connection() as connection:
-        row = connection.execute(
-            "SELECT * FROM ticket_context_history WHERE id = ? AND ticket_id = ?",
-            (int(history_id), int(ticket_id)),
-        ).fetchone()
-    if not row:
-        return False, "Элемент истории не найден"
-    item = dict(row)
-    if mode == "media":
-        chat_id = normalize_message(item.get("chat_id", ""))
-        message_key = normalize_message(item.get("message_key", ""))
-        if not chat_id or not message_key:
-            return False, "У этого элемента нет WhatsApp-медиа для привязки"
-        linked = store.link_whatsapp_message_to_ticket(chat_id, message_key, ticket_id)
-        if linked:
-            ContextEngine._record_history(
-                store, session_id=str(item.get("session_id", "")), ticket_id=ticket_id,
-                contact_key=str(item.get("contact_key", "")), chat_id=chat_id,
-                event_type="history_media_linked", message_key=message_key,
-                media_name=str(item.get("media_name", "")), source=f"Сотрудник: {actor}",
-            )
-            with store.connection() as connection:
-                connection.execute(
-                    "INSERT INTO events(ticket_id,action,actor,created_at) VALUES(?,?,?,?)",
-                    (ticket_id, "Медиа из истории привязано к заявке", actor, utc_now()),
+    repository = ContextRepository(store)
+    with store.atomic():
+        item = repository.history_item(ticket_id, history_id)
+        if not item:
+            return False, "Элемент истории не найден"
+        if mode == "media":
+            chat_id = normalize_message(item.get("chat_id", ""))
+            message_key = normalize_message(item.get("message_key", ""))
+            if not chat_id or not message_key:
+                return False, "У этого элемента нет WhatsApp-медиа для привязки"
+            linked = store.link_whatsapp_message_to_ticket(chat_id, message_key, ticket_id)
+            if linked:
+                repository.record_history(
+                    session_id=str(item.get("session_id", "")), ticket_id=ticket_id,
+                    contact_key=str(item.get("contact_key", "")), chat_id=chat_id,
+                    event_type="history_media_linked", message_key=message_key,
+                    media_name=str(item.get("media_name", "")), source=f"Сотрудник: {actor}",
                 )
-            return True, "Медиа привязано к заявке"
-        return False, "Не удалось привязать медиа: сообщение не найдено"
+                repository.add_event(ticket_id, "Медиа из истории привязано к заявке", actor)
+                return True, "Медиа привязано к заявке"
+            return False, "Не удалось привязать медиа: сообщение не найдено"
 
-    if field_name not in ALLOWED_FIELD_NAMES:
-        return False, "Некорректное поле заявки"
-    value = normalize_message(item.get("new_value", "") or item.get("text", "") or item.get("media_name", ""))
-    if not value:
-        return False, "В выбранной записи нет значения для переноса"
-    existing = {entry["field_name"]: entry["value"] for entry in ticket_fields(store, ticket_id)}
-    old_value = normalize_message(existing.get(field_name, ""))
-    confidence = float(item.get("confidence", 0) or 0) or 0.95
-    _upsert_ticket_field(store, ticket_id, field_name, value, confidence, f"Сотрудник: {actor}", str(item.get("message_key", "")))
-    ContextEngine._record_history(
-        store, session_id=str(item.get("session_id", "")), ticket_id=ticket_id,
-        contact_key=str(item.get("contact_key", "")), chat_id=str(item.get("chat_id", "")),
-        event_type="history_applied_to_field", field_name=field_name, old_value=old_value,
-        new_value=value, message_key=str(item.get("message_key", "")), text=str(item.get("text", "")),
-        media_name=str(item.get("media_name", "")), confidence=confidence, source=f"Сотрудник: {actor}",
-    )
-    with store.connection() as connection:
-        connection.execute(
-            "INSERT INTO events(ticket_id,action,actor,created_at) VALUES(?,?,?,?)",
-            (ticket_id, f"Из истории обновлено поле: {FIELD_LABELS.get(field_name, field_name)}", actor, utc_now()),
+        if field_name not in ALLOWED_FIELD_NAMES:
+            return False, "Некорректное поле заявки"
+        value = normalize_message(item.get("new_value", "") or item.get("text", "") or item.get("media_name", ""))
+        if not value:
+            return False, "В выбранной записи нет значения для переноса"
+        existing = {entry["field_name"]: entry["value"] for entry in ticket_fields(store, ticket_id)}
+        old_value = normalize_message(existing.get(field_name, ""))
+        confidence = float(item.get("confidence", 0) or 0) or 0.95
+        _upsert_ticket_field(store, ticket_id, field_name, value, confidence, f"Сотрудник: {actor}", str(item.get("message_key", "")))
+        repository.record_history(
+            session_id=str(item.get("session_id", "")), ticket_id=ticket_id,
+            contact_key=str(item.get("contact_key", "")), chat_id=str(item.get("chat_id", "")),
+            event_type="history_applied_to_field", field_name=field_name, old_value=old_value,
+            new_value=value, message_key=str(item.get("message_key", "")), text=str(item.get("text", "")),
+            media_name=str(item.get("media_name", "")), confidence=confidence, source=f"Сотрудник: {actor}",
         )
-    return True, f"Поле «{FIELD_LABELS.get(field_name, field_name)}» обновлено из истории"
+        repository.add_event(ticket_id, f"Из истории обновлено поле: {FIELD_LABELS.get(field_name, field_name)}", actor)
+        return True, f"Поле «{FIELD_LABELS.get(field_name, field_name)}» обновлено из истории"
 
 
 def request_fragments(store, contact_key):
-    state = ContextEngine._state(store, contact_key)
+    repository = ContextRepository(store)
+    state = repository.state(contact_key)
     session_id = str(state.get("session_id", ""))
     if not session_id:
         return []
-    with store.connection() as connection:
-        rows = connection.execute(
-            "SELECT text, media_name FROM ticket_context_history WHERE session_id=? AND event_type='message_received' ORDER BY id",
-            (session_id,),
-        ).fetchall()
+    rows = repository.session_messages(session_id)
     fragments = []
     for row in rows:
         value = str(row["text"] or "")

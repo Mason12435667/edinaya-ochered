@@ -12,6 +12,7 @@ from queue_language import tolerant_labels
 import sqlite3
 import threading
 import unicodedata
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -393,13 +394,15 @@ def is_acknowledgement(text: str) -> bool:
     )
 
 
-def general_category(text: str, forced_category: str = "") -> tuple[str, str]:
+def general_category(text: str, forced_category: str = "", *,
+                     category_labels: Mapping[str, str] | None = None) -> tuple[str, str]:
     """Choose only an explicitly configured category, never a legacy industry subtype.
 
     Category identifiers remain valid for reading historical tickets.
     """
-    category = forced_category if forced_category in CATEGORIES else "general"
-    return category, str(CATEGORIES.get(category) or "Общее обращение")
+    labels = CATEGORIES if category_labels is None else category_labels
+    category = forced_category if forced_category in labels else "general"
+    return category, str(labels.get(category) or "Общее обращение")
 
 
 def detect_priority(text: str, category: str) -> str:
@@ -414,9 +417,10 @@ def detect_priority(text: str, category: str) -> str:
 def build_general_summary(
     text: str,
     forced_category: str = "",
+    *, category_labels: Mapping[str, str] | None = None,
 ) -> tuple[str, str, str]:
     normalized = normalize_message(text)
-    category, title = general_category(normalized, forced_category)
+    category, title = general_category(normalized, forced_category, category_labels=category_labels)
 
     error_code = _extract_value(
         normalized,
@@ -449,11 +453,12 @@ def process_incoming_message(
     chat_id: str = "",
     external_id: str = "",
     forced_category: str = "",
+    *, category_labels: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     normalized = normalize_message(text)
     # Явно выбранная пользователем категория всегда имеет приоритет над
     # автоопределением по тексту.
-    category, title, summary = build_general_summary(normalized, forced_category)
+    category, title, summary = build_general_summary(normalized, forced_category, category_labels=category_labels)
     if attachment_name:
         if normalized:
             summary += f"\nВложение: {attachment_name}"

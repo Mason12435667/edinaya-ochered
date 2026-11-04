@@ -20,12 +20,13 @@ from queue_bot_menu import BotMenu
 from queue_contact_profiles import ContactProfiles, USER_PROFILE_CONTEXT
 from queue_core import normalize_phone, valid_chat_id
 from queue_dialog_flow import pending_context_category
+from queue_dialog_policy import (DialogAction, DialogInput, DialogSnapshot, RequestAction,
+                                 choose_dialog_action, choose_request_action)
 from queue_language import parse_menu_number
 from queue_service_result import ServiceResult
 from queue_ticket_service import TicketService
 from queue_user_locale import tr
-from ticketing import (MENU_CONTEXT, MENU_GATE_CONTEXT, TicketStore, is_acknowledgement,
-                      is_main_menu_command, normalize_message, process_incoming_message)
+from ticketing import (MENU_CONTEXT, MENU_GATE_CONTEXT, TicketStore, normalize_message, process_incoming_message)
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +66,6 @@ class InboundMessage:
     chosen_category: str = ""
     forced_category: str = ""
     typed_choice: str = ""
-    active_tickets_choice: bool = False
-    error_report_choice: bool = False
     draft_finalized: bool = False
     draft_finish_command: bool = False
     force_new_requested: bool = False
@@ -246,28 +245,44 @@ class _InboundRun:
                 queue_dialog_flow.remember(self.store, key, payload)
 
     def _process_api_message_core(self, payload: dict) -> None:
-        # Each step handles the message (returns True) or passes it on.
         msg = InboundMessage(payload=payload)
-        for step in (
-            self._inbound_parse,
-            self._inbound_store_chat_message,
-            self._inbound_manual_contact,
-            self._inbound_manual_mode,
-            self._inbound_language,
-            self._inbound_profile,
-            self._inbound_dialog_state,
-            self._inbound_commands,
-            self._inbound_legacy_modes,
-            self._inbound_category_choice,
-            self._inbound_ticket_followup,
-            self._inbound_validate_draft_category,
-            self._inbound_collect_draft,
-            self._inbound_create_ticket,
-        ):
-            if step(msg):
+        self._inbound_parse(msg)
+        self._inbound_store_chat_message(msg)
+        # Access and onboarding gates precede application dialog commands.
+        for gate in (self._inbound_manual_contact, self._inbound_manual_mode,
+                     self._inbound_language, self._inbound_profile):
+            if gate(msg):
                 return
+        self._inbound_dialog_state(msg)
+        action = choose_dialog_action(
+            DialogSnapshot(msg.context_mode, msg.pending_category),
+            DialogInput(msg.text, msg.typed_choice, msg.chosen_category, msg.draft_finish_command),
+        )
+        handlers = {
+            DialogAction.MAIN_MENU: self._enter_main_menu,
+            DialogAction.UPGRADE_MENU: self._upgrade_menu_gate,
+            DialogAction.SELECT_ACTIVE_TICKET: self._select_active_ticket,
+            DialogAction.SELECTED_TICKET_FOLLOWUP: self._selected_ticket_followup,
+            DialogAction.LIST_ACTIVE_TICKETS: self._list_active_tickets,
+            DialogAction.IGNORE_ACK: self._ignore_ack,
+            DialogAction.LEGACY_ERROR_REPORT: self._legacy_error_report,
+            DialogAction.LEGACY_SUPPORT: self._legacy_support,
+            DialogAction.CHOOSE_CATEGORY: self._choose_category,
+            DialogAction.REQUIRE_CATEGORY: self._require_category,
+            DialogAction.PROCESS_REQUEST: self._process_request,
+        }
+        handlers[action](msg)
 
-    def _inbound_parse(self, msg: InboundMessage) -> bool:
+    def _process_request(self, msg: InboundMessage) -> None:
+        if self._inbound_ticket_followup(msg):
+            return
+        if self._inbound_validate_draft_category(msg):
+            return
+        if self._inbound_collect_draft(msg):
+            return
+        self._inbound_create_ticket(msg)
+
+    def _inbound_parse(self, msg: InboundMessage) -> None:
         # Parse an already claimed message; deduplication precedes all state changes.
         msg.external_id = str(msg.payload.get("external_id", ""))
         msg.phone = normalize_phone(str(msg.payload.get("phone", "")))
@@ -283,9 +298,9 @@ class _InboundRun:
             msg.media_path = self.deps.save_media(msg.chat_id, msg.external_id, media_base64, msg.media_mime, msg.media_name)
         if msg.payload.get("media_receipt"):
             msg.media_path = queue_inbound_media.resolve(self.deps.media_dir, msg.chat_id, msg.external_id, msg.payload["media_receipt"]) or msg.media_path
-        return False
+        return
 
-    def _inbound_store_chat_message(self, msg: InboundMessage) -> bool:
+    def _inbound_store_chat_message(self, msg: InboundMessage) -> None:
         # Mirror an attachment message into the chat history.
         if msg.chat_id and msg.external_id and (msg.media_path or msg.media_name):
             try:
@@ -309,7 +324,7 @@ class _InboundRun:
                     }
                 ],
             )
-        return False
+        return
 
     def _inbound_manual_contact(self, msg: InboundMessage) -> bool:
         # Manual contacts are recorded but never answered by the bot.
@@ -496,7 +511,7 @@ class _InboundRun:
             return True
         return False
 
-    def _inbound_dialog_state(self, msg: InboundMessage) -> bool:
+    def _inbound_dialog_state(self, msg: InboundMessage) -> None:
         # Load the conversation context and interpret menu digits.
         context = self.store.get_conversation_context(msg.contact_key)
         msg.active_ticket = self.store.active_context_ticket(msg.contact_key)
@@ -514,33 +529,179 @@ class _InboundRun:
         explicit_menu_choice = menu_choice if re.fullmatch(r"[1-9]", menu_choice) else ""
         typed_category_choice = msg.typed_choice if msg.context_mode == MENU_CONTEXT else ""
         msg.chosen_category = self.menu.configured_menu_category(explicit_menu_choice or typed_category_choice)
-        inline_category_details = ""
-        selected_from_menu = bool(
-            msg.chosen_category and (explicit_menu_choice or typed_category_choice)
-        )
+        msg.draft_finish_command = bool(msg.payload.get("draft_finish")) or all_information_confirmed(msg.text)
+        return
 
-        # v3 merges questions and bug reports into item 7 (general). The old
-        # separate error-report mode remains only for already-open legacy sessions.
-        msg.error_report_choice = False
-        # "8" works like the category digits: in the menu and after a ticket was
-        # registered (empty context), but not while a draft or ticket list awaits input.
-        msg.active_tickets_choice = (
-            (msg.context_mode in {MENU_CONTEXT, ""} and msg.typed_choice == str(texts.active_tickets_menu_number()))
-            or texts.is_active_tickets_command(msg.text)
-        )
-        attachment_present = bool(
-            msg.media_path or msg.media_name or normalize_message(str(msg.payload.get("attachment_name", "")))
-        )
-        # A free-form message or attachment must never create a ticket without
-        # the user's explicit category selection. Keep the legacy flag false so
-        # old branches below continue routing the conversation through the menu.
-        return False
+    def _enter_main_menu(self, msg: InboundMessage) -> None:
+        self.store.clear_conversation_draft(msg.contact_key)
+        queue_contextual_tickets.reset_context(self.store, msg.contact_key, "")
+        self._upgrade_menu_gate(msg)
 
-    def _inbound_commands(self, msg: InboundMessage) -> bool:
-        # Menu, active-ticket list/selection, «8», acknowledgements.
-        if is_main_menu_command(msg.text) or msg.text.casefold().strip() in {"отмена", "бас тарту"}:
-            self.store.clear_conversation_draft(msg.contact_key)
-            queue_contextual_tickets.reset_context(self.store, msg.contact_key, "")
+    def _upgrade_menu_gate(self, msg: InboundMessage) -> None:
+        self.store.set_conversation_context(
+            msg.contact_key, MENU_CONTEXT, msg.active_ticket_id, bool(msg.active_ticket)
+        )
+        self._respond({
+            "created": False,
+            "awaiting_category": True,
+            "main_menu": True,
+            "force_menu": True,
+            "reply": self.menu.main_menu_text(),
+            "menu_options": self.menu.menu_payload(),
+        })
+        return
+
+    def _select_active_ticket(self, msg: InboundMessage) -> None:
+        active_rows = self.store.list_active_user_tickets(msg.chat_id, msg.phone, 10)
+        try:
+            selected_index = int(msg.typed_choice or "0") - 1
+        except (TypeError, ValueError):
+            selected_index = -1
+        if 0 <= selected_index < len(active_rows):
+            selected_ticket = active_rows[selected_index]
+            selected_id = int(selected_ticket.get("id", 0) or 0)
+            self.store.set_conversation_context(
+                msg.contact_key, texts.ACTIVE_TICKET_FOLLOWUP_CONTEXT, selected_id, False
+            )
+            self._respond({
+                "created": False,
+                "active_ticket_selected": True,
+                "ticket_id": selected_id,
+                "reply": self.deps.tickets.active_ticket_selected_reply(selected_ticket),
+            })
+        else:
+            self._respond({
+                "created": False,
+                "active_tickets": True,
+                "reply": self.deps.tickets.active_tickets_reply(active_rows),
+            })
+        return
+
+    def _save_ticket_followup(self, msg: InboundMessage) -> None:
+        msg.attachment_name = normalize_message(str(msg.payload.get("attachment_name", "")))[:240]
+        self.store.note_context_followup(msg.active_ticket_id, msg.text, msg.attachment_name)
+        queue_contextual_tickets.record_followup(
+            self.store, msg.contact_key, msg.active_ticket_id, chat_id=msg.chat_id,
+            message_key=msg.external_id, text=msg.text, media_name=msg.attachment_name,
+        )
+        if msg.chat_id and msg.external_id:
+            self.store.link_whatsapp_message_to_ticket(msg.chat_id, msg.external_id, msg.active_ticket_id)
+
+    def _selected_ticket_followup(self, msg: InboundMessage) -> None:
+        if not msg.active_ticket:
+            active_rows = self.store.list_active_user_tickets(msg.chat_id, msg.phone, 10)
+            self.store.set_conversation_context(msg.contact_key, texts.ACTIVE_TICKETS_CONTEXT, 0, False)
+            self._respond({
+                "created": False,
+                "active_tickets": True,
+                "reply": (
+                    tr("Выбранная заявка уже закрыта или больше не активна.\n\n", "Таңдалған өтінім жабылған немесе енді белсенді емес.\n\n")
+                    + self.deps.tickets.active_tickets_reply(active_rows)
+                ),
+            })
+            return
+        self._save_ticket_followup(msg)
+        self._respond({
+            "created": False,
+            "linked": True,
+            "ticket_id": msg.active_ticket_id,
+            "reply": tr(
+                f"Дополнительная информация добавлена к заявке №{msg.active_ticket_id}.",
+                f"Қосымша ақпарат №{msg.active_ticket_id} өтінімге қосылды.",
+            ),
+        })
+        return
+
+    def _list_active_tickets(self, msg: InboundMessage) -> None:
+        active_rows = self.store.list_active_user_tickets(msg.chat_id, msg.phone, 10)
+        self.store.clear_conversation_draft(msg.contact_key)
+        self.store.set_conversation_context(msg.contact_key, texts.ACTIVE_TICKETS_CONTEXT, msg.active_ticket_id, False)
+        self._respond({
+            "created": False,
+            "active_tickets": True,
+            "reply": self.deps.tickets.active_tickets_reply(active_rows),
+        })
+        return
+
+    def _ignore_ack(self, msg: InboundMessage) -> None:
+        self._respond(
+            {
+                "created": False,
+                "ignored": True,
+                "silent": True,
+                "reason": "Короткий ответ без новой заявки",
+            }
+        )
+        return
+
+    def _legacy_error_report(self, msg: InboundMessage) -> None:
+        description = msg.text or (
+            f"Вложение: {msg.media_name or str(msg.payload.get('attachment_name', ''))}"
+            if (msg.media_name or msg.payload.get("attachment_name")) else ""
+        )
+        if not description:
+            self._respond({
+                "created": False,
+                "error_report": True,
+                "awaiting_details": True,
+                "reply": tr(
+                    "Опишите ошибку текстом или приложите файл / скриншот.",
+                    "Қатені мәтінмен сипаттаңыз немесе файл / скриншот тіркеңіз.",
+                ),
+            })
+            return
+        report_id = self.store.create_error_report(
+            sender=msg.sender,
+            phone=msg.phone,
+            chat_id=msg.chat_id,
+            external_id=msg.external_id,
+            description=description,
+            attachment_name=msg.media_name or normalize_message(str(msg.payload.get("attachment_name", "")))[:240],
+        )
+        self.store.clear_conversation_draft(msg.contact_key)
+        self.store.set_conversation_context(msg.contact_key, MENU_CONTEXT, msg.active_ticket_id, bool(msg.active_ticket))
+        self._respond({
+            "created": False,
+            "error_report_created": True,
+            "error_report_id": report_id,
+            "reply": tr(
+                f"Репорт об ошибке №{report_id} сохранён. Он находится отдельно от заявок.\n"
+                "Сотрудники смогут посмотреть его в разделе «Ошибки».\n\n"
+                "Чтобы открыть меню снова, отправьте 0.",
+                f"№{report_id} қате туралы хабарлама сақталды. Ол өтінімдерден бөлек орналасқан.\n"
+                "Қызметкерлер оны «Қателер» бөлімінен көре алады.\n\n"
+                "Мәзірді қайта ашу үшін 0 жіберіңіз.",
+            ),
+        })
+        return
+
+    def _legacy_support(self, msg: InboundMessage) -> None:
+        self.store.set_conversation_context(
+            msg.contact_key,
+            "support",
+            msg.active_ticket_id,
+            msg.force_new_requested or bool(msg.active_ticket),
+        )
+        self._respond(
+            {
+                "created": False,
+                "awaiting_details": True,
+                "category": "support",
+                "reply": self.menu.configured_category_prompt("support"),
+            }
+        )
+        return
+
+    def _choose_category(self, msg: InboundMessage) -> None:
+        msg.strict_state = queue_dialog_flow.load(self.store, msg.contact_key)
+        msg.strict_state.pop("buffer", None)
+        msg.strict_state["strict_category"] = str(msg.chosen_category)
+        msg.strict_state["strict_category_message"] = str(msg.external_id or "")
+        queue_dialog_flow.save(self.store, msg.contact_key, msg.strict_state)
+
+        self.store.clear_conversation_draft(msg.contact_key)
+        queue_contextual_tickets.reset_context(self.store, msg.contact_key, msg.chosen_category)
+        if self.menu.configured_category_action(msg.chosen_category) == texts.MENU_ACTION_INSTRUCTION:
             self.store.set_conversation_context(
                 msg.contact_key,
                 MENU_CONTEXT,
@@ -550,181 +711,13 @@ class _InboundRun:
             self._respond(
                 {
                     "created": False,
-                    "awaiting_category": True,
-                    "main_menu": True,
-                    "force_menu": True,
-                    "reply": self.menu.main_menu_text(),
-                    "menu_options": self.menu.menu_payload(),
+                    "instruction_only": True,
+                    "category": msg.chosen_category,
+                    "reply": self.menu.configured_category_prompt(msg.chosen_category),
                 }
             )
-            return True
-
-
-        # Старые сессии могли остаться на MENU_GATE_CONTEXT. После появления
-        # выбора языка дополнительный шаг с цифрой 1 больше не нужен: сразу
-        # переводим такую сессию в основное меню.
-        if msg.context_mode == MENU_GATE_CONTEXT:
-            self.store.set_conversation_context(
-                msg.contact_key, MENU_CONTEXT, msg.active_ticket_id, bool(msg.active_ticket)
-            )
-            self._respond({
-                "created": False,
-                "awaiting_category": True,
-                "main_menu": True,
-                "force_menu": True,
-                "reply": self.menu.main_menu_text(),
-                "menu_options": self.menu.menu_payload(),
-            })
-            return True
-
-        if msg.context_mode == texts.ACTIVE_TICKETS_CONTEXT:
-            active_rows = self.store.list_active_user_tickets(msg.chat_id, msg.phone, 10)
-            try:
-                selected_index = int(msg.typed_choice or "0") - 1
-            except (TypeError, ValueError):
-                selected_index = -1
-            if 0 <= selected_index < len(active_rows):
-                selected_ticket = active_rows[selected_index]
-                selected_id = int(selected_ticket.get("id", 0) or 0)
-                self.store.set_conversation_context(
-                    msg.contact_key, texts.ACTIVE_TICKET_FOLLOWUP_CONTEXT, selected_id, False
-                )
-                self._respond({
-                    "created": False,
-                    "active_ticket_selected": True,
-                    "ticket_id": selected_id,
-                    "reply": self.deps.tickets.active_ticket_selected_reply(selected_ticket),
-                })
-            else:
-                self._respond({
-                    "created": False,
-                    "active_tickets": True,
-                    "reply": self.deps.tickets.active_tickets_reply(active_rows),
-                })
-            return True
-
-        if msg.context_mode == texts.ACTIVE_TICKET_FOLLOWUP_CONTEXT:
-            # Пользователь явно выбрал одну из своих активных заявок. Любой текст
-            # или вложение теперь считается дополнением именно к ней до команды 0.
-            if not msg.active_ticket:
-                active_rows = self.store.list_active_user_tickets(msg.chat_id, msg.phone, 10)
-                self.store.set_conversation_context(msg.contact_key, texts.ACTIVE_TICKETS_CONTEXT, 0, False)
-                self._respond({
-                    "created": False,
-                    "active_tickets": True,
-                    "reply": (
-                        tr("Выбранная заявка уже закрыта или больше не активна.\n\n", "Таңдалған өтінім жабылған немесе енді белсенді емес.\n\n")
-                        + self.deps.tickets.active_tickets_reply(active_rows)
-                    ),
-                })
-                return True
-            msg.attachment_name = normalize_message(str(msg.payload.get("attachment_name", "")))[:240]
-            self.store.note_context_followup(msg.active_ticket_id, msg.text, msg.attachment_name)
-            queue_contextual_tickets.record_followup(
-                self.store, msg.contact_key, msg.active_ticket_id, chat_id=msg.chat_id,
-                message_key=msg.external_id, text=msg.text, media_name=msg.attachment_name,
-            )
-            if msg.chat_id and msg.external_id:
-                self.store.link_whatsapp_message_to_ticket(msg.chat_id, msg.external_id, msg.active_ticket_id)
-            self._respond({
-                "created": False,
-                "linked": True,
-                "ticket_id": msg.active_ticket_id,
-                "reply": tr(
-                    f"Дополнительная информация добавлена к заявке №{msg.active_ticket_id}.",
-                    f"Қосымша ақпарат №{msg.active_ticket_id} өтінімге қосылды.",
-                ),
-            })
-            return True
-
-        if msg.active_tickets_choice:
-            active_rows = self.store.list_active_user_tickets(msg.chat_id, msg.phone, 10)
-            self.store.clear_conversation_draft(msg.contact_key)
-            self.store.set_conversation_context(msg.contact_key, texts.ACTIVE_TICKETS_CONTEXT, msg.active_ticket_id, False)
-            self._respond({
-                "created": False,
-                "active_tickets": True,
-                "reply": self.deps.tickets.active_tickets_reply(active_rows),
-            })
-            return True
-
-        # EO_DRAFT_FINISH_PRIORITY_V13_20261001
-        # "Готово/готово/Дайын" is a draft command, not a casual acknowledgement.
-        # _all_information_confirmed() case-folds the text, so capitalization does
-        # not matter. Connector also passes draft_finish for the fast path.
-        msg.draft_finish_command = bool(msg.payload.get("draft_finish")) or all_information_confirmed(msg.text)
-        if is_acknowledgement(msg.text) and not msg.draft_finish_command:
-            # «Спасибо», «рахмет», «ок», «понял» и похожие ответы не должны
-            # превращаться в заявку даже если до этого остался выбранный пункт меню.
-            self._respond(
-                {
-                    "created": False,
-                    "ignored": True,
-                    "silent": True,
-                    "reason": "Короткий ответ без новой заявки",
-                }
-            )
-            return True
-        return False
-
-    def _inbound_legacy_modes(self, msg: InboundMessage) -> bool:
-        # Sessions still in the old error-report or support modes.
-        if msg.context_mode == texts.ERROR_REPORT_CONTEXT:
-            description = msg.text or (
-                f"Вложение: {msg.media_name or str(msg.payload.get('attachment_name', ''))}"
-                if (msg.media_name or msg.payload.get("attachment_name")) else ""
-            )
-            if not description:
-                self._respond({
-                    "created": False,
-                    "error_report": True,
-                    "awaiting_details": True,
-                    "reply": tr(
-                        "Опишите ошибку текстом или приложите файл / скриншот.",
-                        "Қатені мәтінмен сипаттаңыз немесе файл / скриншот тіркеңіз.",
-                    ),
-                })
-                return True
-            report_id = self.store.create_error_report(
-                sender=msg.sender,
-                phone=msg.phone,
-                chat_id=msg.chat_id,
-                external_id=msg.external_id,
-                description=description,
-                attachment_name=msg.media_name or normalize_message(str(msg.payload.get("attachment_name", "")))[:240],
-            )
-            self.store.clear_conversation_draft(msg.contact_key)
-            self.store.set_conversation_context(msg.contact_key, MENU_CONTEXT, msg.active_ticket_id, bool(msg.active_ticket))
-            self._respond({
-                "created": False,
-                "error_report_created": True,
-                "error_report_id": report_id,
-                "reply": tr(
-                    f"Репорт об ошибке №{report_id} сохранён. Он находится отдельно от заявок.\n"
-                    "Сотрудники смогут посмотреть его в разделе «Ошибки».\n\n"
-                    "Чтобы открыть меню снова, отправьте 0.",
-                    f"№{report_id} қате туралы хабарлама сақталды. Ол өтінімдерден бөлек орналасқан.\n"
-                    "Қызметкерлер оны «Қателер» бөлімінен көре алады.\n\n"
-                    "Мәзірді қайта ашу үшін 0 жіберіңіз.",
-                ),
-            })
-            return True
-
-        if msg.error_report_choice:
-            self.store.clear_conversation_draft(msg.contact_key)
-            self.store.set_conversation_context(msg.contact_key, texts.ERROR_REPORT_CONTEXT, msg.active_ticket_id, bool(msg.active_ticket))
-            self._respond({
-                "created": False,
-                "error_report": True,
-                "awaiting_details": True,
-                "reply": texts.error_report_prompt(),
-            })
-            return True
-
-        if msg.context_mode == texts.SUPPORT_MODE_CONTEXT:
-            # В старых сессиях мог сохраниться выбор способа связи. После
-            # 3.3.10 звонки для обычных пользователей больше не разрешаются:
-            # любой выбор ведёт в текстовую поддержку.
+            return
+        if msg.chosen_category == "support":
             self.store.set_conversation_context(
                 msg.contact_key,
                 "support",
@@ -739,119 +732,67 @@ class _InboundRun:
                     "reply": self.menu.configured_category_prompt("support"),
                 }
             )
-            return True
-        return False
+            return
+        self.store.set_conversation_context(
+            msg.contact_key,
+            msg.chosen_category,
+            msg.active_ticket_id,
+            msg.force_new_requested or bool(msg.active_ticket),
+        )
 
-    def _inbound_category_choice(self, msg: InboundMessage) -> bool:
-        # A category digit starts a new draft; menu needs a valid digit.
-        if msg.chosen_category:
-            msg.strict_state = queue_dialog_flow.load(self.store, msg.contact_key)
-            msg.strict_state.pop("buffer", None)
-            msg.strict_state["strict_category"] = str(msg.chosen_category)
-            msg.strict_state["strict_category_message"] = str(msg.external_id or "")
-            queue_dialog_flow.save(self.store, msg.contact_key, msg.strict_state)
+        # Strict mode intentionally does NOT process ticket details from
+        # the same message as the category choice. The next user message is
+        # the first allowed details message.
 
-            self.store.clear_conversation_draft(msg.contact_key)
-            queue_contextual_tickets.reset_context(self.store, msg.contact_key, msg.chosen_category)
-            if self.menu.configured_category_action(msg.chosen_category) == texts.MENU_ACTION_INSTRUCTION:
-                self.store.set_conversation_context(
-                    msg.contact_key,
-                    MENU_CONTEXT,
-                    msg.active_ticket_id,
-                    bool(msg.active_ticket),
-                )
-                self._respond(
-                    {
-                        "created": False,
-                        "instruction_only": True,
-                        "category": msg.chosen_category,
-                        "reply": self.menu.configured_category_prompt(msg.chosen_category),
-                    }
-                )
-                return True
-            if msg.chosen_category == "support":
-                self.store.set_conversation_context(
-                    msg.contact_key,
-                    "support",
-                    msg.active_ticket_id,
-                    msg.force_new_requested or bool(msg.active_ticket),
-                )
-                self._respond(
-                    {
-                        "created": False,
-                        "awaiting_details": True,
-                        "category": "support",
-                        "reply": self.menu.configured_category_prompt("support"),
-                    }
-                )
-                return True
-            self.store.set_conversation_context(
-                msg.contact_key,
-                msg.chosen_category,
-                msg.active_ticket_id,
-                msg.force_new_requested or bool(msg.active_ticket),
-            )
+        self._respond(
+            {
+                "created": False,
+                "awaiting_details": True,
+                "category": msg.chosen_category,
+                "draft_collecting": True,
+                "reply": (
+                    self.menu.configured_category_prompt(msg.chosen_category)
+                    + "\n\n"
+                    + tr(
+                        "Можно отправить данные несколькими сообщениями. "
+                        "Я сохраню их в одной заявке. Когда закончите — напишите «Готово».",
+                        "Деректерді бірнеше хабарламамен жібере аласыз. "
+                        "Оларды бір өтінімге жинаймын. Аяқтағанда «Дайын» деп жазыңыз.",
+                    )
+                ),
+            }
+        )
+        return
 
-            # Strict mode intentionally does NOT process ticket details from
-            # the same message as the category choice. The next user message is
-            # the first allowed details message.
+    def _require_category(self, msg: InboundMessage) -> None:
+        msg.response = self._category_required_reply()
+        msg.response["menu_reminder"] = True
+        self._respond(msg.response)
+        return
 
-            self._respond(
-                {
-                    "created": False,
-                    "awaiting_details": True,
-                    "category": msg.chosen_category,
-                    "draft_collecting": True,
-                    "reply": (
-                        self.menu.configured_category_prompt(msg.chosen_category)
-                        + "\n\n"
-                        + tr(
-                            "Можно отправить данные несколькими сообщениями. "
-                            "Я сохраню их в одной заявке. Когда закончите — напишите «Готово».",
-                            "Деректерді бірнеше хабарламамен жібере аласыз. "
-                            "Оларды бір өтінімге жинаймын. Аяқтағанда «Дайын» деп жазыңыз.",
-                        )
-                    ),
-                }
-            )
-            return True
-
-        if msg.context_mode == MENU_CONTEXT and not msg.chosen_category:
-            # Keep the menu open and require a valid category number before collecting details.
-            msg.response = self._category_required_reply()
-            msg.response["menu_reminder"] = True
-            self._respond(msg.response)
-            return True
-        return False
 
     def _inbound_ticket_followup(self, msg: InboundMessage) -> bool:
-        # Messages after a ticket are silent additions to it.
-        if msg.draft_finish_command and not msg.pending_category and not msg.chosen_category:
+        remembered_category = ""
+        can_resume = False
+        if msg.draft_finish_command and not msg.pending_category:
             finish_state = queue_dialog_flow.load(self.store, msg.contact_key)
             remembered_category = str(finish_state.get("strict_category", "") or "").strip()
-            remembered_fragments = queue_contextual_tickets.request_fragments(self.store, msg.contact_key)
-            if self._ticket_category_is_selectable(remembered_category) and remembered_fragments:
-                self.store.set_conversation_context(
-                    msg.contact_key,
-                    remembered_category,
-                    msg.active_ticket_id,
-                    True,
-                )
-                msg.pending_category = remembered_category
-                msg.context_mode = remembered_category
-
-        # После создания заявки обычные уточнения по ней принимаются молча:
-        # система не засыпает человека меню на каждую следующую фразу. Новая
-        # заявка начинается только после явной команды 0/«меню» или выбора темы.
-        if msg.active_ticket and not msg.pending_category and not msg.chosen_category:
-            msg.attachment_name = normalize_message(str(msg.payload.get("attachment_name", "")))[:240]
-            self.store.note_context_followup(msg.active_ticket_id, msg.text, msg.attachment_name)
-            queue_contextual_tickets.record_followup(
-                self.store, msg.contact_key, msg.active_ticket_id, chat_id=msg.chat_id,
-                message_key=msg.external_id, text=msg.text, media_name=msg.attachment_name,
+            can_resume = bool(
+                self._ticket_category_is_selectable(remembered_category)
+                and queue_contextual_tickets.request_fragments(self.store, msg.contact_key)
             )
-            if msg.chat_id and msg.external_id:
-                self.store.link_whatsapp_message_to_ticket(msg.chat_id, msg.external_id, msg.active_ticket_id)
+        action = choose_request_action(
+            DialogSnapshot(msg.context_mode, msg.pending_category),
+            has_active_ticket=bool(msg.active_ticket), can_resume_draft=can_resume,
+        )
+        if action is RequestAction.RESUME_DRAFT:
+            self.store.set_conversation_context(
+                msg.contact_key, remembered_category, msg.active_ticket_id, True,
+            )
+            msg.pending_category = remembered_category
+            msg.context_mode = remembered_category
+        elif action is RequestAction.APPEND_FOLLOWUP:
+            self._save_ticket_followup(msg)
             self._respond(
                 {
                     "created": False,
@@ -900,115 +841,98 @@ class _InboundRun:
         return False
 
     def _inbound_collect_draft(self, msg: InboundMessage) -> bool:
-        # Collect the draft until «Готово» and all required fields are present.
+        # Collect messages; keep ready drafts open until explicit confirmation.
         msg.combined_request_text = msg.text
-        contextual_decision = None
-        audio_direct_request = bool(
-            msg.forced_category
-            and not msg.text
-            and msg.media_mime.startswith("audio/")
-        )
-        # EO_MULTIMESSAGE_DRAFT_20261001
         msg.draft_finalized = False
-        if msg.forced_category:
-            collect_text = msg.text
+        collect_text = msg.text
 
-            finish_requested = bool(msg.payload.get("draft_finish")) or all_information_confirmed(msg.text)
-            contextual_decision = queue_contextual_tickets.collect_request(
-                self.store, msg.contact_key, msg.forced_category, collect_text,
-                attachment_name=normalize_message(str(msg.payload.get("attachment_name", "")))[:240],
-                message_key=msg.external_id, chat_id=msg.chat_id, active_ticket_id=0,
-                required_fields_override=self.menu.configured_category_required_fields(msg.forced_category),
+        finish_requested = msg.draft_finish_command
+        contextual_decision = queue_contextual_tickets.collect_request(
+            self.store, msg.contact_key, msg.forced_category, collect_text,
+            attachment_name=normalize_message(str(msg.payload.get("attachment_name", "")))[:240],
+            message_key=msg.external_id, chat_id=msg.chat_id, active_ticket_id=0,
+            required_fields_override=self.menu.configured_category_required_fields(msg.forced_category),
+        )
+
+        raw_fragments = queue_contextual_tickets.request_fragments(self.store, msg.contact_key)
+        draft_fragments = [
+            normalize_message(str(fragment))
+            for fragment in raw_fragments
+            if normalize_message(str(fragment))
+            and not all_information_confirmed(str(fragment))
+        ]
+        accumulated = normalize_message("\n".join(draft_fragments))
+        if not accumulated:
+            accumulated = remove_all_information_phrase(
+                str(contextual_decision.get("request_text") or "")
             )
 
-            if msg.forced_category:
-                raw_fragments = queue_contextual_tickets.request_fragments(self.store, msg.contact_key)
-                draft_fragments = [
-                    normalize_message(str(fragment))
-                    for fragment in raw_fragments
-                    if normalize_message(str(fragment))
-                    and not all_information_confirmed(str(fragment))
-                ]
-                accumulated = normalize_message("\n".join(draft_fragments))
-                if not accumulated:
-                    accumulated = remove_all_information_phrase(
-                        str(contextual_decision.get("request_text") or "")
-                    )
+        if not finish_requested:
+            # Even if all required fields are already present, keep the
+            # request as a draft until the user explicitly says "Готово".
+            missing = contextual_decision.get("missing", [])
+            if contextual_decision.get("ready"):
+                reply = tr(
+                    "✅ Данные сохранены. Можете отправить ещё информацию, фото или документы. "
+                    "Когда закончите — напишите «Готово».",
+                    "✅ Деректер сақталды. Қосымша ақпарат, фото немесе құжат жібере аласыз. "
+                    "Аяқтағанда «Дайын» деп жазыңыз.",
+                )
+            else:
+                missing_reply = (
+                    contextual_decision.get("reply")
+                    or texts.v3_missing_fields_reply(missing)
+                )
+                reply = tr(
+                    "✅ Данные сохранены.",
+                    "✅ Деректер сақталды.",
+                )
+                if missing_reply:
+                    reply += "\n" + str(missing_reply)
+                reply += "\n" + tr(
+                    "Можно продолжать отправлять данные отдельными сообщениями. "
+                    "Когда закончите — «Готово».",
+                    "Деректерді бөлек хабарламалармен жібере беріңіз. "
+                    "Аяқтағанда — «Дайын».",
+                )
 
-                if not finish_requested:
-                    # Even if all required fields are already present, keep the
-                    # request as a draft until the user explicitly says "Готово".
-                    missing = contextual_decision.get("missing", [])
-                    if contextual_decision.get("ready"):
-                        reply = tr(
-                            "✅ Данные сохранены. Можете отправить ещё информацию, фото или документы. "
-                            "Когда закончите — напишите «Готово».",
-                            "✅ Деректер сақталды. Қосымша ақпарат, фото немесе құжат жібере аласыз. "
-                            "Аяқтағанда «Дайын» деп жазыңыз.",
-                        )
-                    else:
-                        missing_reply = (
-                            contextual_decision.get("reply")
-                            or texts.v3_missing_fields_reply(missing)
-                        )
-                        reply = tr(
-                            "✅ Данные сохранены.",
-                            "✅ Деректер сақталды.",
-                        )
-                        if missing_reply:
-                            reply += "\n" + str(missing_reply)
-                        reply += "\n" + tr(
-                            "Можно продолжать отправлять данные отдельными сообщениями. "
-                            "Когда закончите — «Готово».",
-                            "Деректерді бөлек хабарламалармен жібере беріңіз. "
-                            "Аяқтағанда — «Дайын».",
-                        )
-
-                    self._respond(
-                        {
-                            "created": False,
-                            "awaiting_details": True,
-                            "draft_collecting": True,
-                            "draft_ready": bool(contextual_decision.get("ready")),
-                            "category": msg.forced_category,
-                            "missing_fields": missing,
-                            "contextual": True,
-                            "confidence": contextual_decision.get("confidence", {}),
-                            "clarify": bool(contextual_decision.get("clarify")),
-                            "reply": reply,
-                        }
-                    )
-                    return True
-
-                # "Готово / Вся инфа / Дайын" is the only normal-ticket commit.
-                # If there is still some information in the draft, respect the
-                # user's explicit confirmation and create one ticket from all
-                # accumulated messages.
-                if not accumulated:
-                    self._respond(
-                        {
-                            "created": False,
-                            "awaiting_details": True,
-                            "draft_collecting": True,
-                            "category": msg.forced_category,
-                            "reply": tr(
-                                "Сначала отправьте данные по обращению, затем напишите «Готово».",
-                                "Алдымен өтінім бойынша деректерді жіберіңіз, содан кейін «Дайын» деп жазыңыз.",
-                            ),
-                        }
-                    )
-                    return True
-
-                contextual_decision = {
-                    **contextual_decision,
-                    "ready": True,
-                    "missing": [],
-                    "clarify": False,
-                    "request_text": accumulated,
-                    "user_confirmed_all_info": True,
+            self._respond(
+                {
+                    "created": False,
+                    "awaiting_details": True,
+                    "draft_collecting": True,
+                    "draft_ready": bool(contextual_decision.get("ready")),
+                    "category": msg.forced_category,
+                    "missing_fields": missing,
+                    "contextual": True,
+                    "confidence": contextual_decision.get("confidence", {}),
+                    "clarify": bool(contextual_decision.get("clarify")),
+                    "reply": reply,
                 }
-                msg.combined_request_text = accumulated
-                msg.draft_finalized = True
+            )
+            return True
+
+        # "Готово / Вся инфа / Дайын" is the only normal-ticket commit.
+        # If there is still some information in the draft, respect the
+        # user's explicit confirmation and create one ticket from all
+        # accumulated messages.
+        if not accumulated:
+            self._respond(
+                {
+                    "created": False,
+                    "awaiting_details": True,
+                    "draft_collecting": True,
+                    "category": msg.forced_category,
+                    "reply": tr(
+                        "Сначала отправьте данные по обращению, затем напишите «Готово».",
+                        "Алдымен өтінім бойынша деректерді жіберіңіз, содан кейін «Дайын» деп жазыңыз.",
+                    ),
+                }
+            )
+            return True
+
+        msg.combined_request_text = accumulated
+        msg.draft_finalized = True
         return False
 
     def _inbound_create_ticket(self, msg: InboundMessage) -> bool:
@@ -1037,6 +961,7 @@ class _InboundRun:
             msg.chat_id,
             msg.external_id,
             msg.forced_category,
+            category_labels=self.menu.config.category_labels,
         )
         if result["created"]:
             if not self._ticket_category_is_selectable(msg.forced_category):
