@@ -5,6 +5,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 import queue_avatars
+import queue_generic_profile
 import queue_user_locale
 import queue_workflow
 from queue_chat_state import flexible_contact_match
@@ -477,52 +478,67 @@ def render_admin_menu(query: dict[str, list[str]]) -> str:
         {_admin_flow_language_column(queue_user_locale.LANG_RU, "Русский сценарий")}
         {_admin_flow_language_column(queue_user_locale.LANG_KZ, "Қазақша сценарий")}
       </div>
-      <section class="panel admin-flow-legacy-note"><h3>Старый редактор меню отключён на этой странице</h3><p class="muted">Новый пользовательский сценарий фиксирован как 1–8 и использует отдельные RU/KZ тексты. Поэтому старые поля request_menu_json больше не показываются как будто они управляют текущим WhatsApp-меню.</p></section>
+      <section class="panel admin-flow-legacy-note"><p class="muted">Приветствие и категории меняются на странице <a href="/admin/categories">«Категории»</a>.</p></section>
     '''
     return app.admin_layout("Тексты WhatsApp", content, "menu")
+
+
+def _category_editor_row(suffix: str, row: dict[str, object], used_numbers: set[str]) -> str:
+    number = str(row.get("number", ""))
+    options = "".join(
+        f'<option value="{n}" {"selected" if n == number else ""}>{n}</option>'
+        for n in queue_generic_profile.MENU_NUMBERS if n == number or n not in used_numbers
+    )
+    required = set(row.get("required_fields") or ["problem"])
+    field_labels = {"problem": "описание", "reference": "номер / идентификатор", "email": "email"}
+    checks = "".join(
+        f'<label class="checkbox-label"><input type="checkbox" name="req_{name}_{suffix}" value="1" {"checked" if name in required else ""}>{label}</label>'
+        for name, label in field_labels.items()
+    )
+    key_field = f'<input type="hidden" name="key_{suffix}" value="{e(str(row["key"]))}">' if suffix != "new" else ""
+    delete = (f'<label class="checkbox-label danger-choice"><input type="checkbox" name="delete_{suffix}" value="1">Удалить категорию</label>'
+              if suffix != "new" else "")
+    required_attr = "required" if suffix != "new" else ""
+    return f"""<article class="menu-editor-row panel">
+      {key_field}
+      <label>Номер в меню<select name="number_{suffix}">{options}</select></label>
+      <label>Название (RU)<input name="label_ru_{suffix}" maxlength="80" value="{e(str(row.get('label_ru', '')))}" {required_attr}></label>
+      <label>Название (KZ)<input name="label_kz_{suffix}" maxlength="80" value="{e(str(row.get('label_kz', '')))}"></label>
+      <label>Подсказка после выбора (RU)<textarea name="prompt_ru_{suffix}" maxlength="1200" rows="2">{e(str(row.get('prompt_ru', '')))}</textarea></label>
+      <label>Подсказка после выбора (KZ)<textarea name="prompt_kz_{suffix}" maxlength="1200" rows="2">{e(str(row.get('prompt_kz', '')))}</textarea></label>
+      <fieldset class="checkbox-group"><legend>Бот обязательно спросит</legend>{checks}</fieldset>
+      {delete}
+    </article>"""
 
 
 def render_admin_categories(query: dict[str, list[str]]) -> str:
     notice = query.get("notice", [""])[0]
     notice_html = f'<div class="notice">{e(notice)}</div>' if notice else ""
-    rows: list[str] = []
-    ticket_count = 0
-    for index, option in enumerate(app.MENU_OPTIONS, start=1):
-        if str(option.get("action", app.MENU_ACTION_TICKET)) != app.MENU_ACTION_TICKET:
-            continue
-        ticket_count += 1
-        checked = "checked" if bool(option.get("enabled")) else ""
-        rows.append(
-            f"""<article class="menu-editor-row panel">
-              <div class="menu-editor-number">{ticket_count}</div>
-              <input type="hidden" name="key_{index}" value="{e(str(option['key']))}">
-              <label>Название категории<input name="label_{index}" maxlength="80" value="{e(str(option['label']))}" required></label>
-              <label class="checkbox-label"><input type="checkbox" name="enabled_{index}" value="1" {checked}>Доступна для новых заявок</label>
-              <label class="checkbox-label danger-choice"><input type="checkbox" name="delete_{index}" value="1">Удалить категорию</label>
-            </article>"""
-        )
-    empty = '<div class="panel empty">Категорий заявок пока нет</div>' if not rows else ""
+    profile = queue_generic_profile.load_profile(app.STORE, app.ROOT)
+    rows = profile["categories"]
+    used = {str(row["number"]) for row in rows}
+    editors = "".join(_category_editor_row(str(index), row, used) for index, row in enumerate(rows, start=1))
+    free = [n for n in queue_generic_profile.MENU_NUMBERS if n not in used]
+    add_row = (_category_editor_row("new", {"number": free[0], "label_ru": "", "label_kz": ""}, used)
+               if free and len(rows) < 8 else '<p class="muted">Все номера меню заняты.</p>')
     content = f"""
       {notice_html}
-      <section class="section-heading"><div><h2>Категории заявок</h2><p>Добавляйте, переименовывайте или убирайте виды категорий без изменения кода</p></div></section>
+      <section class="section-heading"><div><h2>Меню бота и категории заявок</h2>
+        <p>Изменения сохраняются в базе и сразу применяются в WhatsApp. Файл config/company.json используется только при первом запуске.
+        Номер 8 зарезервирован за «Мои активные заявки», 0 открывает меню, 00 меняет язык.</p></div></section>
       <form class="menu-editor" method="post" action="/admin/categories">
         <input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">
-        <input type="hidden" name="action" value="save">
-        <input type="hidden" name="row_count" value="{len(app.MENU_OPTIONS)}">
-        {''.join(rows)}
-        {empty}
-        <button class="button primary" type="submit">Сохранить категории</button>
+        <section class="panel">
+          <label>Приветствие (RU)<input name="greeting_ru" maxlength="500" value="{e(str(profile.get('greeting_ru', '')))}"></label>
+          <label>Приветствие (KZ)<input name="greeting_kz" maxlength="500" value="{e(str(profile.get('greeting_kz', '')))}"></label>
+        </section>
+        {editors}
+        <h3>Новая категория</h3>
+        {add_row}
+        <button class="button primary" type="submit">Сохранить</button>
       </form>
-      <section class="panel add-menu-option">
-        <div><h2>Добавить категорию</h2><p>Новая категория сразу появится в меню обращений, ручной заявке и выборе категории. Для неё используется универсальный сбор описания проблемы.</p></div>
-        <form class="manual-form" method="post" action="/admin/categories">
-          <input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">
-          <input type="hidden" name="action" value="add">
-          <label>Название<input name="new_label" maxlength="80" placeholder="Например, Доступ к системе" required></label>
-          <button class="button" type="submit">Добавить категорию</button>
-        </form>
-        <p class="muted">При удалении старые заявки не ломаются: название категории сохраняется в истории, но для новых обращений она больше не показывается.</p>
-      </section>
+      <p class="muted">При удалении старые заявки не ломаются: название категории сохраняется в истории, но для новых обращений она больше не показывается.
+        Как бот отвечает сейчас, видно на странице <a href="/admin/menu">«Тексты WhatsApp»</a>.</p>
     """
     return app.admin_layout("Категории", content, "categories")
 

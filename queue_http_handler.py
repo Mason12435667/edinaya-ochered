@@ -19,6 +19,7 @@ import queue_avatars
 import queue_contextual_tickets
 import queue_dialog_flow
 import queue_feature_http
+import queue_generic_profile
 import queue_inbound_media
 import queue_performance_http
 import queue_productivity_http
@@ -1704,159 +1705,23 @@ class QueueHTTPHandlerMixin:
         self.redirect(f"/admin/error?id={report_id}&notice={quote(notice)}")
 
     def _post_admin_categories(self, parsed, form) -> None:
-        # POST /admin/categories
+        # POST /admin/categories: greeting and menu categories of the bot, stored in the database
         if not self.require_admin():
             return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
+        current = queue_generic_profile.load_profile(app.STORE, app.ROOT)
+        try:
+            saved = queue_generic_profile.save_profile(
+                app.STORE, queue_generic_profile.profile_from_form(form, current))
+        except ValueError as error:
+            self.redirect(f"/admin/categories?notice={quote(str(error))}")
             return
-        action = form.get("action", "save")
-        if action == "add":
-            if len(app.MENU_OPTIONS) >= app.MAX_MENU_OPTIONS:
-                self.redirect(
-                    f"/admin/categories?notice={quote(f'Можно добавить не больше {app.MAX_MENU_OPTIONS} пунктов меню и категорий суммарно')}"
-                )
-                return
-            label = normalize_message(form.get("new_label", ""))[:80]
-            if not label:
-                self.redirect(f"/admin/categories?notice={quote('Укажите название категории')}")
-                return
-            key = f"custom_{secrets.token_hex(5)}"
-            app.CATEGORIES[key] = label
-            app.MENU_OPTIONS.append(
-                {
-                    "key": key,
-                    "label": label,
-                    "prompt": category_prompt(key),
-                    "enabled": True,
-                    "action": app.MENU_ACTION_TICKET,
-                }
-            )
-            notice = "Категория добавлена"
-        else:
-            try:
-                count = int(form.get("row_count", "0"))
-            except ValueError:
-                count = 0
-            if count != len(app.MENU_OPTIONS):
-                self.redirect(f"/admin/categories?notice={quote('Категории изменились, обновите страницу и повторите')}")
-                return
-            updated_options: list[dict[str, object]] = []
-            enabled_ticket_count = 0
-            for index, current in enumerate(app.MENU_OPTIONS, start=1):
-                if str(current.get("action", app.MENU_ACTION_TICKET)) != app.MENU_ACTION_TICKET:
-                    updated_options.append(current)
-                    continue
-                key = form.get(f"key_{index}", "")
-                if key != str(current.get("key", "")):
-                    self.send_error(HTTPStatus.BAD_REQUEST, "Invalid category row")
-                    return
-                label = normalize_message(form.get(f"label_{index}", ""))[:80]
-                if not label:
-                    self.redirect(f"/admin/categories?notice={quote('У каждой категории должно быть название')}")
-                    return
-                if form.get(f"delete_{index}") == "1":
-                    # Keep the label for historical tickets, but remove the category
-                    # from all new-ticket selectors and from the WhatsApp request menu.
-                    app.CATEGORY_ARCHIVE[key] = label
-                    app.CATEGORIES[key] = label
-                    continue
-                enabled = form.get(f"enabled_{index}") == "1"
-                old_label = str(current.get("label", ""))
-                old_prompt = str(current.get("prompt", ""))
-                updated = dict(current)
-                updated["label"] = label
-                updated["enabled"] = enabled
-                app.CATEGORIES[key] = label
-                # If the prompt is still the automatically generated one, keep
-                # its heading in sync with a renamed category. Hand-edited prompts
-                # from the menu editor are left untouched.
-                if old_prompt.startswith(f"Вы выбрали: {old_label}."):
-                    updated["prompt"] = category_prompt(key)
-                updated_options.append(updated)
-                if enabled:
-                    enabled_ticket_count += 1
-            if enabled_ticket_count < 1:
-                self.redirect(f"/admin/categories?notice={quote('Оставьте хотя бы одну активную категорию для заявок')}")
-                return
-            app.MENU_OPTIONS[:] = updated_options
-            notice = "Категории сохранены. Нумерация меню для пользователей обновлена автоматически"
-        app.apply_menu_labels()
-        app.STORE.set_setting("request_menu_json", json.dumps(app.MENU_OPTIONS, ensure_ascii=False))
+        kept = {str(row["key"]) for row in saved["categories"]}
+        for row in current["categories"]:
+            if str(row["key"]) not in kept:
+                app.CATEGORY_ARCHIVE[str(row["key"])] = str(row["label_ru"])
         app.STORE.set_setting("request_category_archive_json", json.dumps(app.CATEGORY_ARCHIVE, ensure_ascii=False))
-        self.redirect(f"/admin/categories?notice={quote(notice)}")
-
-    def _post_admin_menu(self, parsed, form) -> None:
-        # POST /admin/menu
-        if not self.require_admin():
-            return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
-            return
-        action = form.get("action", "save")
-        if action == "add":
-            if len(app.MENU_OPTIONS) >= app.MAX_MENU_OPTIONS:
-                self.redirect(
-                    f"/admin/menu?notice={quote(f'Можно добавить не больше {app.MAX_MENU_OPTIONS} вариантов')}"
-                )
-                return
-            label = normalize_message(form.get("new_label", ""))[:80]
-            prompt = normalize_message(form.get("new_prompt", ""))[:1200]
-            menu_action = form.get("new_action", app.MENU_ACTION_TICKET)
-            if menu_action not in app.MENU_ACTIONS:
-                menu_action = app.MENU_ACTION_TICKET
-            if not label or not prompt:
-                self.redirect(f"/admin/menu?notice={quote('Заполните название и подсказку')}")
-                return
-            app.MENU_OPTIONS.append(
-                {
-                    "key": f"custom_{secrets.token_hex(5)}",
-                    "label": label,
-                    "prompt": prompt,
-                    "enabled": True,
-                    "action": menu_action,
-                }
-            )
-        else:
-            try:
-                count = int(form.get("row_count", "0"))
-            except ValueError:
-                count = 0
-            if count != len(app.MENU_OPTIONS):
-                self.redirect(f"/admin/menu?notice={quote('Меню изменилось, обновите страницу и повторите')}")
-                return
-            updated_options: list[dict[str, object]] = []
-            for index, current in enumerate(app.MENU_OPTIONS, start=1):
-                key = form.get(f"key_{index}", "")
-                if key != current["key"]:
-                    self.send_error(HTTPStatus.BAD_REQUEST, "Invalid menu row")
-                    return
-                label = normalize_message(form.get(f"label_{index}", ""))[:80]
-                prompt = normalize_message(form.get(f"prompt_{index}", ""))[:1200]
-                menu_action = form.get(f"action_{index}", app.MENU_ACTION_TICKET)
-                if menu_action not in app.MENU_ACTIONS:
-                    menu_action = app.MENU_ACTION_TICKET
-                if not label or not prompt:
-                    self.redirect(f"/admin/menu?notice={quote('У каждого варианта должны быть название и подсказка')}")
-                    return
-                updated_options.append(
-                    {
-                        "key": key,
-                        "label": label,
-                        "prompt": prompt,
-                        "enabled": form.get(f"enabled_{index}") == "1",
-                        "action": menu_action,
-                    }
-                )
-            if not any(bool(item["enabled"]) for item in updated_options):
-                self.redirect(f"/admin/menu?notice={quote('Оставьте включённым хотя бы один вариант')}")
-                return
-            app.MENU_OPTIONS[:] = updated_options
-        app.apply_menu_labels()
-        app.STORE.set_setting("request_menu_json", json.dumps(app.MENU_OPTIONS, ensure_ascii=False))
-        self.redirect(f"/admin/menu?notice={quote('Меню обращений сохранено. Нумерация видимых пунктов обновлена автоматически')}")
+        app.apply_bot_profile(saved)
+        self.redirect(f"/admin/categories?notice={quote('Сохранено. Бот уже использует новое меню')}")
 
     def _post_active_employee(self, parsed, form) -> None:
         # POST /active-employee
@@ -2285,7 +2150,6 @@ class QueueHTTPHandlerMixin:
         "/admin/groups": _post_admin_groups,
         "/admin/errors": _post_admin_errors,
         "/admin/categories": _post_admin_categories,
-        "/admin/menu": _post_admin_menu,
         "/active-employee": _post_active_employee,
         "/handoff": _post_handoff,
         "/status": _post_status,

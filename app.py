@@ -1624,11 +1624,23 @@ def apply_contact_profile_to_ticket(ticket: dict[str, object], profile: dict[str
 if os.getenv("QUEUE_PROFILE", "generic").strip().lower() != "generic":
     raise RuntimeError("The public source branch supports only QUEUE_PROFILE=generic")
 import queue_generic_profile
-# Fills the menu tables above from config/company.json and defines the menu
-# functions: main_menu_text, start_menu_prompt, menu_payload, user_menu_label,
-# configured_menu_category, configured_category_prompt,
-# configured_category_required_fields, active_ticket_category_items.
-queue_generic_profile.activate(globals(), ROOT)
+
+
+def apply_bot_profile(profile: dict[str, object] | None = None) -> None:
+    """Load the stored bot profile (or the given one) into the menu tables.
+
+    Defines the menu functions main_menu_text, start_menu_prompt, menu_payload,
+    user_menu_label, configured_menu_category, configured_category_prompt,
+    configured_category_required_fields and active_ticket_category_items.
+    Removed categories keep their archived label so old tickets stay readable.
+    """
+    queue_generic_profile.activate(globals(), ROOT, profile)
+    for key, label in CATEGORY_ARCHIVE.items():
+        if key not in V3_REQUIRED_FIELDS:
+            CATEGORIES[key] = label
+
+
+apply_bot_profile()
 
 # Configure explicit work dependencies after application services are ready.
 queue_work_context.configure(queue_work_context.WorkDependencies(
@@ -1651,7 +1663,7 @@ queue_work_context.configure(queue_work_context.WorkDependencies(
     snapshot_cache_lock=SNAPSHOT_CACHE_LOCK,
     read_marked_at=READ_MARKED_AT,
     read_mark_lock=READ_MARK_LOCK,
-    category_items=active_ticket_category_items,
+    category_items=lambda: active_ticket_category_items(),  # re-read after a profile change
     connector_snapshot=connector_state_snapshot,
 ))
 
