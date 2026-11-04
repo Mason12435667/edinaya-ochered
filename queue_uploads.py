@@ -127,9 +127,6 @@ def safe_mime(value):
 def post(handler, app):
     parsed=urlparse(handler.path)
     if not parsed.path.startswith('/upload/'): return False
-    if not secrets.compare_digest(handler.headers.get('X-CSRF-Token',''),app.csrf_token()):
-        handler.json_response({'error':'Обновите страницу перед загрузкой'},403)
-        return True
     user = handler.effective_user() or {}
     owner = str(user.get('id') or ('legacy:' + str(user.get('username') or '')))
     try:

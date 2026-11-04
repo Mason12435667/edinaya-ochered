@@ -136,7 +136,6 @@ config/company.json` и перезапустите сервер.
 | `QUEUE_TIMEZONE` или `QUEUE_UTC_OFFSET_HOURS` | Рабочий часовой пояс (по умолчанию UTC+5) |
 | `QUEUE_ALLOW_SELF_REGISTRATION` | `1` открывает страницу `/register`; новый аккаунт всё равно ждёт одобрения администратора. По умолчанию выключено — сотрудников создаёт администратор |
 | `QUEUE_LOG_LEVEL` | Уровень журнала (`WARNING` по умолчанию, `INFO`, `DEBUG`); журнал пишется в stderr |
-| `QUEUE_INSTRUCTION_SOURCE_URL` | Необязательно: Google Таблица с базой знаний, открытая по ссылке |
 
 ## Ограничения
 
