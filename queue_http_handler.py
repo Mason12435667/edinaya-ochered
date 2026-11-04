@@ -277,6 +277,7 @@ class QueueHTTPHandlerMixin:
         return path in {
             "/api/media-stage",
             "/api/whatsapp",
+            "/api/inbound-recovery-reply",
             "/api/template-error-delivery",
             "/api/outbound/claim",
             "/api/outbound/heartbeat",
@@ -1196,16 +1197,17 @@ class QueueHTTPHandlerMixin:
         # POST /api/outbound/claim
         self.handle_outbound_claim()
 
+    def _post_inbound_recovery_reply(self, parsed) -> None:
+        payload = self.read_authorized_json(120_000)
+        if payload is not None:
+            result = self.outbound_service.recover_reply(payload)
+            self.json_response(result.payload, result.status)
+
     def _post_api_outbound_heartbeat(self, parsed) -> None:
-        # POST /api/outbound/heartbeat, /api/outbound/begin
         payload = self.read_authorized_json()
         if payload is not None:
-            try:
-                operation = app.STORE.begin_outbound_send if parsed.path.endswith('/begin') else app.STORE.touch_outbound_message
-                alive = operation(int(payload.get("message_id", 0)))
-                self.json_response({"updated": alive})
-            except (ValueError, TypeError):
-                self.json_response({"error": "invalid_id"}, 400)
+            result = self.outbound_service.heartbeat(payload, begin=parsed.path.endswith('/begin'))
+            self.json_response(result.payload, result.status)
 
     def _post_api_outbound_result(self, parsed) -> None:
         # POST /api/outbound/result
@@ -1705,23 +1707,14 @@ class QueueHTTPHandlerMixin:
         self.redirect(f"/admin/error?id={report_id}&notice={quote(notice)}")
 
     def _post_admin_categories(self, parsed, form) -> None:
-        # POST /admin/categories: greeting and menu categories of the bot, stored in the database
         if not self.require_admin():
             return
-        current = queue_generic_profile.load_profile(app.STORE, app.ROOT)
         try:
-            saved = queue_generic_profile.save_profile(
-                app.STORE, queue_generic_profile.profile_from_form(form, current))
+            app.MENU_CONFIG.update_from_form(form)
         except ValueError as error:
             self.redirect(f"/admin/categories?notice={quote(str(error))}")
             return
-        kept = {str(row["key"]) for row in saved["categories"]}
-        for row in current["categories"]:
-            if str(row["key"]) not in kept:
-                app.CATEGORY_ARCHIVE[str(row["key"])] = str(row["label_ru"])
-        app.STORE.set_setting("request_category_archive_json", json.dumps(app.CATEGORY_ARCHIVE, ensure_ascii=False))
-        app.apply_bot_profile(saved)
-        self.redirect(f"/admin/categories?notice={quote('Сохранено. Бот уже использует новое меню')}")
+        self.redirect(f"/admin/categories?notice={quote('Сохранено. Меню бота обновлено')}")
 
     def _post_active_employee(self, parsed, form) -> None:
         # POST /active-employee
@@ -2100,6 +2093,7 @@ class QueueHTTPHandlerMixin:
         "/api/system-warning-action": _post_api_system_warning_action,
         "/api/media-stage": _post_api_media_stage,
         "/api/whatsapp": _post_api_whatsapp,
+        "/api/inbound-recovery-reply": _post_inbound_recovery_reply,
         "/api/template-error-delivery": _post_api_template_error_delivery,
         "/api/outbound/claim": _post_api_outbound_claim,
         "/api/outbound/heartbeat": _post_api_outbound_heartbeat,
@@ -2301,11 +2295,6 @@ class QueueHTTPHandlerMixin:
         self.wfile.write(encoded)
 
     def json_response(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK) -> None:
-        # 1.00.6.14: global kill-switch for bot replies. The inbound webhook is
-        # still processed normally, so chats, contexts and tickets keep working;
-        # only the automatic response returned to the WhatsApp connector is muted.
-        if urlparse(self.path).path == "/api/whatsapp" and not app.global_auto_reply_enabled():
-            payload = app.suppress_inbound_auto_reply(payload)
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")

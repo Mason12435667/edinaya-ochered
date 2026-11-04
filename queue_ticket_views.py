@@ -30,7 +30,7 @@ MAIN_STYLESHEETS = (
     "notifications.css", "chat.css", "auth.css", "pink-theme.css", "polish.css", "user-ui.css",
 )
 MAIN_SCRIPTS = (
-    "csrf.js", "ui.js", "app.js", "productivity.js", "workflow.js", "reliability.js",
+    "http.js", "ui.js", "app.js", "productivity.js", "workflow.js", "reliability.js",
     "chat-layout.js", "performance.js", "attachments.js", "account.js",
 )
 

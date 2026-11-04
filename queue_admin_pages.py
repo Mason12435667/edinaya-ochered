@@ -403,10 +403,10 @@ def _admin_live_flow_snapshot(language: str) -> dict[str, object]:
     previous_language = queue_user_locale.current_language()
     queue_user_locale.set_language(language)
     try:
-        labels = app.V3_MENU_LABELS_KZ if queue_user_locale.is_kz() else app.V3_MENU_LABELS_RU
         categories: list[tuple[str, str]] = []
-        for number, category in sorted(app.V3_MENU_CATEGORIES.items(), key=lambda item: int(item[0])):
-            categories.append((f"{number}. {labels.get(str(number), category)}", app.configured_category_prompt(category)))
+        for row in sorted(app.MENU_CONFIG.rows(), key=lambda row: int(row["number"])):
+            category = str(row["key"])
+            categories.append((f"{row['number']}. {app.user_menu_label(category)}", app.configured_category_prompt(category)))
         sample_ticket = {
             "id": 12345,
             "category": "general",
@@ -514,7 +514,7 @@ def _category_editor_row(suffix: str, row: dict[str, object], used_numbers: set[
 def render_admin_categories(query: dict[str, list[str]]) -> str:
     notice = query.get("notice", [""])[0]
     notice_html = f'<div class="notice">{e(notice)}</div>' if notice else ""
-    profile = queue_generic_profile.load_profile(app.STORE, app.ROOT)
+    profile = app.MENU_CONFIG.profile
     rows = profile["categories"]
     used = {str(row["number"]) for row in rows}
     editors = "".join(_category_editor_row(str(index), row, used) for index, row in enumerate(rows, start=1))

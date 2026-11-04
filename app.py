@@ -12,10 +12,10 @@ import re
 import sqlite3
 import secrets
 import threading
-import time
 import webbrowser
 import sys
 import queue_message_identity
+import queue_bot_texts
 import queue_features
 import queue_productivity
 import queue_contextual_tickets
@@ -42,8 +42,6 @@ import queue_ticket_service
 import queue_work_context
 import queue_ticket_views
 import queue_admin_pages
-from queue_user_locale import tr
-from queue_language import parse_menu_number  # used by queue_generic_profile.activate()
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,10 +55,16 @@ from ticketing import (
     PRIORITIES,
     STATUSES,
     TicketStore,
-    category_prompt,
     normalize_message,
 )
 from queue_core import log_suppressed
+import queue_generic_profile
+from queue_menu_config import MenuConfig
+from queue_bot_menu import BotMenu
+from queue_contact_profiles import ContactProfiles, USER_PROFILE_CONTEXT
+from queue_inbound_service import InboundDependencies, InboundService
+from queue_attachment_archive import AttachmentArchive
+from queue_outbound_service import OutboundService
 
 # Public release from CHANGELOG.md; reported by /api/integration/ping.
 APP_VERSION = "v143"
@@ -161,16 +165,6 @@ def global_auto_reply_enabled() -> bool:
     return value not in {"0", "off", "false", "no", "disabled", "выкл"}
 
 
-def suppress_inbound_auto_reply(payload: dict[str, object]) -> dict[str, object]:
-    """Strip bot output while keeping inbound processing and ticket state."""
-    result = dict(payload)
-    if result.get("reply"):
-        result["auto_reply_suppressed"] = True
-    result.pop("reply", None)
-    result.pop("menu_options", None)
-    result["silent"] = True
-    result["auto_reply_disabled"] = True
-    return result
 MAX_MEDIA_BYTES = max(1, min(256, int(os.getenv("QUEUE_MAX_MEDIA_MB", "12")))) * 1024 * 1024
 UPLOADS = queue_uploads.Uploads(OUTBOUND_MEDIA_DIR / "uploads", STORE)
 class DisabledVoiceJobs:
@@ -232,21 +226,17 @@ ADMIN_SESSION_MAX_AGE = 12 * 60 * 60
 AUTH_SESSION_COOKIE = "queue_session"
 AUTH_SESSION_MAX_AGE = queue_auth.SESSION_HOURS * 60 * 60
 MAX_EMPLOYEES = 50
-MAX_MENU_OPTIONS = 30
-MENU_ACTION_TICKET = "ticket"
-MENU_ACTION_INSTRUCTION = "instruction"
-MENU_ACTIONS = {MENU_ACTION_TICKET, MENU_ACTION_INSTRUCTION}
-SUPPORT_MODE_CONTEXT = "__support_mode__"
-ERROR_REPORT_CONTEXT = "__error_report__"
-ACTIVE_TICKETS_CONTEXT = "__active_tickets__"
-ACTIVE_TICKET_FOLLOWUP_CONTEXT = "__active_ticket_followup__"
+MENU_ACTION_TICKET = queue_bot_texts.MENU_ACTION_TICKET
+MENU_ACTION_INSTRUCTION = queue_bot_texts.MENU_ACTION_INSTRUCTION
+MENU_ACTIONS = queue_bot_texts.MENU_ACTIONS
+SUPPORT_MODE_CONTEXT = queue_bot_texts.SUPPORT_MODE_CONTEXT
+ERROR_REPORT_CONTEXT = queue_bot_texts.ERROR_REPORT_CONTEXT
+ACTIVE_TICKETS_CONTEXT = queue_bot_texts.ACTIVE_TICKETS_CONTEXT
+ACTIVE_TICKET_FOLLOWUP_CONTEXT = queue_bot_texts.ACTIVE_TICKET_FOLLOWUP_CONTEXT
 REACTION_EMOJIS = {"👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉", "✅", "👏", "🤔", "👀", "😡", "💯", "👌", "😁", "😍", "🥳"}
-DEFAULT_MENU_KEYS = ['general']
-DEFAULT_MENU_LABELS = {'general': 'Общее обращение'}
 
 # 1.00.6.11: ordinary WhatsApp users receive Kazakh texts. The employee/admin
 # interface, stored ticket data, internal statuses and menu editor remain Russian.
-USER_MENU_LABELS_KZ = {'general': 'Жалпы өтініш'}
 USER_STATUS_LABELS_KZ = {
     "new": "Жаңа",
     "in_progress": "Жұмыста",
@@ -305,182 +295,28 @@ def set_chat_favorite(chat_id: str, favorite: bool) -> tuple[bool, str]:
     return True, clean
 
 
-def load_category_archive() -> dict[str, str]:
-    """Labels of removed custom categories, kept so old tickets stay readable."""
-    raw = STORE.get_setting("request_category_archive_json", "")
-    if not raw:
-        return {}
-    try:
-        values = json.loads(raw)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return {}
-    if not isinstance(values, dict):
-        return {}
-    cleaned: dict[str, str] = {}
-    for raw_key, raw_label in values.items():
-        key = re.sub(r"[^a-z0-9_]", "", str(raw_key))[:40]
-        label = normalize_message(str(raw_label))[:80]
-        if key and label:
-            cleaned[key] = label
-    return cleaned
+error_report_prompt = queue_bot_texts.error_report_prompt
 
 
-CATEGORY_ARCHIVE = load_category_archive()
-
-
-def load_menu_options() -> list[dict[str, object]]:
-    raw = STORE.get_setting("request_menu_json", "")
-    if raw:
-        try:
-            values = json.loads(raw)
-            if isinstance(values, list):
-                cleaned: list[dict[str, object]] = []
-                seen: set[str] = set()
-                for item in values[:MAX_MENU_OPTIONS]:
-                    if not isinstance(item, dict):
-                        continue
-                    key = re.sub(r"[^a-z0-9_]", "", str(item.get("key", "")))[:40]
-                    label = normalize_message(str(item.get("label", "")))[:80]
-                    prompt = normalize_message(str(item.get("prompt", "")))[:1200]
-                    action = str(item.get("action", MENU_ACTION_TICKET))
-                    if action not in MENU_ACTIONS:
-                        action = MENU_ACTION_TICKET
-                    if not key or key in seen or not label:
-                        continue
-                    seen.add(key)
-                    cleaned.append(
-                        {
-                            "key": key,
-                            "label": label,
-                            "prompt": prompt,
-                            "enabled": bool(item.get("enabled", True)),
-                            "action": action,
-                        }
-                    )
-                if cleaned and any(bool(item["enabled"]) for item in cleaned):
-                    return cleaned
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-    return [
-        {
-            "key": key,
-            "label": DEFAULT_MENU_LABELS[key],
-            "prompt": category_prompt(key),
-            "enabled": True,
-            "action": MENU_ACTION_TICKET,
-        }
-        for key in DEFAULT_MENU_KEYS
-    ]
-
-
-MENU_OPTIONS = load_menu_options()
-
-
-def apply_menu_labels() -> None:
-    # Removed custom categories stay in CATEGORIES only for historical tickets.
-    for key, label in CATEGORY_ARCHIVE.items():
-        CATEGORIES[str(key)] = str(label)
-    for option in MENU_OPTIONS:
-        CATEGORIES[str(option["key"])] = str(option["label"])
-
-
-apply_menu_labels()
-
-
-def enabled_menu_options() -> list[dict[str, object]]:
-    return [item for item in MENU_OPTIONS if bool(item.get("enabled"))]
-
-
-def error_report_prompt() -> str:
-    return tr(
-        "Вы выбрали категорию «Репорт об ошибке».\n\n"
-        "Опишите, пожалуйста, последовательность действий и возникшую ошибку. При необходимости приложите скриншот, фото, видео или файл.\n\n"
-        "Сообщение будет сохранено отдельно от обычных заявок и доступно сотрудникам в разделе «Ошибки».\n"
-        "Для возврата в главное меню отправьте 0.",
-        "Сіз «Қате туралы хабарлама» санатын таңдадыңыз.\n\n"
-        "Орындаған әрекеттеріңізді және пайда болған қатені сипаттаңыз. Қажет болса, скриншот, фото, видео немесе файл тіркеңіз.\n\n"
-        "Хабарлама қарапайым өтінімдерден бөлек сақталады және қызметкерлерге «Қателер» бөлімінде қолжетімді болады.\n"
-        "Негізгі мәзірге оралу үшін 0 жіберіңіз.",
-    )
-
-
-def is_active_tickets_command(text: str) -> bool:
-    normalized = normalize_message(text).casefold().strip(" .,!?:;-")
-    return normalized in {
-        "мои заявки", "мои активные заявки", "активные заявки",
-        "показать заявки", "покажи заявки", "статус заявок",
-        "менің өтінімдерім", "менің белсенді өтінімдерім", "белсенді өтінімдер",
-    }
+is_active_tickets_command = queue_bot_texts.is_active_tickets_command
 
 
 
 
-def configured_category_action(category: str) -> str:
-    option = next((item for item in MENU_OPTIONS if item["key"] == category), None)
-    action = str(option.get("action", MENU_ACTION_TICKET)) if option else MENU_ACTION_TICKET
-    return action if action in MENU_ACTIONS else MENU_ACTION_TICKET
+V3_FIELD_LABELS_RU = queue_bot_texts.V3_FIELD_LABELS_RU
+V3_FIELD_LABELS_KZ = queue_bot_texts.V3_FIELD_LABELS_KZ
 
 
-# ---------------------------------------------------------------------------
-# 1.00.6.98: approved ordinary-user WhatsApp flow ("Текст системы_v3").
-# Staff/admin UI and internal ticket statuses remain Russian. Public menu
-# numbering is fixed to 1-8 so an old request_menu_json cannot change it.
-# ---------------------------------------------------------------------------
-
-# Keep staff-facing category names aligned with the new public flow while preserving
-# the existing internal keys and historical ticket records.
-CATEGORIES["database"] = 'Доступ к системе'
-CATEGORIES["mobile"] = 'Мобильное приложение'
-CATEGORIES["general"] = "Другая проблема / Вопрос / Ошибка"
-
-V3_MENU_CATEGORIES = {'1': 'general'}
-V3_MENU_LABELS_RU = {'1': 'Общее обращение', '2': 'Не настроено', '3': 'Не настроено', '4': 'Не настроено', '5': 'Не настроено', '6': 'Не настроено', '7': 'Не настроено', '8': 'Мои активные заявки', '9': 'Не настроено'}
-V3_MENU_LABELS_KZ = {'1': 'Жалпы өтініш', '2': 'Бапталмаған', '3': 'Бапталмаған', '4': 'Бапталмаған', '5': 'Бапталмаған', '6': 'Бапталмаған', '7': 'Бапталмаған', '8': 'Менің белсенді өтінімдерім', '9': 'Бапталмаған'}
-V3_REQUIRED_FIELDS = {'general': ['problem']}
-V3_FIELD_LABELS_RU = {
-    "reference": "номер / идентификатор",
-    "problem": "описание проблемы",
-    "email": "email/логин пользователя",
-}
-V3_FIELD_LABELS_KZ = {
-    "reference": "нөмір / идентификатор",
-    "problem": "мәселенің сипаттамасы",
-    "email": "пайдаланушының email/логині",
-}
-V3_CATEGORY_LABELS_KZ = {'general': 'Жалпы өтініш'}
+language_selection_text_v3 = queue_bot_texts.language_selection_text_v3
 
 
-def language_selection_text_v3() -> str:
-    return (
-        "Здравствуйте! / Сәлеметсіз бе!\n"
-        "Выберите язык обслуживания / Қызмет көрсету тілін таңдаңыз (1-2):\n"
-        "1️⃣ — Русский\n"
-        "2️⃣ — Қазақша\n\n"
-        "После выбора языка укажите своё подразделение и должность / "
-        "Тілді таңдағаннан кейін бөлімшеңіз бен лауазымыңызды көрсетіңіз."
-    )
+active_tickets_menu_number = queue_bot_texts.active_tickets_menu_number
 
 
-def active_tickets_menu_number() -> int:
-    return 8
+v3_missing_fields_reply = queue_bot_texts.v3_missing_fields_reply
 
 
-def v3_missing_fields_reply(missing_fields) -> str:
-    fields = [str(item or "").strip() for item in (missing_fields or []) if str(item or "").strip()]
-    labels_map = V3_FIELD_LABELS_KZ if queue_user_locale.is_kz() else V3_FIELD_LABELS_RU
-    labels = [labels_map.get(field, field) for field in fields]
-    joined = ", ".join(labels) if labels else tr("недостающие данные", "жетіспейтін мәліметтер")
-    return tr(
-        f"Пожалуйста, уточните: {joined} (остальные данные уже зафиксированы).",
-        f"Нақтылап жіберіңізші: {joined} (қалған мәліметтер сақталды).",
-    )
-
-
-def v3_duplicate_reply(ticket_id: int) -> str:
-    return tr(
-        f"⚠️ Заявка по данному вопросу уже в работе (№{ticket_id}). Мы добавили ваше сообщение к ней, повторную заявку создавать не требуется.",
-        f"⚠️ Бұл мәселе бойынша өтінім қазір жұмыс барысында (№{ticket_id}). Хабарламаңыз оған қосылды, жаңа өтінім жасаудың қажеті жоқ.",
-    )
+v3_duplicate_reply = queue_bot_texts.v3_duplicate_reply
 
 
 def save_media_payload(
@@ -999,7 +835,7 @@ def reconcile_uncertain_system_outgoing_media(
         }
     else:
         try:
-            preserved = queue_uploads.preserve_sent_attachment(sys.modules[__name__], row_id)
+            preserved = ATTACHMENTS.preserve(row_id)
         except Exception:
             log_suppressed("app.reconcile_uncertain_system_outgoing_media")
             preserved = {}
@@ -1116,7 +952,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                 str(item.get("quoted_message_key", "")),
                 str(item.get("message_type", item.get("type", ""))),
             ):
-                media = queue_uploads.preserve_sent_attachment(sys.modules[__name__], sent_row["id"])
+                media = ATTACHMENTS.preserve(sent_row["id"])
             if not media:
                 media = reconcile_uncertain_system_outgoing_media(
                     chat_id,
@@ -1290,22 +1126,6 @@ _decorate_notification_event = queue_chat_state._decorate_notification_event
 notifications_snapshot = queue_chat_state.notifications_snapshot
 
 
-TICKET_SERVICE = queue_ticket_service.TicketService(queue_ticket_service.TicketDependencies(
-    store=STORE, statuses=STATUSES, categories=CATEGORIES, menu_context=MENU_CONTEXT,
-    close_reason_labels_kz=USER_CLOSE_REASON_LABELS_KZ,
-    contact_language=lambda chat, phone: get_contact_language(chat, phone),
-    auto_reply_enabled=lambda: global_auto_reply_enabled(),
-    main_menu=lambda: main_menu_text(),
-    menu_label=lambda category, fallback: user_menu_label(category, fallback),
-    status_label=lambda status, fallback: user_status_label(status, fallback),
-))
-ticket_accepted_reply = TICKET_SERVICE.ticket_accepted_reply
-active_tickets_reply = TICKET_SERVICE.active_tickets_reply
-active_ticket_selected_reply = TICKET_SERVICE.active_ticket_selected_reply
-support_question_accepted_reply = TICKET_SERVICE.support_question_accepted_reply
-ticket_status_reply_text = TICKET_SERVICE.status_reply_text
-update_ticket_status = TICKET_SERVICE.update_status
-
 # Ticket views retain their existing interface.
 layout = queue_ticket_views.layout
 render_instruction = queue_ticket_views.render_instruction
@@ -1394,253 +1214,66 @@ render_whatsapp = queue_chat_views.render_whatsapp
 # The selected language is persisted per WhatsApp user in app_settings.
 # Admin/employee UI and stored ticket data stay Russian.
 # ---------------------------------------------------------------------------
-LANGUAGE_SETTING_PREFIX = "whatsapp_user_language:"
 
-
-def _language_identities(chat_id: str = "", phone: str = "") -> list[str]:
-    """Return every stable identity we know for one WhatsApp user.
-
-    WhatsApp can alternate between phone-backed @c.us and LID identifiers.
-    Persisting the language under both aliases prevents a previously selected
-    language from appearing to flip when the connector reports another alias.
-    """
-    identities: list[str] = []
-    phone_digits = re.sub(r"\D", "", normalize_phone(phone))
-    if len(phone_digits) >= 10:
-        identities.append(f"phone:{phone_digits}")
-    clean_chat = valid_chat_id(chat_id)
-    if clean_chat:
-        try:
-            clean_chat = STORE.canonical_whatsapp_chat_id(clean_chat) or clean_chat
-        except Exception:
-            log_suppressed("app._language_identities")
-        identities.append(f"chat:{clean_chat}")
-    result: list[str] = []
-    for identity in identities:
-        if identity and identity not in result:
-            result.append(identity)
-    return result
-
-
-def _language_identity(chat_id: str = "", phone: str = "") -> str:
-    identities = _language_identities(chat_id, phone)
-    return identities[0] if identities else ""
-
-
-def _language_setting_key(identity: str) -> str:
-    if not identity:
-        return ""
-    digest = hashlib.sha256(identity.encode("utf-8", "ignore")).hexdigest()
-    return f"{LANGUAGE_SETTING_PREFIX}{digest}"
-
-
-def get_user_language(identity: str) -> str:
-    key = _language_setting_key(identity)
-    if not key:
-        return ""
-    value = STORE.get_setting(key, "").strip().casefold()
-    return value if value in {queue_user_locale.LANG_RU, queue_user_locale.LANG_KZ} else ""
-
-
-def set_user_language(identity: str, language: str) -> str:
-    key = _language_setting_key(identity)
-    lang = queue_user_locale.normalize_language(language)
-    if key:
-        STORE.set_setting(key, lang)
-    return lang
-
-
-def clear_user_language(identity: str) -> None:
-    key = _language_setting_key(identity)
-    if key:
-        STORE.set_setting(key, "")
-
-
-def get_contact_language(chat_id: str = "", phone: str = "") -> str:
-    """Resolve language across phone/chat aliases and heal stale conflicts."""
-    identities = _language_identities(chat_id, phone)
-    values = [(identity, get_user_language(identity)) for identity in identities]
-    selected = next((value for _identity, value in values if value), "")
-    if selected:
-        for identity, value in values:
-            if value != selected:
-                set_user_language(identity, selected)
-    return selected
-
-
-def set_contact_language(chat_id: str, phone: str, language: str) -> str:
-    lang = queue_user_locale.normalize_language(language)
-    identities = _language_identities(chat_id, phone)
-    if not identities:
-        return lang
-    for identity in identities:
-        set_user_language(identity, lang)
-    return lang
-
-
-def clear_contact_language(chat_id: str = "", phone: str = "") -> None:
-    for identity in _language_identities(chat_id, phone):
-        clear_user_language(identity)
-
-
-USER_PROFILE_SETTING_PREFIX = "whatsapp_user_profile:"
-USER_PROFILE_CONTEXT = "__user_profile__"
-
-
-def _profile_setting_key(identity: str) -> str:
-    if not identity:
-        return ""
-    digest = hashlib.sha256(identity.encode("utf-8", "ignore")).hexdigest()
-    return f"{USER_PROFILE_SETTING_PREFIX}{digest}"
-
-
-def _clean_user_profile_value(value: object) -> str:
-    clean = normalize_message(str(value or "")).strip(" \t\r\n,;.")[:120]
-    return clean if len(clean) >= 2 else ""
-
-
-def get_user_profile(identity: str) -> dict[str, str]:
-    key = _profile_setting_key(identity)
-    if not key:
-        return {}
-    raw = STORE.get_setting(key, "")
-    try:
-        payload = json.loads(raw) if raw else {}
-    except (TypeError, ValueError, json.JSONDecodeError):
-        payload = {}
-    if not isinstance(payload, dict):
-        return {}
-    post_name = _clean_user_profile_value(payload.get("post", ""))
-    position = _clean_user_profile_value(payload.get("position", ""))
-    return {"post": post_name, "position": position} if post_name and position else {}
-
-
-def set_user_profile(identity: str, post_name: str, position: str) -> dict[str, str]:
-    key = _profile_setting_key(identity)
-    profile = {
-        "post": _clean_user_profile_value(post_name),
-        "position": _clean_user_profile_value(position),
-    }
-    if key and profile["post"] and profile["position"]:
-        STORE.set_setting(key, json.dumps(profile, ensure_ascii=False, separators=(",", ":")))
-        return profile
-    return {}
-
-
-def get_contact_profile(chat_id: str = "", phone: str = "") -> dict[str, str]:
-    """Resolve saved post/position across phone/chat aliases and heal them."""
-    identities = _language_identities(chat_id, phone)
-    values = [(identity, get_user_profile(identity)) for identity in identities]
-    selected = next((profile for _identity, profile in values if profile), {})
-    if selected:
-        for identity, profile in values:
-            if profile != selected:
-                set_user_profile(identity, selected["post"], selected["position"])
-    return dict(selected)
-
-
-def set_contact_profile(chat_id: str, phone: str, post_name: str, position: str) -> dict[str, str]:
-    post_value = _clean_user_profile_value(post_name)
-    position_value = _clean_user_profile_value(position)
-    if not post_value or not position_value:
-        return {}
-    profile = {"post": post_value, "position": position_value}
-    for identity in _language_identities(chat_id, phone):
-        set_user_profile(identity, post_value, position_value)
-    return profile
-
-
-def profile_prompt_text(error: bool = False) -> str:
-    if queue_user_locale.is_kz():
-        prefix = "Екі жолды да көрсетіңіз.\n\n" if error else ""
-        return (
-            prefix
-            + "Өтініммен жұмысты бастамас бұрын, бөлімшеңіз бен лауазымыңызды бір хабарламамен жазыңыз:\n"
-            "Бөлімше: [бөлімше атауы]\n"
-            "Лауазым: [лауазымыңыз]\n\n"
-            "Бұл мәліметтер сақталады, келесі өтінімдерде қайта енгізудің қажеті жоқ."
-        )
-    prefix = "Укажите оба поля.\n\n" if error else ""
-    return (
-        prefix
-        + "Перед началом работы с заявками укажите одним сообщением своё подразделение и должность:\n"
-        "Подразделение: [название подразделения]\n"
-        "Должность: [ваша должность]\n\n"
-        "Эти данные сохранятся, и в следующих заявках вводить их повторно не потребуется."
-    )
-
-
-def parse_contact_profile(text: str) -> dict[str, str]:
-    raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not raw:
-        return {}
-    post_name = ""
-    position = ""
-    unlabeled: list[str] = []
-    for source_line in raw.split("\n"):
-        line = source_line.strip().lstrip("•*-—– ").strip()
-        if not line:
-            continue
-        match = re.match(r"(?i)^(?:подразделение|отдел|филиал|бөлімше)\s*[:=\-–—]\s*(.+)$", line)
-        if match:
-            post_name = _clean_user_profile_value(match.group(1))
-            continue
-        match = re.match(r"(?i)^(?:должность|лауазым)\s*[:=\-–—]\s*(.+)$", line)
-        if match:
-            position = _clean_user_profile_value(match.group(1))
-            continue
-        unlabeled.append(line)
-    if not post_name and not position and len(unlabeled) == 2:
-        post_name = _clean_user_profile_value(unlabeled[0])
-        position = _clean_user_profile_value(unlabeled[1])
-    if not post_name or not position:
-        return {}
-    # A bare identifier is not an occupation, even in a two-line reply.
-    if not re.search(r"[^\W\d_]{3,}", position, re.UNICODE):
-        return {}
-    if any(re.search(r"\d", token) for token in position.split()) and not re.search(r"[^\W\d_]{3,}", " ".join(t for t in position.split() if not re.search(r"\d", t)), re.UNICODE):
-        return {}
-    return {"post": post_name, "position": position}
-
-
-def apply_contact_profile_to_ticket(ticket: dict[str, object], profile: dict[str, str]) -> None:
-    post_name = _clean_user_profile_value(profile.get("post", ""))
-    position = _clean_user_profile_value(profile.get("position", ""))
-    if not post_name or not position:
-        return
-    profile_summary = f"Подразделение: {post_name} · Должность: {position}"
-    current_summary = normalize_message(str(ticket.get("summary", "") or ""))
-    if current_summary and profile_summary not in current_summary:
-        ticket["summary"] = f"{profile_summary} · {current_summary}"
-    elif not current_summary:
-        ticket["summary"] = profile_summary
-    current_original = str(ticket.get("original_text", "") or "").strip()
-    profile_block = f"Подразделение: {post_name}\nДолжность: {position}"
-    if profile_block not in current_original:
-        ticket["original_text"] = f"{profile_block}\n\n{current_original}".strip()
+CONTACTS = ContactProfiles(STORE)
+_language_identities = CONTACTS._language_identities
+_language_identity = CONTACTS._language_identity
+_language_setting_key = CONTACTS._language_setting_key
+get_user_language = CONTACTS.get_user_language
+set_user_language = CONTACTS.set_user_language
+clear_user_language = CONTACTS.clear_user_language
+get_contact_language = CONTACTS.get_contact_language
+set_contact_language = CONTACTS.set_contact_language
+clear_contact_language = CONTACTS.clear_contact_language
+_profile_setting_key = CONTACTS._profile_setting_key
+_clean_user_profile_value = CONTACTS._clean_user_profile_value
+get_user_profile = CONTACTS.get_user_profile
+set_user_profile = CONTACTS.set_user_profile
+get_contact_profile = CONTACTS.get_contact_profile
+set_contact_profile = CONTACTS.set_contact_profile
+profile_prompt_text = CONTACTS.profile_prompt_text
+parse_contact_profile = CONTACTS.parse_contact_profile
+apply_contact_profile_to_ticket = CONTACTS.apply_contact_profile_to_ticket
 
 
 # This public branch no longer contains the specialized legacy views/assets.
 if os.getenv("QUEUE_PROFILE", "generic").strip().lower() != "generic":
     raise RuntimeError("The public source branch supports only QUEUE_PROFILE=generic")
-import queue_generic_profile
+
+MENU_CONFIG = MenuConfig(STORE, lambda: queue_generic_profile.read_profile(ROOT), CATEGORIES)
+MENU = BotMenu(MENU_CONFIG)
 
 
-def apply_bot_profile(profile: dict[str, object] | None = None) -> None:
-    """Load the stored bot profile (or the given one) into the menu tables.
+def apply_bot_profile(profile):
+    """Explicit compatibility entry point for profile updates."""
+    MENU_CONFIG.replace(profile, MENU_CONFIG.archive)
 
-    Defines the menu functions main_menu_text, start_menu_prompt, menu_payload,
-    user_menu_label, configured_menu_category, configured_category_prompt,
-    configured_category_required_fields and active_ticket_category_items.
-    Removed categories keep their archived label so old tickets stay readable.
-    """
-    queue_generic_profile.activate(globals(), ROOT, profile)
-    for key, label in CATEGORY_ARCHIVE.items():
-        if key not in V3_REQUIRED_FIELDS:
-            CATEGORIES[key] = label
+configured_menu_category = MENU.configured_menu_category
+user_menu_label = MENU.user_menu_label
+menu_payload = MENU.menu_payload
+main_menu_text = MENU.main_menu_text
+start_menu_prompt = MENU.start_menu_prompt
+configured_category_prompt = MENU.configured_category_prompt
+configured_category_required_fields = MENU.configured_category_required_fields
+active_ticket_category_items = MENU.active_ticket_category_items
+enabled_menu_options = MENU.enabled_menu_options
+configured_category_action = MENU.configured_category_action
 
-
-apply_bot_profile()
+TICKET_SERVICE = queue_ticket_service.TicketService(queue_ticket_service.TicketDependencies(
+    store=STORE, statuses=STATUSES, categories=CATEGORIES, menu_context=MENU_CONTEXT,
+    close_reason_labels_kz=USER_CLOSE_REASON_LABELS_KZ,
+    contact_language=CONTACTS.get_contact_language,
+    auto_reply_enabled=global_auto_reply_enabled,
+    main_menu=MENU.main_menu_text,
+    menu_label=MENU.user_menu_label,
+    status_label=user_status_label,
+))
+ticket_accepted_reply = TICKET_SERVICE.ticket_accepted_reply
+active_tickets_reply = TICKET_SERVICE.active_tickets_reply
+active_ticket_selected_reply = TICKET_SERVICE.active_ticket_selected_reply
+support_question_accepted_reply = TICKET_SERVICE.support_question_accepted_reply
+ticket_status_reply_text = TICKET_SERVICE.status_reply_text
+update_ticket_status = TICKET_SERVICE.update_status
 
 # Configure explicit work dependencies after application services are ready.
 queue_work_context.configure(queue_work_context.WorkDependencies(
@@ -1663,13 +1296,27 @@ queue_work_context.configure(queue_work_context.WorkDependencies(
     snapshot_cache_lock=SNAPSHOT_CACHE_LOCK,
     read_marked_at=READ_MARKED_AT,
     read_mark_lock=READ_MARK_LOCK,
-    category_items=lambda: active_ticket_category_items(),  # re-read after a profile change
+    category_items=active_ticket_category_items,
     connector_snapshot=connector_state_snapshot,
 ))
+
+
+INBOUND_SERVICE = InboundService(InboundDependencies(
+    store=STORE, menu=MENU, contacts=CONTACTS, tickets=TICKET_SERVICE,
+    media_dir=MEDIA_DIR, save_media=save_media_payload,
+    active_employee=active_employee, image_lookback_seconds=PRE_TICKET_IMAGE_LOOKBACK_SECONDS,
+    auto_reply_enabled=global_auto_reply_enabled,
+))
+
+
+ATTACHMENTS = AttachmentArchive(STORE, MEDIA_DIR, OUTBOUND_MEDIA_DIR, UPLOADS.root)
+OUTBOUND_SERVICE = OutboundService(STORE, ATTACHMENTS, queue_realtime, global_auto_reply_enabled)
 
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
 class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_handler.QueueHTTPHandlerMixin, BaseHTTPRequestHandler):
+    inbound_service = INBOUND_SERVICE
+    outbound_service = OUTBOUND_SERVICE
     server_version = "UnifiedQueue/1.00.1"
 
     def _generic_domain_path(self):

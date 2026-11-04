@@ -368,24 +368,18 @@
   }
 
   // Observe the same read-only state calls the existing UI already makes. The response returned to app.js is untouched.
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = async (...args) => {
-    const response = await originalFetch(...args);
-    try {
-      const raw = typeof args[0] === "string" ? args[0] : args[0]?.url || "";
-      const url = new URL(raw, location.origin);
-      if (url.pathname === "/api/chat-state" || url.pathname === "/api/group-state") {
-        response.clone().json().then((state) => {
-          if (state && typeof state === "object") {
-            renderContext(state);
-            const selected = String(state.selected_chat_id || "");
-            if (selected) { pageSettings.lastChatId = selected; save(); }
-          }
-        }).catch(()=>{});
+  window.QueueHTTP.subscribe({
+    match: ({url, response}) => response?.ok && url.origin === location.origin
+      && (url.pathname === "/api/chat-state" || url.pathname === "/api/group-state"),
+    response: async ({response}) => {
+      const state = await response.json();
+      if (state && typeof state === "object") {
+        renderContext(state);
+        const selected = String(state.selected_chat_id || "");
+        if (selected) { pageSettings.lastChatId = selected; save(); }
       }
-    } catch (_) {}
-    return response;
-  };
+    },
+  });
 
   // Upload progress presentation. The actual chunk upload/cancel remains in app.js.
   const fileInput = composer.querySelector("[data-media-input]");

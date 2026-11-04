@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import queue_dialog_flow
+
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -114,17 +116,7 @@ def whatsapp_display_name(value: object) -> str:
 
 
 def pending_context_category(context: dict[str, object] | None) -> str:
-    if not context or context.get("pending_category") not in app.CATEGORIES:
-        return ""
-    try:
-        updated = datetime.fromisoformat(str(context["updated_at"]).replace("Z", "+00:00"))
-        if updated.tzinfo is None:
-            updated = updated.replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError, KeyError):
-        return ""
-    if datetime.now(timezone.utc) - updated > timedelta(hours=24):
-        return ""
-    return str(context["pending_category"])
+    return queue_dialog_flow.pending_context_category(context, app.CATEGORIES)
 
 
 
