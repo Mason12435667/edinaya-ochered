@@ -174,7 +174,7 @@ def recover_once(app: Any, now_epoch: int | None = None) -> int:
                     active_id,
                     bool(active),
                 )
-                text = app.main_menu_text()
+                text = app.BOT_MENU.text()
 
         request_id = _request_id(chat_id, message_key)
         if _request_already_queued(app.STORE, request_id):

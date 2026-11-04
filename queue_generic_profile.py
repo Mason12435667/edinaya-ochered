@@ -13,6 +13,10 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+import queue_user_locale
+from queue_language import parse_menu_number
+from queue_user_locale import tr
+
 PROFILE_SETTING = "bot_profile_json"
 REQUIRED_FIELD_NAMES = ("problem", "reference", "email")
 MENU_NUMBERS = tuple(str(v) for v in range(1, 8)) + ("9",)
@@ -140,71 +144,53 @@ def _form_row(form: dict[str, str], suffix: str, key: str, previous: list[str]) 
     }
 
 
-def activate(namespace: dict[str, Any], root: Path, profile: dict[str, Any] | None = None) -> bool:
-    """Apply the bot profile to the app module's menu tables and menu functions."""
-    if os.getenv("QUEUE_PROFILE", "generic").strip().lower() != "generic":
-        return False
-    profile = profile or load_profile(namespace["STORE"], root)
-    rows = sorted(profile["categories"], key=lambda item: int(item["number"]))
-    by_number = {str(row["number"]): row for row in rows}
-    by_key = {str(row["key"]): row for row in rows}
-    generic_keys = set(by_key)
-    categories = namespace["CATEGORIES"]
-    for key in list(categories):
-        if key not in generic_keys:
-            categories[key] = "Не используется"
-    for row in rows:
-        categories[row["key"]] = str(row["label_ru"]).strip()[:80]
+class BotMenu:
+    """The WhatsApp menu built from one validated profile.
 
-    menu_rows = [
-        {"key": str(row["key"]), "label": str(row["label_ru"]),
-         "prompt": str(row.get("prompt_ru", "")).strip(), "enabled": True, "action": "ticket"}
-        for row in rows
-    ]
-    namespace["MENU_OPTIONS"][:] = menu_rows
-    namespace["DEFAULT_MENU_KEYS"][:] = [item["key"] for item in menu_rows]
-    for key in list(namespace["DEFAULT_MENU_LABELS"]):
-        namespace["DEFAULT_MENU_LABELS"][key] = "Не используется"
-    for item in menu_rows:
-        namespace["DEFAULT_MENU_LABELS"][item["key"]] = item["label"]
+    Read-only: a profile change builds a new BotMenu instead of editing this one.
+    Texts for users follow the language of the current conversation (queue_user_locale).
+    """
 
-    namespace["V3_MENU_CATEGORIES"].clear()
-    namespace["V3_MENU_CATEGORIES"].update({n: row["key"] for n, row in by_number.items()})
-    for k in list(namespace["V3_MENU_LABELS_RU"]):
-        namespace["V3_MENU_LABELS_RU"][k] = "Не настроено"
-        namespace["V3_MENU_LABELS_KZ"][k] = "Бапталмаған"
-    for n, row in by_number.items():
-        namespace["V3_MENU_LABELS_RU"][n] = str(row["label_ru"])
-        namespace["V3_MENU_LABELS_KZ"][n] = str(row["label_kz"])
-    namespace["V3_MENU_LABELS_RU"]["8"] = "Мои активные заявки"
-    namespace["V3_MENU_LABELS_KZ"]["8"] = "Менің белсенді өтінімдерім"
-    namespace["V3_REQUIRED_FIELDS"].clear()
-    namespace["V3_REQUIRED_FIELDS"].update({k: list(by_key[k].get("required_fields", ["problem"])) for k in generic_keys})
-    namespace["V3_CATEGORY_LABELS_KZ"].clear()
-    namespace["V3_CATEGORY_LABELS_KZ"].update({k: str(row["label_kz"]) for k, row in by_key.items()})
-    namespace["USER_MENU_LABELS_KZ"].update({k: str(row["label_kz"]) for k, row in by_key.items()})
+    def __init__(self, profile: dict[str, Any]):
+        self.profile = profile
+        self.rows = sorted(profile["categories"], key=lambda item: int(item["number"]))
+        self._by_number = {str(row["number"]): row for row in self.rows}
+        self._by_key = {str(row["key"]): row for row in self.rows}
 
-    def tr(ru: str, kz: str) -> str:
-        return namespace["queue_user_locale"].tr(ru, kz)
+    def has_category(self, category: str) -> bool:
+        return str(category) in self._by_key
 
-    def configured_menu_category(choice: str) -> str:
-        return str(by_number.get(str(namespace["parse_menu_number"](choice)), {}).get("key", ""))
+    def category_for_choice(self, choice: str) -> str:
+        """Category key for a menu number typed by the user, or ""."""
+        return str(self._by_number.get(str(parse_menu_number(choice)), {}).get("key", ""))
 
-    def user_menu_label(category: str, fallback: str = "") -> str:
-        row = by_key.get(str(category))
+    def label(self, category: str, fallback: str = "") -> str:
+        """Category name in the user's language."""
+        row = self._by_key.get(str(category))
         if row:
-            return str(row["label_kz"] if namespace["queue_user_locale"].is_kz() else row["label_ru"])
+            return str(row["label_kz"] if queue_user_locale.is_kz() else row["label_ru"])
         return fallback or str(category)
 
-    def menu_payload() -> list[dict[str, str]]:
-        result = [{"number": n, "label": user_menu_label(row["key"])} for n, row in by_number.items()]
+    def staff_label(self, category: str) -> str:
+        """Russian category name (the staff interface), or "" for an unknown category."""
+        return str(self._by_key.get(str(category), {}).get("label_ru", ""))
+
+    def category_items(self) -> list[tuple[str, str]]:
+        """(key, Russian name) of every category, in menu order."""
+        return [(str(row["key"]), str(row["label_ru"])) for row in self.rows]
+
+    def numbered_categories(self) -> list[tuple[str, str]]:
+        """(menu number, category key) in menu order."""
+        return [(number, str(row["key"])) for number, row in self._by_number.items()]
+
+    def payload(self) -> list[dict[str, str]]:
+        result = [{"number": n, "label": self.label(row["key"])} for n, row in self._by_number.items()]
         result.append({"number": "8", "label": tr("Мои активные заявки", "Менің белсенді өтінімдерім")})
         return result
 
-    def main_menu_text(error: bool = False) -> str:
-        kz = namespace["queue_user_locale"].is_kz()
-        greeting = str(profile["greeting_kz"] if kz else profile["greeting_ru"])
-        entries = "\n".join(f"{n}. {user_menu_label(row['key'])}" for n, row in by_number.items())
+    def text(self, error: bool = False) -> str:
+        greeting = str(self.profile["greeting_kz"] if queue_user_locale.is_kz() else self.profile["greeting_ru"])
+        entries = "\n".join(f"{n}. {self.label(row['key'])}" for n, row in self._by_number.items())
         active = tr("8. Мои активные заявки", "8. Менің белсенді өтінімдерім")
         prefix = tr("Выберите категорию обращения:", "Өтінім санатын таңдаңыз:")
         tail = tr("00 — сменить язык", "00 — тілді өзгерту")
@@ -212,26 +198,10 @@ def activate(namespace: dict[str, Any], root: Path, profile: dict[str, Any] | No
             prefix = tr("Выберите действительный номер категории:\n", "Санаттың дұрыс нөмірін таңдаңыз:\n") + prefix
         return f"{greeting}\n\n{prefix}\n{entries}\n{active}\n\n{tail}"
 
-    def configured_category_prompt(category: str) -> str:
-        row = by_key.get(str(category))
-        if not row:
-            return tr("Опишите ваш вопрос", "Сұрағыңызды жазыңыз")
-        return str(row.get("prompt_kz" if namespace["queue_user_locale"].is_kz() else "prompt_ru", "")) or tr("Опишите ваш вопрос", "Сұрағыңызды жазыңыз")
+    def prompt(self, category: str) -> str:
+        row = self._by_key.get(str(category))
+        configured = str(row.get("prompt_kz" if queue_user_locale.is_kz() else "prompt_ru", "")) if row else ""
+        return configured or tr("Опишите ваш вопрос", "Сұрағыңызды жазыңыз")
 
-    def configured_category_required_fields(category: str) -> list[str]:
-        return list(by_key.get(str(category), {}).get("required_fields", ["problem"]))
-
-    def active_ticket_category_items() -> list[tuple[str, str]]:
-        return [(str(row["key"]), str(row["label_ru"])) for row in rows]
-
-    namespace.update({
-        "configured_menu_category": configured_menu_category,
-        "user_menu_label": user_menu_label,
-        "menu_payload": menu_payload,
-        "main_menu_text": main_menu_text,
-        "start_menu_prompt": main_menu_text,
-        "configured_category_prompt": configured_category_prompt,
-        "configured_category_required_fields": configured_category_required_fields,
-        "active_ticket_category_items": active_ticket_category_items,
-    })
-    return True
+    def required_fields(self, category: str) -> list[str]:
+        return list(self._by_key.get(str(category), {}).get("required_fields", ["problem"]))

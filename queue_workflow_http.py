@@ -63,7 +63,7 @@ def _workflow_admin_page(handler, app, query):
     required = set(qw.required_close_categories(app.STORE))
     category_items = []
     try:
-        category_items = list(app.active_ticket_category_items())
+        category_items = list(app.BOT_MENU.category_items())
     except Exception:
         log_suppressed("queue_workflow_http._workflow_admin_page")
         category_items = [(k, v) for k, v in getattr(app, "CATEGORIES", {}).items()]

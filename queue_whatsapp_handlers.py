@@ -46,17 +46,7 @@ class WhatsAppHandlerMixin:
         self._inbound_result = (payload, status)
 
     def _ticket_category_is_selectable(self, category: str) -> bool:
-        category = str(category or "").strip()
-        if not category:
-            return False
-        options = app.enabled_menu_options()
-        for option in options:
-            if not bool(option.get("enabled", True)):
-                continue
-            if str(option.get("key", "")) != category:
-                continue
-            return app.configured_category_action(category) == app.MENU_ACTION_TICKET
-        return False
+        return app.BOT_MENU.has_category(str(category or "").strip())
 
     def _category_required_reply(self) -> dict[str, object]:
         return {
@@ -64,8 +54,8 @@ class WhatsAppHandlerMixin:
             "awaiting_category": True,
             "main_menu": True,
             "force_menu": True,
-            "reply": app.main_menu_text(error=True),
-            "menu_options": app.menu_payload(),
+            "reply": app.BOT_MENU.text(error=True),
+            "menu_options": app.BOT_MENU.payload(),
         }
 
     # EO_FLEXIBLE_CONTACT_PROFILE_V23_20261001
@@ -241,7 +231,7 @@ class WhatsAppHandlerMixin:
         match = re.match(r"^\s*([1-9])\s+(.+)$", raw, re.IGNORECASE | re.DOTALL)
         if match:
             number, remainder = match.group(1), normalize_message(match.group(2))
-            category = app.configured_menu_category(number)
+            category = app.BOT_MENU.category_for_choice(number)
             if category and self._category_text_matches(category, remainder):
                 return number, remainder
 
@@ -257,11 +247,8 @@ class WhatsAppHandlerMixin:
     @staticmethod
     def _strip_category_label(category: str, text: str) -> str:
         raw = normalize_message(text)
-        labels = [str(item.get("label", "")).strip() for item in app.enabled_menu_options()
-                  if str(item.get("key", "")) == str(category)]
-        for label in labels:
-            if not label:
-                continue
+        label = app.BOT_MENU.staff_label(category).strip()
+        if label:
             if raw.casefold() == label.casefold():
                 return ""
             if raw.casefold().startswith(label.casefold()):
@@ -362,7 +349,7 @@ class WhatsAppHandlerMixin:
         # regardless of the previous dialog/category context.
         # Long numbers (e.g. 39855502/010926/9017998) are NOT affected.
         global_menu_digit = parse_menu_number(text)
-        global_menu_category = app.configured_menu_category(global_menu_digit) if global_menu_digit else ""
+        global_menu_category = app.BOT_MENU.category_for_choice(global_menu_digit) if global_menu_digit else ""
         global_menu_command = bool(
             command == "0"
             or (global_menu_digit and global_menu_category)
@@ -562,7 +549,7 @@ class WhatsAppHandlerMixin:
             # menu digit immediately returns control to the bot. A pause set by
             # a real employee remains authoritative and is NOT bypassed.
             menu_digit_now = parse_menu_number(msg.text)
-            menu_category_now = app.configured_menu_category(menu_digit_now) if menu_digit_now else ""
+            menu_category_now = app.BOT_MENU.category_for_choice(menu_digit_now) if menu_digit_now else ""
             menu_command_now = bool(
                 normalize_message(msg.text).strip() == "0"
                 or (menu_digit_now and menu_category_now)
@@ -657,8 +644,8 @@ class WhatsAppHandlerMixin:
                 "awaiting_category": True,
                 "main_menu": True,
                 "force_menu": True,
-                "reply": app.main_menu_text(),
-                "menu_options": app.menu_payload(),
+                "reply": app.BOT_MENU.text(),
+                "menu_options": app.BOT_MENU.payload(),
             })
             return True
         return False
@@ -695,8 +682,8 @@ class WhatsAppHandlerMixin:
                 "position": msg.contact_profile.get("position", ""),
                 "main_menu": True,
                 "force_menu": True,
-                "reply": app.main_menu_text(),
-                "menu_options": app.menu_payload(),
+                "reply": app.BOT_MENU.text(),
+                "menu_options": app.BOT_MENU.payload(),
             })
             return True
         return False
@@ -718,7 +705,7 @@ class WhatsAppHandlerMixin:
         # - "2. Доступ ..." in one message is NOT accepted as selection+details.
         explicit_menu_choice = menu_choice if re.fullmatch(r"[1-9]", menu_choice) else ""
         typed_category_choice = msg.typed_choice if msg.context_mode == app.MENU_CONTEXT else ""
-        msg.chosen_category = app.configured_menu_category(explicit_menu_choice or typed_category_choice)
+        msg.chosen_category = app.BOT_MENU.category_for_choice(explicit_menu_choice or typed_category_choice)
         inline_category_details = ""
         selected_from_menu = bool(
             msg.chosen_category and (explicit_menu_choice or typed_category_choice)
@@ -759,8 +746,8 @@ class WhatsAppHandlerMixin:
                     "awaiting_category": True,
                     "main_menu": True,
                     "force_menu": True,
-                    "reply": app.main_menu_text(),
-                    "menu_options": app.menu_payload(),
+                    "reply": app.BOT_MENU.text(),
+                    "menu_options": app.BOT_MENU.payload(),
                 }
             )
             return True
@@ -778,8 +765,8 @@ class WhatsAppHandlerMixin:
                 "awaiting_category": True,
                 "main_menu": True,
                 "force_menu": True,
-                "reply": app.main_menu_text(),
-                "menu_options": app.menu_payload(),
+                "reply": app.BOT_MENU.text(),
+                "menu_options": app.BOT_MENU.payload(),
             })
             return True
 
@@ -942,7 +929,7 @@ class WhatsAppHandlerMixin:
                     "created": False,
                     "awaiting_details": True,
                     "category": "support",
-                    "reply": app.configured_category_prompt("support"),
+                    "reply": app.BOT_MENU.prompt("support"),
                 }
             )
             return True
@@ -971,7 +958,7 @@ class WhatsAppHandlerMixin:
                         "created": False,
                         "awaiting_details": True,
                         "category": "support",
-                        "reply": app.configured_category_prompt("support"),
+                        "reply": app.BOT_MENU.prompt("support"),
                     }
                 )
                 return True
@@ -993,7 +980,7 @@ class WhatsAppHandlerMixin:
                     "category": msg.chosen_category,
                     "draft_collecting": True,
                     "reply": (
-                        app.configured_category_prompt(msg.chosen_category)
+                        app.BOT_MENU.prompt(msg.chosen_category)
                         + "\n\n"
                         + tr(
                             "Можно отправить данные несколькими сообщениями. "
@@ -1108,7 +1095,7 @@ class WhatsAppHandlerMixin:
                 app.STORE, msg.contact_key, msg.forced_category, collect_text,
                 attachment_name=normalize_message(str(msg.payload.get("attachment_name", "")))[:240],
                 message_key=msg.external_id, chat_id=msg.chat_id, active_ticket_id=0,
-                required_fields_override=app.configured_category_required_fields(msg.forced_category),
+                required_fields_override=app.BOT_MENU.required_fields(msg.forced_category),
             )
 
             if msg.forced_category:
@@ -1214,7 +1201,7 @@ class WhatsAppHandlerMixin:
                     "created": False,
                     "menu_gate": True,
                     "force_menu": True,
-                    "reply": app.start_menu_prompt(),
+                    "reply": app.BOT_MENU.text(),
                 }
             )
             return True

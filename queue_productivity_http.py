@@ -75,7 +75,7 @@ def get(handler, app):
         handler.json_response({"contact":qp.get_contact_meta(app.STORE,chat_id),"mute":qp.mute_state(app.STORE,chat_id)})
     elif path=="/api/productivity-categories":
         try:
-            categories=[[str(key),str(label)] for key,label in app.active_ticket_category_items()]
+            categories=[[str(key),str(label)] for key,label in app.BOT_MENU.category_items()]
         except Exception:
             log_suppressed("queue_productivity_http.get")
             categories=[["general","Другая проблема"],["support","Поддержка"]]

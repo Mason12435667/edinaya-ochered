@@ -132,6 +132,15 @@ class BackupsPageTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
 
 
+class ContactsPageTests(unittest.TestCase):
+    def test_page_with_a_saved_contact_renders(self):
+        cookie = admin_cookie()
+        post_form("/admin/contacts", {"action": "save", "name": "Контакт для теста", "phone": "+7 701 555 00 11"}, cookie)
+        response = get("/admin/contacts", cookie)
+        self.assertEqual(response.status, 200)
+        self.assertIn("Контакт для теста", response.text)
+
+
 class StaticFilesTests(unittest.TestCase):
     def test_every_layout_asset_is_served(self):
         page = get("/", admin_cookie()).text

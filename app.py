@@ -43,7 +43,6 @@ import queue_work_context
 import queue_ticket_views
 import queue_admin_pages
 from queue_user_locale import tr
-from queue_language import parse_menu_number  # used by queue_generic_profile.activate()
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,7 +56,6 @@ from ticketing import (
     PRIORITIES,
     STATUSES,
     TicketStore,
-    category_prompt,
     normalize_message,
 )
 from queue_core import log_suppressed
@@ -210,20 +208,14 @@ ADMIN_SESSION_MAX_AGE = 12 * 60 * 60
 AUTH_SESSION_COOKIE = "queue_session"
 AUTH_SESSION_MAX_AGE = queue_auth.SESSION_HOURS * 60 * 60
 MAX_EMPLOYEES = 50
-MAX_MENU_OPTIONS = 30
-MENU_ACTION_TICKET = "ticket"
-MENU_ACTIONS = {MENU_ACTION_TICKET}
 SUPPORT_MODE_CONTEXT = "__support_mode__"
 ERROR_REPORT_CONTEXT = "__error_report__"
 ACTIVE_TICKETS_CONTEXT = "__active_tickets__"
 ACTIVE_TICKET_FOLLOWUP_CONTEXT = "__active_ticket_followup__"
 REACTION_EMOJIS = {"👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉", "✅", "👏", "🤔", "👀", "😡", "💯", "👌", "😁", "😍", "🥳"}
-DEFAULT_MENU_KEYS = ['general']
-DEFAULT_MENU_LABELS = {'general': 'Общее обращение'}
 
 # 1.00.6.11: ordinary WhatsApp users receive Kazakh texts. The employee/admin
 # interface, stored ticket data, internal statuses and menu editor remain Russian.
-USER_MENU_LABELS_KZ = {'general': 'Жалпы өтініш'}
 USER_STATUS_LABELS_KZ = {
     "new": "Жаңа",
     "in_progress": "Жұмыста",
@@ -238,7 +230,6 @@ USER_CLOSE_REASON_LABELS_KZ = {
     "Передано": "Берілді",
     "Другое": "Басқа",
 }
-USER_CATEGORY_PROMPTS_KZ = {'general': 'Мәселені немесе сұрақты сипаттаңыз. Қажет болса, скриншот немесе файл тіркеңіз.\n0 — негізгі мәзірге оралу'}
 
 
 def user_status_label(status: str, fallback: str = "") -> str:
@@ -305,69 +296,6 @@ def load_category_archive() -> dict[str, str]:
 CATEGORY_ARCHIVE = load_category_archive()
 
 
-def load_menu_options() -> list[dict[str, object]]:
-    raw = STORE.get_setting("request_menu_json", "")
-    if raw:
-        try:
-            values = json.loads(raw)
-            if isinstance(values, list):
-                cleaned: list[dict[str, object]] = []
-                seen: set[str] = set()
-                for item in values[:MAX_MENU_OPTIONS]:
-                    if not isinstance(item, dict):
-                        continue
-                    key = re.sub(r"[^a-z0-9_]", "", str(item.get("key", "")))[:40]
-                    label = normalize_message(str(item.get("label", "")))[:80]
-                    prompt = normalize_message(str(item.get("prompt", "")))[:1200]
-                    action = str(item.get("action", MENU_ACTION_TICKET))
-                    if action not in MENU_ACTIONS:
-                        action = MENU_ACTION_TICKET
-                    if not key or key in seen or not label:
-                        continue
-                    seen.add(key)
-                    cleaned.append(
-                        {
-                            "key": key,
-                            "label": label,
-                            "prompt": prompt,
-                            "enabled": bool(item.get("enabled", True)),
-                            "action": action,
-                        }
-                    )
-                if cleaned and any(bool(item["enabled"]) for item in cleaned):
-                    return cleaned
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-    return [
-        {
-            "key": key,
-            "label": DEFAULT_MENU_LABELS[key],
-            "prompt": category_prompt(key),
-            "enabled": True,
-            "action": MENU_ACTION_TICKET,
-        }
-        for key in DEFAULT_MENU_KEYS
-    ]
-
-
-MENU_OPTIONS = load_menu_options()
-
-
-def apply_menu_labels() -> None:
-    # Removed custom categories stay in CATEGORIES only for historical tickets.
-    for key, label in CATEGORY_ARCHIVE.items():
-        CATEGORIES[str(key)] = str(label)
-    for option in MENU_OPTIONS:
-        CATEGORIES[str(option["key"])] = str(option["label"])
-
-
-apply_menu_labels()
-
-
-def enabled_menu_options() -> list[dict[str, object]]:
-    return [item for item in MENU_OPTIONS if bool(item.get("enabled"))]
-
-
 def error_report_prompt() -> str:
     return tr(
         "Вы выбрали категорию «Репорт об ошибке».\n\n"
@@ -391,29 +319,12 @@ def is_active_tickets_command(text: str) -> bool:
 
 
 
-
-def configured_category_action(category: str) -> str:
-    option = next((item for item in MENU_OPTIONS if item["key"] == category), None)
-    action = str(option.get("action", MENU_ACTION_TICKET)) if option else MENU_ACTION_TICKET
-    return action if action in MENU_ACTIONS else MENU_ACTION_TICKET
-
-
 # ---------------------------------------------------------------------------
 # 1.00.6.98: approved ordinary-user WhatsApp flow ("Текст системы_v3").
-# Staff/admin UI and internal ticket statuses remain Russian. Public menu
-# numbering is fixed to 1-8 so an old request_menu_json cannot change it.
+# Staff/admin UI and internal ticket statuses remain Russian. The menu itself
+# (numbers, categories, prompts) is BOT_MENU, built from the stored profile.
 # ---------------------------------------------------------------------------
 
-# Keep staff-facing category names aligned with the new public flow while preserving
-# the existing internal keys and historical ticket records.
-CATEGORIES["database"] = 'Доступ к системе'
-CATEGORIES["mobile"] = 'Мобильное приложение'
-CATEGORIES["general"] = "Другая проблема / Вопрос / Ошибка"
-
-V3_MENU_CATEGORIES = {'1': 'general'}
-V3_MENU_LABELS_RU = {'1': 'Общее обращение', '2': 'Не настроено', '3': 'Не настроено', '4': 'Не настроено', '5': 'Не настроено', '6': 'Не настроено', '7': 'Не настроено', '8': 'Мои активные заявки', '9': 'Не настроено'}
-V3_MENU_LABELS_KZ = {'1': 'Жалпы өтініш', '2': 'Бапталмаған', '3': 'Бапталмаған', '4': 'Бапталмаған', '5': 'Бапталмаған', '6': 'Бапталмаған', '7': 'Бапталмаған', '8': 'Менің белсенді өтінімдерім', '9': 'Бапталмаған'}
-V3_REQUIRED_FIELDS = {'general': ['problem']}
 V3_FIELD_LABELS_RU = {
     "reference": "номер / идентификатор",
     "problem": "описание проблемы",
@@ -424,7 +335,6 @@ V3_FIELD_LABELS_KZ = {
     "problem": "мәселенің сипаттамасы",
     "email": "пайдаланушының email/логині",
 }
-V3_CATEGORY_LABELS_KZ = {'general': 'Жалпы өтініш'}
 
 
 def language_selection_text_v3() -> str:
@@ -1272,8 +1182,8 @@ TICKET_SERVICE = queue_ticket_service.TicketService(queue_ticket_service.TicketD
     close_reason_labels_kz=USER_CLOSE_REASON_LABELS_KZ,
     contact_language=lambda chat, phone: get_contact_language(chat, phone),
     auto_reply_enabled=lambda: global_auto_reply_enabled(),
-    main_menu=lambda: main_menu_text(),
-    menu_label=lambda category, fallback: user_menu_label(category, fallback),
+    main_menu=lambda: BOT_MENU.text(),
+    menu_label=lambda category, fallback: BOT_MENU.label(category, fallback),
     status_label=lambda status, fallback: user_status_label(status, fallback),
 ))
 ticket_accepted_reply = TICKET_SERVICE.ticket_accepted_reply
@@ -1602,18 +1512,23 @@ if os.getenv("QUEUE_PROFILE", "generic").strip().lower() != "generic":
 import queue_generic_profile
 
 
-def apply_bot_profile(profile: dict[str, object] | None = None) -> None:
-    """Load the stored bot profile (or the given one) into the menu tables.
+BOT_MENU: queue_generic_profile.BotMenu
 
-    Defines the menu functions main_menu_text, start_menu_prompt, menu_payload,
-    user_menu_label, configured_menu_category, configured_category_prompt,
-    configured_category_required_fields and active_ticket_category_items.
-    Removed categories keep their archived label so old tickets stay readable.
+
+def apply_bot_profile(profile: dict[str, object] | None = None) -> None:
+    """Build BOT_MENU from the stored bot profile (or the given one).
+
+    CATEGORIES (staff names of ticket categories) follows the profile; built-in
+    categories missing from it read "Не используется", removed custom ones keep
+    their archived label so old tickets stay readable.
     """
-    queue_generic_profile.activate(globals(), ROOT, profile)
-    for key, label in CATEGORY_ARCHIVE.items():
-        if key not in V3_REQUIRED_FIELDS:
-            CATEGORIES[key] = label
+    global BOT_MENU
+    menu = queue_generic_profile.BotMenu(profile or queue_generic_profile.load_profile(STORE, ROOT))
+    for key in list(CATEGORIES):
+        CATEGORIES[key] = "Не используется"
+    CATEGORIES.update(CATEGORY_ARCHIVE)
+    CATEGORIES.update((key, label.strip()[:80]) for key, label in menu.category_items())
+    BOT_MENU = menu
 
 
 apply_bot_profile()
@@ -1639,7 +1554,7 @@ queue_work_context.configure(queue_work_context.WorkDependencies(
     snapshot_cache_lock=SNAPSHOT_CACHE_LOCK,
     read_marked_at=READ_MARKED_AT,
     read_mark_lock=READ_MARK_LOCK,
-    category_items=lambda: active_ticket_category_items(),  # re-read after a profile change
+    category_items=lambda: BOT_MENU.category_items(),  # re-read after a profile change
     connector_snapshot=connector_state_snapshot,
 ))
 

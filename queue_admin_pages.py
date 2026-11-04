@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -34,7 +33,7 @@ def render_admin_home() -> str:
         <a class="panel admin-card" href="/admin/employees"><span>Сотрудники</span><strong>{len(app.EMPLOYEES)}</strong><small>Имена и количество сотрудников</small></a>
         <a class="panel admin-card" href="/admin/manual"><span>Ручная заявка</span><strong>+</strong><small>Создать запрос от имени сотрудника</small></a>
         <a class="panel admin-card" href="/admin/menu"><span>Тексты WhatsApp</span><strong>RU/KZ</strong><small>Актуальный пользовательский сценарий и системные ответы</small></a>
-        <a class="panel admin-card" href="/admin/categories"><span>Категории</span><strong>{len(app.active_ticket_category_items())}</strong><small>Добавить, убрать или переименовать виды заявок</small></a>
+        <a class="panel admin-card" href="/admin/categories"><span>Категории</span><strong>{len(app.BOT_MENU.category_items())}</strong><small>Добавить, убрать или переименовать виды заявок</small></a>
         <a class="panel admin-card" href="/admin/errors"><span>Ошибки</span><strong>{open_errors}</strong><small>Отдельные репорты пользователей, не являющиеся заявками</small></a>
         <a class="panel admin-card" href="/admin/contacts"><span>Контакты WhatsApp</span><strong>{contacts}</strong><small>Добавление пользователя по номеру</small></a>
         <a class="panel admin-card" href="/groups"><span>Группы WhatsApp</span><strong>{groups}</strong><small>Общая переписка и отправка сообщений</small></a>
@@ -403,10 +402,9 @@ def _admin_live_flow_snapshot(language: str) -> dict[str, object]:
     previous_language = queue_user_locale.current_language()
     queue_user_locale.set_language(language)
     try:
-        labels = app.V3_MENU_LABELS_KZ if queue_user_locale.is_kz() else app.V3_MENU_LABELS_RU
-        categories: list[tuple[str, str]] = []
-        for number, category in sorted(app.V3_MENU_CATEGORIES.items(), key=lambda item: int(item[0])):
-            categories.append((f"{number}. {labels.get(str(number), category)}", app.configured_category_prompt(category)))
+        menu = app.BOT_MENU
+        categories = [(f"{number}. {menu.label(category)}", menu.prompt(category))
+                      for number, category in menu.numbered_categories()]
         sample_ticket = {
             "id": 12345,
             "category": "general",
@@ -417,7 +415,7 @@ def _admin_live_flow_snapshot(language: str) -> dict[str, object]:
         close_reason = next(iter(queue_workflow.ALLOWED_CLOSE_REASONS.keys()), "")
         return {
             "profile": app.profile_prompt_text(),
-            "menu": app.main_menu_text(),
+            "menu": app.BOT_MENU.text(),
             "categories": categories,
             "active": app.active_tickets_reply([sample_ticket]),
             "active_empty": app.active_tickets_reply([]),
@@ -544,7 +542,7 @@ def render_admin_categories(query: dict[str, list[str]]) -> str:
 
 
 def avatar_html(chat_id: str, name: str) -> str:
-    url = queue_avatars.url(sys.modules[__name__],chat_id)
+    url = queue_avatars.url(app, chat_id)
     letters = ''.join(word[0] for word in name.split()[:2]) or '?'
     pic = f'<img src="{e(url)}" alt="" loading="lazy" onerror="this.remove()">' if url else ''
     return f'<span class="chat-avatar table-avatar">{e(letters)}{pic}</span>'
