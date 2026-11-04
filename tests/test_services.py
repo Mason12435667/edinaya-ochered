@@ -110,6 +110,10 @@ class ServiceTests(unittest.TestCase):
             response = self.send(service, "0", external_id="shared-provider-id")
             self.assertNotIn("duplicate", response)
             self.assertIn(name, response["reply"])
+            self.send(service, "1")
+            self.send(service, "Не открывается почта")
+            created = self.send(service, "Готово")
+            self.assertEqual(service.store.get_ticket(created["ticket_id"])["title"], name)
         self.assertTrue(self.send(first, "0", external_id="shared-provider-id")["duplicate"])
 
     def test_direct_dialog_creates_ticket_and_keeps_locale(self):
@@ -255,3 +259,63 @@ class ServiceTests(unittest.TestCase):
         response = service.outbound.claim({})
         self.assertIsNone(response.payload["message"])
         self.assertIn("error", response.payload)
+
+    def test_stale_category_context_cannot_start_a_draft(self):
+        import queue_dialog_flow
+        service = self.services()
+        self.register(service)
+        service.store.set_conversation_context("77010000001@c.us", "general")
+        queue_dialog_flow.save(service.store, "77010000001@c.us", {})
+        result = self.send(service, "Не печатает принтер")
+        self.assertTrue(result.get("strict_category_required"))
+        self.assertEqual(service.store.get_conversation_draft("77010000001@c.us"), {})
+
+    def test_category_switch_discards_previous_draft_and_fragments(self):
+        service = self.services()
+        profile = service.config.profile
+        profile["categories"].append({"number": 2, "key": "custom_email",
+            "label_ru": "Почта", "label_kz": "Пошта", "prompt_ru": "Опишите проблему"})
+        service.config.replace(profile, service.config.archive)
+        self.register(service)
+        self.send(service, "1")
+        self.send(service, "Не печатает принтер")
+        self.send(service, "2")
+        self.assertEqual(service.store.get_conversation_draft("77010000001@c.us"), {})
+        self.assertEqual(queue_contextual_tickets.request_fragments(service.store, "77010000001@c.us"), [])
+        self.send(service, "Не открывается почта")
+        created = self.send(service, "Готово")
+        ticket = service.store.get_ticket(created["ticket_id"])
+        self.assertEqual(ticket["category"], "custom_email")
+        self.assertNotIn("принтер", ticket["original_text"])
+        self.assertIn("Не открывается почта", ticket["original_text"])
+
+    def test_selected_ticket_consumes_followup_and_closed_ticket_returns_to_list(self):
+        from queue_bot_texts import ACTIVE_TICKET_FOLLOWUP_CONTEXT
+        service = self.services()
+        self.register(service)
+        ticket_id = service.store.create_ticket({"chat_id": "77010000001@c.us"})
+        service.store.set_conversation_context("77010000001@c.us", ACTIVE_TICKET_FOLLOWUP_CONTEXT, ticket_id)
+        response = self.send(service, "Спасибо")
+        self.assertTrue(response.get("linked"))
+        self.assertEqual(response["ticket_id"], ticket_id)
+        self.assertIn("Спасибо", service.store.get_ticket(ticket_id)["original_text"])
+        closed = service.store.create_ticket({"chat_id": "77010000001@c.us", "status": "done"})
+        service.store.set_conversation_context("77010000001@c.us", ACTIVE_TICKET_FOLLOWUP_CONTEXT, closed)
+        self.assertTrue(self.send(service, "Дополнение").get("active_tickets"))
+        self.assertNotIn("Дополнение", service.store.get_ticket(closed)["original_text"])
+
+    def test_context_storage_failure_allows_redelivery_without_losing_details(self):
+        from queue_context_repository import ContextRepository
+        service = self.services()
+        self.register(service)
+        self.send(service, "1")
+        payload = {"chat_id": "77010000001@c.us", "external_id": "retry-details",
+                   "text": "Не печатает принтер"}
+        with patch.object(ContextRepository, "record_analysis", side_effect=RuntimeError("disk failure")):
+            self.assertEqual(service.inbound.handle(payload).status, 503)
+        self.assertEqual(service.store.get_conversation_draft("77010000001@c.us"), {})
+        result = service.inbound.handle(payload)
+        self.assertTrue(result.payload.get("draft_ready"))
+        self.assertTrue(service.inbound.handle(payload).payload.get("duplicate"))
+        created = self.send(service, "Готово")
+        self.assertIn("Не печатает принтер", service.store.get_ticket(created["ticket_id"])["original_text"])
