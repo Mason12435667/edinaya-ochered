@@ -2,6 +2,10 @@
 import hashlib
 import html
 from urllib.parse import urlparse
+import queue_productivity
+import queue_realtime
+from queue_core import e, valid_chat_id
+from queue_ticket_views import layout
 
 
 def initialize(store):
@@ -42,40 +46,40 @@ def handoff_history(store,ticket_id):
     return ''.join('<p><strong>'+html.escape(r['actor'])+'</strong>: '+html.escape(r['note'])+'<br><small>'+html.escape('Принял: '+r['accepted_by'] if r['accepted_by'] else 'Ожидает принятия')+'</small></p>' for r in rows)
 
 
-def get(handler,app):
+def get(handler,deps):
     if urlparse(handler.path).path!='/shift-handoff':return False
-    with app.STORE.connection() as db:
+    with deps.STORE.connection() as db:
         tickets=[dict(r) for r in db.execute("SELECT * FROM tickets WHERE status NOT IN ('done','invalid') ORDER BY shift_handoff DESC,updated_at LIMIT 200")]
     cards=[]
     for t in tickets:
         action='accept' if t['shift_handoff'] else 'transfer'
         label='Принять' if t['shift_handoff'] else 'Передать смене'
         note='' if t['shift_handoff'] else '<label>Что сделано и что осталось<textarea name="handoff_note" maxlength="2000" required></textarea></label>'
-        cards.append(f'''<section class="panel"><h2><a href="/ticket?id={t['id']}">#{t['id']} · {app.e(t['title'])}</a></h2>
-        <p>Исполнитель: {app.e(t['assigned_to'] or 'Не назначен')}</p>{handoff_history(app.STORE,t['id'])}
+        cards.append(f'''<section class="panel"><h2><a href="/ticket?id={t['id']}">#{t['id']} · {e(t['title'])}</a></h2>
+        <p>Исполнитель: {e(t['assigned_to'] or 'Не назначен')}</p>{handoff_history(deps.STORE,t['id'])}
         <form method="post" action="/handoff"><input type="hidden" name="ticket_id" value="{t['id']}">
-        <input type="hidden" name="revision" value="{t['revision']}"><input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}">
+        <input type="hidden" name="revision" value="{t['revision']}"><input type="hidden" name="csrf_token" value="{e(deps.csrf_token())}">
         <input type="hidden" name="next" value="/shift-handoff">{note}<button class="button" name="action" value="{action}">{label}</button></form></section>''')
-    handler.html_response(app.layout('Передача смены','<h1>Передача смены</h1><p>До 200 незавершённых заявок. Принятие записывается от имени вашего аккаунта.</p>'+(''.join(cards) or '<p>Незавершённых заявок нет</p>'),show_admin=handler.is_admin()))
+    handler.html_response(layout('Передача смены','<h1>Передача смены</h1><p>До 200 незавершённых заявок. Принятие записывается от имени вашего аккаунта.</p>'+(''.join(cards) or '<p>Незавершённых заявок нет</p>'),show_admin=handler.is_admin()))
     return True
 
 
 class Conflict(ValueError):pass
 
 
-def inbound_recovery_reply(handler,app):
+def inbound_recovery_reply(handler,deps):
     """POST /api/inbound-recovery-reply (connector): queue the bot reply to a message
     that was delivered from the connector's spool after an outage. Idempotent per message."""
     payload=handler.read_authorized_json(150000)
     if payload is None:return
-    chat=app.valid_chat_id(str(payload.get('chat_id','')))
+    chat=valid_chat_id(str(payload.get('chat_id','')))
     external=str(payload.get('external_id',''))
     if not chat or not external:handler.json_response({'error':'invalid_identity'},400);return
-    if not app.global_auto_reply_enabled() or app.STORE.manual_chat_mode(chat) or app.STORE.manual_whatsapp_contact(chat,'') or app.queue_productivity.auto_reply_blocked(app.STORE,chat):
+    if not deps.global_auto_reply_enabled() or deps.STORE.manual_chat_mode(chat) or deps.STORE.manual_whatsapp_contact(chat,'') or queue_productivity.auto_reply_blocked(deps.STORE,chat):
         handler.json_response({'suppressed':True});return
     request_id='inbound-recovery:'+hashlib.sha256(external.encode()).hexdigest()
-    message=app.STORE.queue_direct_message(chat,str(payload.get('reply',''))[:32000],'Система',request_id=request_id)
-    if message:app.queue_realtime.notify_outbound()
+    message=deps.STORE.queue_direct_message(chat,str(payload.get('reply',''))[:32000],'Система',request_id=request_id)
+    if message:queue_realtime.notify_outbound()
     handler.json_response({'queued':bool(message),'message_id':message},200 if message else 400)
 
 

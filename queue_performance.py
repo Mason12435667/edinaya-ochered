@@ -101,7 +101,7 @@ def sql_health(database_path: Path) -> dict[str, Any]:
     return out
 
 
-def snapshot(app) -> dict[str, Any]:
+def snapshot(deps) -> dict[str, Any]:
     with _LOCK:
         connector = dict(_CONNECTOR)
         sql = dict(_SQL)
@@ -134,11 +134,11 @@ def friendly_error(raw: object) -> str:
     return text or "Неизвестная ошибка. Технические детали сохранены в журнале"
 
 
-def worker_loop(app) -> None:
-    log_path = Path(app.DATA_DIR) / "performance.log"
+def worker_loop(deps) -> None:
+    log_path = Path(deps.DATA_DIR) / "performance.log"
     while True:
         try:
-            result = sql_health(app.DATABASE_PATH)
+            result = sql_health(deps.DATABASE_PATH)
             if (not result.get("ok")) or result.get("slow"):
                 line = f"{utc_now()} sql={result.get('optimize')} slow={result.get('slow')} total_ms={result.get('total_ms')}\n"
                 try:

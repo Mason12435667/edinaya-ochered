@@ -14,7 +14,6 @@ import secrets
 import threading
 import time
 import webbrowser
-import sys
 import queue_message_identity
 import queue_features
 import queue_productivity
@@ -42,6 +41,7 @@ import queue_ticket_service
 import queue_work_context
 import queue_ticket_views
 import queue_admin_pages
+import queue_app_deps
 from queue_user_locale import tr
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
@@ -63,16 +63,9 @@ from queue_core import log_suppressed
 # Public release from CHANGELOG.md; reported by /api/integration/ping.
 APP_VERSION = "v143"
 
-# Modules split out of app.py read shared services and settings as app.NAME.
-for _module in (queue_chat_state, queue_ticket_views, queue_admin_pages, queue_chat_views,
-                queue_whatsapp_handlers, queue_http_handler):
-    _module.bind(sys.modules[__name__])
-
-
 ROOT =Path(__file__).resolve().parent
 
-# 1.00.6.27: first modularization phase. Keep the historic names in app.py as
-# aliases so existing feature modules can continue receiving app as their context.
+# Short names for queue_core helpers used throughout this file.
 LOCAL_TIMEZONE = queue_core.LOCAL_TIMEZONE
 resolve_data_dir = queue_core.resolve_data_dir
 prepare_database_path = queue_core.prepare_database_path
@@ -886,7 +879,7 @@ def reconcile_uncertain_system_outgoing_media(
         }
     else:
         try:
-            preserved = queue_uploads.preserve_sent_attachment(sys.modules[__name__], row_id)
+            preserved = queue_uploads.preserve_sent_attachment(DEPS, row_id)
         except Exception:
             log_suppressed("app.reconcile_uncertain_system_outgoing_media")
             preserved = {}
@@ -1003,7 +996,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                 str(item.get("quoted_message_key", "")),
                 str(item.get("message_type", item.get("type", ""))),
             ):
-                media = queue_uploads.preserve_sent_attachment(sys.modules[__name__], sent_row["id"])
+                media = queue_uploads.preserve_sent_attachment(DEPS, sent_row["id"])
             if not media:
                 media = reconcile_uncertain_system_outgoing_media(
                     chat_id,
@@ -1018,7 +1011,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                 # [Фото] rows by matching the still-present clipboard upload to
                 # this exact chat and WhatsApp timestamp.
                 media = queue_uploads.recover_clipboard_attachment(
-                    sys.modules[__name__],
+                    DEPS,
                     chat_id,
                     str(item.get("id", "")),
                     int(item.get("timestamp", item.get("message_timestamp", 0)) or 0),
@@ -1057,7 +1050,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
             for avatar_id in avatar_candidates:
                 if not avatar_id:
                     continue
-                avatar_url = queue_avatars.url(sys.modules[__name__], avatar_id)
+                avatar_url = queue_avatars.url(DEPS, avatar_id)
                 if avatar_url:
                     item["sender_avatar_url"] = avatar_url
                     break
@@ -1558,6 +1551,100 @@ queue_work_context.configure(queue_work_context.WorkDependencies(
     connector_snapshot=connector_state_snapshot,
 ))
 
+# Everything the feature modules use from this file (see queue_app_deps).
+DEPS = queue_app_deps.AppDependencies(
+    ACTIVE_TICKETS_CONTEXT=ACTIVE_TICKETS_CONTEXT,
+    ACTIVE_TICKET_FOLLOWUP_CONTEXT=ACTIVE_TICKET_FOLLOWUP_CONTEXT,
+    ADMIN_SESSION_COOKIE=ADMIN_SESSION_COOKIE,
+    ADMIN_SESSION_MAX_AGE=ADMIN_SESSION_MAX_AGE,
+    ADMIN_SESSION_TOKEN=ADMIN_SESSION_TOKEN,
+    ADMIN_USER=ADMIN_USER,
+    APP_VERSION=APP_VERSION,
+    AUTH_SESSION_COOKIE=AUTH_SESSION_COOKIE,
+    AUTH_SESSION_MAX_AGE=AUTH_SESSION_MAX_AGE,
+    DATABASE_PATH=DATABASE_PATH,
+    DATA_DIR=DATA_DIR,
+    ERROR_REPORT_CONTEXT=ERROR_REPORT_CONTEXT,
+    LOCAL_MODE=LOCAL_MODE,
+    LOCAL_TIMEZONE=LOCAL_TIMEZONE,
+    MAX_EMPLOYEES=MAX_EMPLOYEES,
+    MAX_MEDIA_BYTES=MAX_MEDIA_BYTES,
+    MEDIA_DIR=MEDIA_DIR,
+    MONITOR_LOG_PATH=MONITOR_LOG_PATH,
+    OUTBOUND_MEDIA_DIR=OUTBOUND_MEDIA_DIR,
+    PAGE_SIZE=PAGE_SIZE,
+    PRE_TICKET_IMAGE_LOOKBACK_SECONDS=PRE_TICKET_IMAGE_LOOKBACK_SECONDS,
+    ROOT=ROOT,
+    SUPPORT_MODE_CONTEXT=SUPPORT_MODE_CONTEXT,
+    USER_PROFILE_CONTEXT=USER_PROFILE_CONTEXT,
+    WEBHOOK_TOKEN=WEBHOOK_TOKEN,
+    CATEGORY_ARCHIVE=CATEGORY_ARCHIVE,
+    CHAT_STATE=CHAT_STATE,
+    EMPLOYEES=EMPLOYEES,
+    ERROR_REPORT_STATUS_LABELS=ERROR_REPORT_STATUS_LABELS,
+    REACTION_EMOJIS=REACTION_EMOJIS,
+    READ_MARKED_AT=READ_MARKED_AT,
+    bot_menu=lambda: BOT_MENU,
+    AUTH=AUTH,
+    CHAT_LOCK=CHAT_LOCK,
+    REPORTING=REPORTING,
+    STORE=STORE,
+    UPLOADS=UPLOADS,
+    _analytics_snapshot=_analytics_snapshot,
+    _final_ticket_filter=_final_ticket_filter,
+    _language_identity=_language_identity,
+    activate_employee_shift=activate_employee_shift,
+    active_ticket_selected_reply=active_ticket_selected_reply,
+    active_tickets_menu_number=active_tickets_menu_number,
+    active_tickets_reply=active_tickets_reply,
+    admin_layout=admin_layout,
+    apply_bot_profile=apply_bot_profile,
+    apply_contact_profile_to_ticket=apply_contact_profile_to_ticket,
+    clear_contact_language=clear_contact_language,
+    create_scheduled_backup=create_scheduled_backup,
+    csrf_token=csrf_token,
+    csrf_token_valid=csrf_token_valid,
+    decorate_chat_messages=decorate_chat_messages,
+    error_report_prompt=error_report_prompt,
+    favorite_chat_ids=favorite_chat_ids,
+    get_contact_language=get_contact_language,
+    get_contact_profile=get_contact_profile,
+    global_auto_reply_enabled=global_auto_reply_enabled,
+    is_active_tickets_command=is_active_tickets_command,
+    language_selection_text_v3=language_selection_text_v3,
+    mention_only_message=mention_only_message,
+    parse_contact_profile=parse_contact_profile,
+    preserved_system_outgoing_media=preserved_system_outgoing_media,
+    process_resource_snapshot=process_resource_snapshot,
+    profile_prompt_text=profile_prompt_text,
+    reconcile_uncertain_system_outgoing_media=reconcile_uncertain_system_outgoing_media,
+    render_account=render_account,
+    render_admin_users=render_admin_users,
+    render_forgot_password=render_forgot_password,
+    render_local_setup=render_local_setup,
+    render_login=render_login,
+    render_register=render_register,
+    same_whatsapp_message_identity=same_whatsapp_message_identity,
+    save_media_payload=save_media_payload,
+    save_outbound_media=save_outbound_media,
+    save_outbound_media_stream=save_outbound_media_stream,
+    scheduled_backup_snapshot=scheduled_backup_snapshot,
+    scrub_deleted_whatsapp_message=scrub_deleted_whatsapp_message,
+    set_chat_favorite=set_chat_favorite,
+    set_contact_language=set_contact_language,
+    set_contact_profile=set_contact_profile,
+    support_question_accepted_reply=support_question_accepted_reply,
+    suppress_inbound_auto_reply=suppress_inbound_auto_reply,
+    ticket_accepted_reply=ticket_accepted_reply,
+    ticket_status_reply_text=ticket_status_reply_text,
+    update_ticket_status=update_ticket_status,
+    v3_duplicate_reply=v3_duplicate_reply,
+    v3_missing_fields_reply=v3_missing_fields_reply,
+)
+for _module in (queue_chat_state, queue_ticket_views, queue_admin_pages, queue_chat_views,
+                queue_whatsapp_handlers, queue_http_handler):
+    _module.bind(DEPS)
+
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
 class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_handler.QueueHTTPHandlerMixin, BaseHTTPRequestHandler):
@@ -1591,9 +1678,9 @@ def main() -> None:
     cleanup_retention_once()
     threading.Thread(target=retention_worker, name="queue-retention", daemon=True).start()
     threading.Thread(target=scheduled_backup_worker, name="queue-scheduled-backup", daemon=True).start()
-    threading.Thread(target=queue_reliability.worker_loop, args=(sys.modules[__name__],), name="queue-reliability", daemon=True).start()
-    threading.Thread(target=queue_performance.worker_loop, args=(sys.modules[__name__],), name="queue-performance", daemon=True).start()
-    threading.Thread(target=queue_stale_menu.worker_loop, args=(sys.modules[__name__],), name="queue-stale-menu", daemon=True).start()
+    threading.Thread(target=queue_reliability.worker_loop, args=(DEPS,), name="queue-reliability", daemon=True).start()
+    threading.Thread(target=queue_performance.worker_loop, args=(DEPS,), name="queue-performance", daemon=True).start()
+    threading.Thread(target=queue_stale_menu.worker_loop, args=(DEPS,), name="queue-stale-menu", daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), TicketHandler)
     address = f"http://127.0.0.1:{PORT}"
     print(f"Единая очередь запущена: {address}")

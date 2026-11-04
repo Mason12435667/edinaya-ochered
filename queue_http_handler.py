@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
-from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
 import queue_auth
@@ -37,15 +36,16 @@ from queue_chat_views import render_groups, render_whatsapp
 from queue_core import content_disposition_header, display_phone, log_suppressed, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
 from queue_ticket_views import render_dashboard, render_my_page, render_ticket
 from queue_work_context import active_employee, assignment_names, audit_admin_form_submission, query_page, render_pagination, render_ticket_rows, work_actor
-from ticketing import normalize_message
+from ticketing import CATEGORIES, MENU_CONTEXT, STATUSES, normalize_message
+from queue_app_deps import AppDependencies
 
 # Application module (app.py): shared services, settings and helpers it defines.
-app: Any = None
+deps: AppDependencies
 
 
-def bind(app_module: Any) -> None:
-    global app
-    app = app_module
+def bind(dependencies: AppDependencies) -> None:
+    global deps
+    deps = dependencies
 
 
 # Files under static/ that may be served (every page asset is part of the main layout).
@@ -68,7 +68,7 @@ def _bookmark_setting(user_id: int) -> str:
 def _load_message_bookmarks(user_id: int) -> list[dict[str, object]]:
     if user_id <= 0:
         return []
-    raw = app.STORE.get_setting(_bookmark_setting(user_id), "[]")
+    raw = deps.STORE.get_setting(_bookmark_setting(user_id), "[]")
     try:
         values = json.loads(raw)
     except (TypeError, ValueError):
@@ -141,11 +141,11 @@ class QueueHTTPHandlerMixin:
 
     @staticmethod
     def auth_slot_cookie_name(slot: int) -> str:
-        return f"{app.AUTH_SESSION_COOKIE}_{int(slot)}"
+        return f"{deps.AUTH_SESSION_COOKIE}_{int(slot)}"
 
     def active_auth_slot(self, cookies=None) -> int:
         cookies = cookies or self.auth_cookie_jar()
-        morsel = cookies.get(f"{app.AUTH_SESSION_COOKIE}_active")
+        morsel = cookies.get(f"{deps.AUTH_SESSION_COOKIE}_active")
         try:
             slot = int(str(morsel.value)) if morsel else 0
         except (TypeError, ValueError):
@@ -163,13 +163,13 @@ class QueueHTTPHandlerMixin:
             if not token or token in seen:
                 continue
             seen.add(token)
-            user = app.AUTH.session_user(token, touch=touch)
+            user = deps.AUTH.session_user(token, touch=touch)
             if user:
                 result.append({"slot": slot, "token": token, "user": user, "active": slot == active_slot})
-        legacy = cookies.get(app.AUTH_SESSION_COOKIE)
+        legacy = cookies.get(deps.AUTH_SESSION_COOKIE)
         legacy_token = str(legacy.value).strip() if legacy else ""
         if legacy_token and legacy_token not in seen:
-            user = app.AUTH.session_user(legacy_token, touch=touch)
+            user = deps.AUTH.session_user(legacy_token, touch=touch)
             if user:
                 result.append({"slot": 0, "token": legacy_token, "user": user, "active": active_slot == 0})
         if result and not any(bool(item.get("active")) for item in result):
@@ -183,7 +183,7 @@ class QueueHTTPHandlerMixin:
             morsel = cookies.get(self.auth_slot_cookie_name(active_slot))
             if morsel:
                 return str(morsel.value).strip()
-        legacy = cookies.get(app.AUTH_SESSION_COOKIE)
+        legacy = cookies.get(deps.AUTH_SESSION_COOKIE)
         if legacy:
             return str(legacy.value).strip()
         for slot in range(1, self.MULTI_ACCOUNT_SLOTS + 1):
@@ -201,7 +201,7 @@ class QueueHTTPHandlerMixin:
             morsel = cookies.get(self.auth_slot_cookie_name(slot))
             if morsel and str(morsel.value).strip() == token:
                 return slot
-        legacy = cookies.get(app.AUTH_SESSION_COOKIE)
+        legacy = cookies.get(deps.AUTH_SESSION_COOKIE)
         if legacy and str(legacy.value).strip() == token:
             return 0
         return 0
@@ -213,13 +213,13 @@ class QueueHTTPHandlerMixin:
         if isinstance(cached, dict):
             return cached
         token = self.auth_cookie_token()
-        user = app.AUTH.session_user(token) if token else None
+        user = deps.AUTH.session_user(token) if token else None
         if not user:
             for item in self.saved_account_sessions(touch=False):
                 candidate = str(item.get("token") or "")
                 if not candidate or candidate == token:
                     continue
-                user = app.AUTH.session_user(candidate)
+                user = deps.AUTH.session_user(candidate)
                 if user:
                     break
         self._queue_auth_user = user if user else False
@@ -227,10 +227,10 @@ class QueueHTTPHandlerMixin:
 
     def legacy_admin_user(self) -> dict[str, object] | None:
         username = self.authenticated_user().casefold()
-        if (bool(username) and username == app.ADMIN_USER) or self.has_admin_session():
+        if (bool(username) and username == deps.ADMIN_USER) or self.has_admin_session():
             return {
                 "id": 0,
-                "username": app.ADMIN_USER,
+                "username": deps.ADMIN_USER,
                 "display_name": "Администратор",
                 "role": "admin",
                 "enabled": True,
@@ -266,8 +266,8 @@ class QueueHTTPHandlerMixin:
 
     def local_setup_allowed(self) -> bool:
         return bool(
-            app.LOCAL_MODE
-            and not app.AUTH.has_users()
+            deps.LOCAL_MODE
+            and not deps.AUTH.has_users()
             and self.client_address
             and self.client_address[0] in {"127.0.0.1", "::1"}
         )
@@ -304,13 +304,13 @@ class QueueHTTPHandlerMixin:
         }
 
     def _session_cookie_header(self, name: str, value: str, *, max_age: int | None = None) -> str:
-        secure = "" if app.LOCAL_MODE else "Secure; "
-        age = app.AUTH_SESSION_MAX_AGE if max_age is None else max(0, int(max_age))
+        secure = "" if deps.LOCAL_MODE else "Secure; "
+        age = deps.AUTH_SESSION_MAX_AGE if max_age is None else max(0, int(max_age))
         return f"{name}={value}; Path=/; Max-Age={age}; HttpOnly; {secure}SameSite=Lax"
 
     def start_app_session(self, token: str, location: str = "/") -> None:
         token = str(token or "").strip()
-        new_user = app.AUTH.session_user(token, touch=False) if token else None
+        new_user = deps.AUTH.session_user(token, touch=False) if token else None
         if not new_user:
             self.redirect("/login")
             return
@@ -322,23 +322,23 @@ class QueueHTTPHandlerMixin:
             existing_token = str(morsel.value).strip() if morsel else ""
             if not existing_token:
                 continue
-            existing_user = app.AUTH.session_user(existing_token, touch=False)
+            existing_user = deps.AUTH.session_user(existing_token, touch=False)
             if existing_user:
                 slots[slot] = (existing_token, existing_user)
             else:
                 invalid_slots.append(slot)
 
         migrated: list[tuple[int, str]] = []
-        legacy = cookies.get(app.AUTH_SESSION_COOKIE)
+        legacy = cookies.get(deps.AUTH_SESSION_COOKIE)
         legacy_token = str(legacy.value).strip() if legacy else ""
-        legacy_user = app.AUTH.session_user(legacy_token, touch=False) if legacy_token else None
+        legacy_user = deps.AUTH.session_user(legacy_token, touch=False) if legacy_token else None
         new_user_id = int(new_user.get("id", 0) or 0)
         slot = 0
         for existing_slot, (existing_token, existing_user) in slots.items():
             if int(existing_user.get("id", 0) or 0) == new_user_id:
                 slot = existing_slot
                 if existing_token != token:
-                    app.AUTH.revoke_session(existing_token)
+                    deps.AUTH.revoke_session(existing_token)
                 break
 
         if legacy_user and int(legacy_user.get("id", 0) or 0) == new_user_id:
@@ -356,7 +356,7 @@ class QueueHTTPHandlerMixin:
             if slot in slots:
                 old_token, _old_user = slots[slot]
                 if old_token != token:
-                    app.AUTH.revoke_session(old_token)
+                    deps.AUTH.revoke_session(old_token)
 
         self.send_response(HTTPStatus.SEE_OTHER)
         self.send_header("Location", location)
@@ -367,30 +367,30 @@ class QueueHTTPHandlerMixin:
             if invalid_slot != slot and invalid_slot not in migrated_slots:
                 self.send_header("Set-Cookie", self._session_cookie_header(self.auth_slot_cookie_name(invalid_slot), "", max_age=0))
         self.send_header("Set-Cookie", self._session_cookie_header(self.auth_slot_cookie_name(slot), token))
-        self.send_header("Set-Cookie", self._session_cookie_header(f"{app.AUTH_SESSION_COOKIE}_active", str(slot)))
-        self.send_header("Set-Cookie", self._session_cookie_header(app.AUTH_SESSION_COOKIE, "", max_age=0))
+        self.send_header("Set-Cookie", self._session_cookie_header(f"{deps.AUTH_SESSION_COOKIE}_active", str(slot)))
+        self.send_header("Set-Cookie", self._session_cookie_header(deps.AUTH_SESSION_COOKIE, "", max_age=0))
         self.end_headers()
 
     def switch_app_session(self, slot: int, location: str = "/") -> bool:
         cookies = self.auth_cookie_jar()
         if slot == 0:
-            morsel = cookies.get(app.AUTH_SESSION_COOKIE)
+            morsel = cookies.get(deps.AUTH_SESSION_COOKIE)
         elif 1 <= slot <= self.MULTI_ACCOUNT_SLOTS:
             morsel = cookies.get(self.auth_slot_cookie_name(slot))
         else:
             morsel = None
         token = str(morsel.value).strip() if morsel else ""
-        user = app.AUTH.session_user(token, touch=False) if token else None
+        user = deps.AUTH.session_user(token, touch=False) if token else None
         if not user:
             return False
         if str(user.get("role", "")) == "employee":
-            app.activate_employee_shift(user)
+            deps.activate_employee_shift(user)
         self.send_response(HTTPStatus.SEE_OTHER)
         self.send_header("Location", location)
         if slot > 0:
-            self.send_header("Set-Cookie", self._session_cookie_header(f"{app.AUTH_SESSION_COOKIE}_active", str(slot)))
+            self.send_header("Set-Cookie", self._session_cookie_header(f"{deps.AUTH_SESSION_COOKIE}_active", str(slot)))
         else:
-            self.send_header("Set-Cookie", self._session_cookie_header(f"{app.AUTH_SESSION_COOKIE}_active", "", max_age=0))
+            self.send_header("Set-Cookie", self._session_cookie_header(f"{deps.AUTH_SESSION_COOKIE}_active", "", max_age=0))
         self.end_headers()
         return True
 
@@ -399,30 +399,30 @@ class QueueHTTPHandlerMixin:
         current_slot = self.current_auth_slot()
         sessions = self.saved_account_sessions(touch=False)
         if token:
-            user = app.AUTH.session_user(token, touch=False)
+            user = deps.AUTH.session_user(token, touch=False)
             if user:
-                app.AUTH.release_user_locks(int(user.get("id", 0) or 0), str(user.get("username", "") or ""))
-            app.AUTH.revoke_session(token)
+                deps.AUTH.release_user_locks(int(user.get("id", 0) or 0), str(user.get("username", "") or ""))
+            deps.AUTH.revoke_session(token)
         remaining = [item for item in sessions if str(item.get("token") or "") != token]
         self.send_response(HTTPStatus.SEE_OTHER)
         self.send_header("Location", "/accounts" if remaining else "/login")
-        secure = "" if app.LOCAL_MODE else "Secure; "
+        secure = "" if deps.LOCAL_MODE else "Secure; "
         if current_slot > 0:
             self.send_header("Set-Cookie", self._session_cookie_header(self.auth_slot_cookie_name(current_slot), "", max_age=0))
         else:
-            self.send_header("Set-Cookie", self._session_cookie_header(app.AUTH_SESSION_COOKIE, "", max_age=0))
+            self.send_header("Set-Cookie", self._session_cookie_header(deps.AUTH_SESSION_COOKIE, "", max_age=0))
         if remaining:
             next_user = remaining[0].get("user") if isinstance(remaining[0].get("user"), dict) else {}
             if str(next_user.get("role", "")) == "employee":
-                app.activate_employee_shift(next_user)
+                deps.activate_employee_shift(next_user)
             next_slot = int(remaining[0].get("slot", 0) or 0)
             if next_slot > 0:
-                self.send_header("Set-Cookie", self._session_cookie_header(f"{app.AUTH_SESSION_COOKIE}_active", str(next_slot)))
+                self.send_header("Set-Cookie", self._session_cookie_header(f"{deps.AUTH_SESSION_COOKIE}_active", str(next_slot)))
             else:
-                self.send_header("Set-Cookie", self._session_cookie_header(f"{app.AUTH_SESSION_COOKIE}_active", "", max_age=0))
+                self.send_header("Set-Cookie", self._session_cookie_header(f"{deps.AUTH_SESSION_COOKIE}_active", "", max_age=0))
         else:
-            self.send_header("Set-Cookie", self._session_cookie_header(f"{app.AUTH_SESSION_COOKIE}_active", "", max_age=0))
-            self.send_header("Set-Cookie", f"{app.ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; {secure}SameSite=Lax")
+            self.send_header("Set-Cookie", self._session_cookie_header(f"{deps.AUTH_SESSION_COOKIE}_active", "", max_age=0))
+            self.send_header("Set-Cookie", f"{deps.ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; {secure}SameSite=Lax")
         self.end_headers()
 
     def has_admin_session(self) -> bool:
@@ -432,8 +432,8 @@ class QueueHTTPHandlerMixin:
         try:
             cookies = SimpleCookie()
             cookies.load(raw_cookie)
-            morsel = cookies.get(app.ADMIN_SESSION_COOKIE)
-            return bool(morsel) and secrets.compare_digest(morsel.value, app.ADMIN_SESSION_TOKEN)
+            morsel = cookies.get(deps.ADMIN_SESSION_COOKIE)
+            return bool(morsel) and secrets.compare_digest(morsel.value, deps.ADMIN_SESSION_TOKEN)
         except (CookieError, ValueError):
             return False
 
@@ -442,7 +442,7 @@ class QueueHTTPHandlerMixin:
         if user and str(user.get("role")) == "admin":
             return True
         username = self.authenticated_user().casefold()
-        return (bool(username) and username == app.ADMIN_USER) or self.has_admin_session()
+        return (bool(username) and username == deps.ADMIN_USER) or self.has_admin_session()
 
     def claim_conversation_write(self, chat_id: str) -> bool:
         chat_id = valid_conversation_id(chat_id) or valid_group_id(chat_id)
@@ -451,7 +451,7 @@ class QueueHTTPHandlerMixin:
             return False
         user = self.effective_user() or {}
         kind = "group" if chat_id.endswith("@g.us") else "chat"
-        ok, lock = app.AUTH.claim_conversation(chat_id, kind, user, display_name=work_actor())
+        ok, lock = deps.AUTH.claim_conversation(chat_id, kind, user, display_name=work_actor())
         if ok:
             return True
         owner = lock or {}
@@ -481,7 +481,7 @@ class QueueHTTPHandlerMixin:
         self.send_header("Location", "/admin/")
         self.send_header(
             "Set-Cookie",
-            f"{app.ADMIN_SESSION_COOKIE}={app.ADMIN_SESSION_TOKEN}; Path=/; Max-Age={app.ADMIN_SESSION_MAX_AGE}; HttpOnly; {'Secure; ' if not app.LOCAL_MODE else ''}SameSite=Lax",
+            f"{deps.ADMIN_SESSION_COOKIE}={deps.ADMIN_SESSION_TOKEN}; Path=/; Max-Age={deps.ADMIN_SESSION_MAX_AGE}; HttpOnly; {'Secure; ' if not deps.LOCAL_MODE else ''}SameSite=Lax",
         )
         self.end_headers()
 
@@ -490,7 +490,7 @@ class QueueHTTPHandlerMixin:
         self.send_header("Location", "/")
         self.send_header(
             "Set-Cookie",
-            f"{app.ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+            f"{deps.ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
         )
         self.end_headers()
 
@@ -503,7 +503,7 @@ class QueueHTTPHandlerMixin:
             auth_header = str(self.headers.get("Authorization", "") or "").strip()
             if auth_header.lower().startswith("bearer "):
                 raw = auth_header[7:].strip()
-        key = app.AUTH.authenticate_api_key(raw, "read") if raw else None
+        key = deps.AUTH.authenticate_api_key(raw, "read") if raw else None
         if key:
             return key
         self.json_response({"error":"unauthorized","message":"Требуется действующий API-ключ"}, HTTPStatus.UNAUTHORIZED)
@@ -555,7 +555,7 @@ class QueueHTTPHandlerMixin:
         if parsed.path == "/api/account-preferences":
             current = self.effective_user() or {}
             user_id = int(current.get("id", 0) or 0)
-            self.json_response({"preferences": app.AUTH.get_user_preferences(user_id) if user_id > 0 else {}})
+            self.json_response({"preferences": deps.AUTH.get_user_preferences(user_id) if user_id > 0 else {}})
             return
         if parsed.path == "/api/realtime-wait":
             try:
@@ -569,15 +569,15 @@ class QueueHTTPHandlerMixin:
             state = queue_realtime.wait_for_change(since, timeout_ms / 1000.0)
             self.json_response(state)
             return
-        if queue_performance_http.get(self, app):
+        if queue_performance_http.get(self, deps):
             return
-        if queue_reliability_http.get(self, app):
+        if queue_reliability_http.get(self, deps):
             return
-        if queue_workflow_http.get(self, app):
+        if queue_workflow_http.get(self, deps):
             return
-        if queue_productivity_http.get(self, app):
+        if queue_productivity_http.get(self, deps):
             return
-        if queue_feature_http.get(self, app):
+        if queue_feature_http.get(self, deps):
             return
         show_admin = self.is_admin()
         if parsed.path == "/login":
@@ -587,29 +587,29 @@ class QueueHTTPHandlerMixin:
             else:
                 if add_account and not query.get("next"):
                     query["next"] = ["/accounts"]
-                self.html_response(app.render_login(query))
+                self.html_response(deps.render_login(query))
         elif parsed.path == "/accounts":
             sessions = self.saved_account_sessions(touch=False)
             self.html_response(queue_ticket_views.render_account_switcher(query, show_admin, sessions, self.current_auth_slot()))
         elif parsed.path == "/register":
             status = HTTPStatus.OK if queue_auth.self_registration_enabled() else HTTPStatus.FORBIDDEN
-            self.html_response(app.render_register(), status)
+            self.html_response(deps.render_register(), status)
         elif parsed.path == "/forgot-password":
             if self.effective_user():
                 self.redirect("/account")
             else:
-                self.html_response(app.render_forgot_password())
+                self.html_response(deps.render_forgot_password())
         elif parsed.path == "/setup":
             if not self.local_setup_allowed():
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
-            self.html_response(app.render_local_setup())
+            self.html_response(deps.render_local_setup())
         elif parsed.path == "/logout":
             self.end_app_session()
         elif parsed.path == "/account":
             current = self.effective_user() or {}
             if current.get("must_change_password"):
-                self.html_response(app.render_account(query))
+                self.html_response(deps.render_account(query))
             else:
                 self.redirect("/")
         elif parsed.path == "/me":
@@ -617,7 +617,7 @@ class QueueHTTPHandlerMixin:
         elif parsed.path == "/":
             self.html_response(render_dashboard(query, show_admin))
         elif parsed.path == "/admin/login":
-            if self.authenticated_user().casefold() != app.ADMIN_USER:
+            if self.authenticated_user().casefold() != deps.ADMIN_USER:
                 self.send_error(HTTPStatus.FORBIDDEN, "Administrator login required")
                 return
             self.start_admin_session()
@@ -632,7 +632,7 @@ class QueueHTTPHandlerMixin:
         elif parsed.path == "/admin/users":
             if not self.require_admin():
                 return
-            self.html_response(app.render_admin_users(query))
+            self.html_response(deps.render_admin_users(query))
         elif parsed.path == "/admin/employees":
             if not self.require_admin():
                 return
@@ -680,7 +680,7 @@ class QueueHTTPHandlerMixin:
         elif parsed.path == "/admin/tickets-export.csv":
             if not self.require_admin():
                 return
-            rows = app._final_ticket_filter(query)
+            rows = deps._final_ticket_filter(query)
             stream = io.StringIO(newline="")
             writer = csv.writer(stream, delimiter=";")
             writer.writerow(["ID","Статус","Категория","Приоритет","Сотрудник","Создано","Обновлено","Описание"])
@@ -729,7 +729,7 @@ class QueueHTTPHandlerMixin:
             key = self.integration_api_key()
             if not key:
                 return
-            self.json_response({"ok":True,"service":"Единая очередь","version":app.APP_VERSION,"key":{"name":str(key.get("name") or ""),"scope":str(key.get("scope") or "read")}})
+            self.json_response({"ok":True,"service":"Единая очередь","version":deps.APP_VERSION,"key":{"name":str(key.get("name") or ""),"scope":str(key.get("scope") or "read")}})
         elif parsed.path == "/api/integration/tickets":
             key = self.integration_api_key()
             if not key:
@@ -738,7 +738,7 @@ class QueueHTTPHandlerMixin:
                 limit = max(1, min(500, int(query.get("limit", ["100"])[0] or 100)))
             except (TypeError, ValueError):
                 limit = 100
-            rows = app._final_ticket_filter(query, limit=5000)[:limit]
+            rows = deps._final_ticket_filter(query, limit=5000)[:limit]
             public_rows = []
             for item in rows:
                 public_rows.append({
@@ -789,7 +789,7 @@ class QueueHTTPHandlerMixin:
                         raw_id = valid_chat_id(str(raw_row.get("id", "")))
                         if not raw_id:
                             continue
-                        canonical_id = app.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
+                        canonical_id = deps.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
                         row = dict(raw_row)
                         row["id"] = canonical_id
 
@@ -866,7 +866,7 @@ class QueueHTTPHandlerMixin:
                             raw_id = valid_chat_id(str(target.get("id", "")))
                             if not raw_id:
                                 continue
-                            canonical_id = app.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
+                            canonical_id = deps.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
                             row = dict(target)
                             row["id"] = canonical_id
                             previous = target_map.get(canonical_id)
@@ -882,7 +882,7 @@ class QueueHTTPHandlerMixin:
 
                 selected = valid_chat_id(str(state.get("selected_chat_id", "") or ""))
                 if selected:
-                    state["selected_chat_id"] = app.STORE.canonical_whatsapp_chat_id(selected) or selected
+                    state["selected_chat_id"] = deps.STORE.canonical_whatsapp_chat_id(selected) or selected
 
             self.json_response(state)
         elif parsed.path == "/api/group-state":
@@ -893,13 +893,13 @@ class QueueHTTPHandlerMixin:
             self.handle_message_window(query)
         elif parsed.path == "/api/chat-action-status":
             action_id = self.query_int(query, "id")
-            action = app.STORE.whatsapp_action_status(action_id)
+            action = deps.STORE.whatsapp_action_status(action_id)
             self.json_response({"found": bool(action), "action": action or {}})
         elif parsed.path == "/api/notifications":
             self.json_response(notifications_snapshot())
         elif parsed.path == "/api/conversation-users":
             users=[]
-            for item in app.AUTH.list_users():
+            for item in deps.AUTH.list_users():
                 if not item.get("enabled"): continue
                 users.append({"id":int(item.get("id",0) or 0),"username":str(item.get("username","") or ""),"display_name":str(item.get("display_name","") or ""),"role":str(item.get("role","") or ""),"employee_name":str(item.get("employee_name","") or "")})
             current=self.effective_user() or {}
@@ -907,15 +907,15 @@ class QueueHTTPHandlerMixin:
                 "users": users,
                 "current_user_id": int(current.get("id", 0) or 0),
                 "is_admin": self.is_admin(),
-                "active_shift_employee": str(app.STORE.get_setting("active_employee", active_employee()) or active_employee()),
+                "active_shift_employee": str(deps.STORE.get_setting("active_employee", active_employee()) or active_employee()),
             })
         elif parsed.path == "/api/chat-media":
             self.handle_chat_media(query)
         elif parsed.path.startswith("/static/") and parsed.path[len("/static/"):] in STATIC_FILES:
             name = parsed.path[len("/static/"):]
-            self.file_response(app.ROOT / "static" / name, STATIC_FILES[name])
+            self.file_response(deps.ROOT / "static" / name, STATIC_FILES[name])
         elif parsed.path == "/favicon.ico":
-            self.file_response(app.ROOT / "static" / "favicon.png", "image/png")
+            self.file_response(deps.ROOT / "static" / "favicon.png", "image/png")
         elif parsed.path == "/health/connector":
             self.json_response(connector_state_snapshot())
         elif parsed.path == "/health":
@@ -943,30 +943,30 @@ class QueueHTTPHandlerMixin:
             return
         if parsed.path.startswith("/admin/") and self.is_admin():
             try:
-                app.AUTH.record_audit(user or {}, "admin_post", object_type="admin_settings", object_id=parsed.path, details="Отправлено изменение в административном разделе")
+                deps.AUTH.record_audit(user or {}, "admin_post", object_type="admin_settings", object_id=parsed.path, details="Отправлено изменение в административном разделе")
             except Exception:
                 log_suppressed("queue_http_handler.do_POST")
         route = self.EARLY_POST_ROUTES.get(parsed.path)
         if route:
             route(self, parsed)
             return
-        if queue_performance_http.post(self, app):
+        if queue_performance_http.post(self, deps):
             return
-        if queue_reliability_http.post(self, app):
+        if queue_reliability_http.post(self, deps):
             return
-        if queue_reliability.maintenance_active(app.STORE) and queue_reliability.should_block_mutation(parsed.path, self.is_admin()):
+        if queue_reliability.maintenance_active(deps.STORE) and queue_reliability.should_block_mutation(parsed.path, self.is_admin()):
             if parsed.path.startswith("/api/") or self.headers.get("X-Requested-With") == "fetch" or parsed.path.startswith("/chat"):
                 self.json_response({"error":"Режим обслуживания: изменения временно заблокированы администратором"}, HTTPStatus.LOCKED)
             else:
                 self.redirect("/?notice=" + quote("Режим обслуживания: изменения временно заблокированы"))
             return
-        if queue_workflow_http.post(self, app):
+        if queue_workflow_http.post(self, deps):
             return
-        if queue_productivity_http.post(self, app):
+        if queue_productivity_http.post(self, deps):
             return
-        if queue_feature_http.post(self, app):
+        if queue_feature_http.post(self, deps):
             return
-        if queue_uploads.post(self, app):
+        if queue_uploads.post(self, deps):
             return
         route = self.SERVICE_POST_ROUTES.get(parsed.path)
         if route:
@@ -987,7 +987,7 @@ class QueueHTTPHandlerMixin:
     def _post_login(self, parsed) -> None:
         # POST /login
         form = self.read_form()
-        result = app.AUTH.authenticate(
+        result = deps.AUTH.authenticate(
             form.get("username", ""),
             form.get("password", ""),
             client_ip=self.client_address[0] if self.client_address else "",
@@ -995,14 +995,14 @@ class QueueHTTPHandlerMixin:
         )
         if not result.get("ok"):
             next_path = form.get("next", "/")
-            self.html_response(app.render_login({"next": [next_path]}, str(result.get("error") or "Ошибка входа")), HTTPStatus.UNAUTHORIZED)
+            self.html_response(deps.render_login({"next": [next_path]}, str(result.get("error") or "Ошибка входа")), HTTPStatus.UNAUTHORIZED)
             return
         next_path = str(form.get("next", "/") or "/")
         if not next_path.startswith("/") or next_path.startswith("//"):
             next_path = "/"
         login_user = result.get("user") or {}
         if str(login_user.get("role", "")) == "employee":
-            app.activate_employee_shift(login_user)
+            deps.activate_employee_shift(login_user)
         if bool(login_user.get("must_change_password")):
             next_path = "/account?required=1"
         self.start_app_session(str(result["token"]), next_path)
@@ -1010,29 +1010,29 @@ class QueueHTTPHandlerMixin:
     def _post_register(self, parsed) -> None:
         # POST /register (only with QUEUE_ALLOW_SELF_REGISTRATION=1; the account then waits for approval)
         if not queue_auth.self_registration_enabled():
-            self.html_response(app.render_register(), HTTPStatus.FORBIDDEN)
+            self.html_response(deps.render_register(), HTTPStatus.FORBIDDEN)
             return
         form = self.read_form()
         password = form.get("password", "")
         if password != form.get("password2", ""):
-            self.html_response(app.render_register("Пароли не совпадают"), HTTPStatus.BAD_REQUEST)
+            self.html_response(deps.render_register("Пароли не совпадают"), HTTPStatus.BAD_REQUEST)
             return
-        ok, message, _ = app.AUTH.self_register_employee(
+        ok, message, _ = deps.AUTH.self_register_employee(
             form.get("username", ""),
             form.get("display_name", ""),
             password,
         )
         if not ok:
-            self.html_response(app.render_register(message), HTTPStatus.BAD_REQUEST)
+            self.html_response(deps.render_register(message), HTTPStatus.BAD_REQUEST)
             return
         # The new account is disabled until an administrator approves it: no session yet.
-        self.html_response(app.render_login({}, message), HTTPStatus.OK)
+        self.html_response(deps.render_login({}, message), HTTPStatus.OK)
 
     def _post_forgot_password(self, parsed) -> None:
         # POST /forgot-password
         form = self.read_form()
-        notice = app.AUTH.request_password_reset(form.get("username", ""))
-        self.html_response(app.render_forgot_password(notice=notice), HTTPStatus.OK)
+        notice = deps.AUTH.request_password_reset(form.get("username", ""))
+        self.html_response(deps.render_forgot_password(notice=notice), HTTPStatus.OK)
 
     def _post_setup(self, parsed) -> None:
         # POST /setup
@@ -1041,21 +1041,21 @@ class QueueHTTPHandlerMixin:
             return
         form = self.read_form()
         if form.get("password", "") != form.get("password2", ""):
-            self.html_response(app.render_local_setup("Пароли не совпадают"), HTTPStatus.BAD_REQUEST)
+            self.html_response(deps.render_local_setup("Пароли не совпадают"), HTTPStatus.BAD_REQUEST)
             return
-        ok, message, _ = app.AUTH.create_user(
+        ok, message, _ = deps.AUTH.create_user(
             form.get("username", ""), form.get("display_name", ""), form.get("password", ""), role="admin"
         )
         if not ok:
-            self.html_response(app.render_local_setup(message), HTTPStatus.BAD_REQUEST)
+            self.html_response(deps.render_local_setup(message), HTTPStatus.BAD_REQUEST)
             return
-        result = app.AUTH.authenticate(
+        result = deps.AUTH.authenticate(
             form.get("username", ""), form.get("password", ""),
             client_ip=self.client_address[0] if self.client_address else "",
             user_agent=self.headers.get("User-Agent", ""),
         )
         if not result.get("ok"):
-            self.html_response(app.render_login({}, "Администратор создан, но автоматический вход не выполнен"), HTTPStatus.UNAUTHORIZED)
+            self.html_response(deps.render_login({}, "Администратор создан, но автоматический вход не выполнен"), HTTPStatus.UNAUTHORIZED)
             return
         self.start_app_session(str(result["token"]), "/admin/users")
 
@@ -1076,7 +1076,7 @@ class QueueHTTPHandlerMixin:
             self.json_response({"updated": False, "error": "Некорректное сообщение"}, HTTPStatus.BAD_REQUEST)
             return
         if not chat_id.endswith("@g.us"):
-            chat_id = app.STORE.canonical_whatsapp_chat_id(chat_id) or chat_id
+            chat_id = deps.STORE.canonical_whatsapp_chat_id(chat_id) or chat_id
         is_favorite = str(form.get("favorite", "1")).strip().lower() in {"1", "true", "yes", "on"}
         with _BOOKMARKS_LOCK:
             items = _load_message_bookmarks(user_id)
@@ -1092,7 +1092,7 @@ class QueueHTTPHandlerMixin:
                 items.insert(0, {"chat_id": chat_id, "message_id": message_id, "chat_name": name,
                                  "preview": preview, "sender": sender, "timestamp": timestamp})
             items = items[:_BOOKMARKS_MAX]
-            app.STORE.set_setting(_bookmark_setting(user_id), json.dumps(items, ensure_ascii=False))
+            deps.STORE.set_setting(_bookmark_setting(user_id), json.dumps(items, ensure_ascii=False))
         self.json_response({"updated": True, "favorite": is_favorite, "bookmarks": items})
 
     def _post_accounts_switch(self, parsed) -> None:
@@ -1112,11 +1112,11 @@ class QueueHTTPHandlerMixin:
         if form is None: return
         action=str(form.get("action") or "").strip().lower(); actor=self.effective_user() or {}
         if action == "create":
-            ok,message,token=app.AUTH.create_api_key(actor,form.get("name",""),"read"); self.html_response(render_admin_api_keys({},new_token=token if ok else "",notice=message),HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST); return
+            ok,message,token=deps.AUTH.create_api_key(actor,form.get("name",""),"read"); self.html_response(render_admin_api_keys({},new_token=token if ok else "",notice=message),HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST); return
         if action == "revoke":
             try: key_id=int(form.get("key_id",0) or 0)
             except ValueError: key_id=0
-            ok,message=app.AUTH.revoke_api_key(actor,key_id); self.redirect("/admin/api-keys?notice="+quote(message)); return
+            ok,message=deps.AUTH.revoke_api_key(actor,key_id); self.redirect("/admin/api-keys?notice="+quote(message)); return
         self.html_response(render_admin_api_keys({},notice="Неизвестное действие"),HTTPStatus.BAD_REQUEST); return
 
     def _post_api_system_warning_action(self, parsed) -> None:
@@ -1128,7 +1128,7 @@ class QueueHTTPHandlerMixin:
         event_id = str(payload.get("event_id") or "").strip()
         try:
             if action == "dismiss":
-                if not queue_reliability.dismiss_notification(app.STORE, event_id):
+                if not queue_reliability.dismiss_notification(deps.STORE, event_id):
                     self.json_response({"error":"invalid_warning_id"}, HTTPStatus.BAD_REQUEST)
                     return
                 self.json_response({"ok":True,"dismissed":1})
@@ -1136,11 +1136,11 @@ class QueueHTTPHandlerMixin:
             if action == "dismiss_all":
                 snapshot = notifications_snapshot()
                 ids = [str(item.get("id") or item.get("event_id") or "") for item in snapshot.get("events",[]) if isinstance(item,dict)]
-                count = queue_reliability.dismiss_notifications(app.STORE, ids)
+                count = queue_reliability.dismiss_notifications(deps.STORE, ids)
                 self.json_response({"ok":True,"dismissed":count})
                 return
             if action in {"check","check_all"}:
-                queue_reliability.refresh_active_alerts(app)
+                queue_reliability.refresh_active_alerts(deps)
                 self.json_response({"ok":True,"checked":True})
                 return
         except Exception as error:
@@ -1152,7 +1152,7 @@ class QueueHTTPHandlerMixin:
         # POST /api/media-stage
         payload = self.read_authorized_json(800_000)
         if payload is not None:
-            try: self.json_response(queue_inbound_media.receive(app.MEDIA_DIR, payload))
+            try: self.json_response(queue_inbound_media.receive(deps.MEDIA_DIR, payload))
             except (ValueError, OSError) as error: self.json_response({"error": str(error)[:180]}, 400)
 
     def _post_api_whatsapp(self, parsed) -> None:
@@ -1173,7 +1173,7 @@ class QueueHTTPHandlerMixin:
         payload = self.read_authorized_json()
         if payload is not None:
             try:
-                operation = app.STORE.begin_outbound_send if parsed.path.endswith('/begin') else app.STORE.touch_outbound_message
+                operation = deps.STORE.begin_outbound_send if parsed.path.endswith('/begin') else deps.STORE.touch_outbound_message
                 alive = operation(int(payload.get("message_id", 0)))
                 self.json_response({"updated": alive})
             except (ValueError, TypeError):
@@ -1212,7 +1212,7 @@ class QueueHTTPHandlerMixin:
         payload = self.read_authorized_json()
         if payload is not None:
             try:
-                queue_avatars.save(app,payload)
+                queue_avatars.save(deps,payload)
                 self.json_response({"updated":True})
             except (ValueError,TypeError,OSError):
                 self.json_response({"error":"Некорректный аватар"},400)
@@ -1275,7 +1275,7 @@ class QueueHTTPHandlerMixin:
 
     def _post_api_inbound_recovery_reply(self, parsed) -> None:
         # POST /api/inbound-recovery-reply (connector spool after an outage)
-        queue_operations.inbound_recovery_reply(self, app)
+        queue_operations.inbound_recovery_reply(self, deps)
 
     def _post_api_account_preferences(self, parsed, form) -> None:
         # POST /api/account-preferences
@@ -1288,9 +1288,9 @@ class QueueHTTPHandlerMixin:
         for key in ("theme", "chat_scale", "compact_chats", "sidebar_width"):
             if key in form:
                 updates[key] = str(form.get(key, ""))
-        result = app.AUTH.set_user_preferences(user_id, updates)
-        app.AUTH.record_audit(current, "interface_preferences", object_type="user", object_id=str(user_id), details=", ".join(k for k,v in result.items() if v))
-        self.json_response({"updated": all(result.values()) if result else False, "preferences": app.AUTH.get_user_preferences(user_id), "result": result})
+        result = deps.AUTH.set_user_preferences(user_id, updates)
+        deps.AUTH.record_audit(current, "interface_preferences", object_type="user", object_id=str(user_id), details=", ".join(k for k,v in result.items() if v))
+        self.json_response({"updated": all(result.values()) if result else False, "preferences": deps.AUTH.get_user_preferences(user_id), "result": result})
 
     def _post_conversation_lock(self, parsed, form) -> None:
         # POST /conversation-lock
@@ -1301,21 +1301,21 @@ class QueueHTTPHandlerMixin:
             self.json_response({"updated": False, "error": "Диалог не выбран"}, HTTPStatus.BAD_REQUEST)
             return
         if action == "claim":
-            ok, _lock = app.AUTH.claim_conversation(
+            ok, _lock = deps.AUTH.claim_conversation(
                 chat_id, "group" if chat_id.endswith("@g.us") else "chat", user, display_name=work_actor()
             )
             state = conversation_lock_snapshot(chat_id)
             if ok:
-                app.AUTH.record_audit(user, "conversation_claim", object_type="group" if chat_id.endswith("@g.us") else "chat", object_id=chat_id, details=work_actor())
+                deps.AUTH.record_audit(user, "conversation_claim", object_type="group" if chat_id.endswith("@g.us") else "chat", object_id=chat_id, details=work_actor())
                 queue_realtime.notify_outbound()
             self.json_response({"updated": ok, "conversation_lock": state}, HTTPStatus.OK if ok else HTTPStatus.LOCKED)
             return
         if action == "release":
-            ok, message = app.AUTH.release_conversation(
+            ok, message = deps.AUTH.release_conversation(
                 chat_id, user, force=self.is_admin() and form.get("force", "") == "1"
             )
             if ok:
-                app.AUTH.record_audit(user, "conversation_release", object_type="group" if chat_id.endswith("@g.us") else "chat", object_id=chat_id, details=message)
+                deps.AUTH.record_audit(user, "conversation_release", object_type="group" if chat_id.endswith("@g.us") else "chat", object_id=chat_id, details=message)
                 queue_realtime.notify_outbound()
             self.json_response({"updated": ok, "message": message, "conversation_lock": conversation_lock_snapshot(chat_id)}, HTTPStatus.OK if ok else HTTPStatus.LOCKED)
             return
@@ -1324,18 +1324,18 @@ class QueueHTTPHandlerMixin:
                 target_user_id = int(form.get("target_user_id", "0") or 0)
             except ValueError:
                 target_user_id = 0
-            target = app.AUTH.get_user(target_user_id) if target_user_id > 0 else None
+            target = deps.AUTH.get_user(target_user_id) if target_user_id > 0 else None
             target_name = ""
             if target:
                 target_name = (
                     str(target.get("employee_name", "") or "").strip()
                     or str(target.get("display_name", "") or target.get("username", "")).strip()
                 )
-            ok, message, _lock = app.AUTH.transfer_conversation(
+            ok, message, _lock = deps.AUTH.transfer_conversation(
                 chat_id, user, target_user_id, target_display_name=target_name
             )
             if ok:
-                app.AUTH.record_audit(user, "conversation_transfer", object_type="group" if chat_id.endswith("@g.us") else "chat", object_id=chat_id, details=f"Передано user_id={target_user_id}")
+                deps.AUTH.record_audit(user, "conversation_transfer", object_type="group" if chat_id.endswith("@g.us") else "chat", object_id=chat_id, details=f"Передано user_id={target_user_id}")
                 queue_realtime.notify_outbound()
             self.json_response({"updated": ok, "message": message, "conversation_lock": conversation_lock_snapshot(chat_id)}, HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST)
             return
@@ -1352,9 +1352,9 @@ class QueueHTTPHandlerMixin:
         if new_password != form.get("new_password2", ""):
             self.redirect(f"{target}?notice={quote('Новые пароли не совпадают')}")
             return
-        ok, notice = app.AUTH.change_own_password(int(user["id"]), form.get("current_password", ""), new_password)
+        ok, notice = deps.AUTH.change_own_password(int(user["id"]), form.get("current_password", ""), new_password)
         if ok:
-            app.AUTH.record_audit(user, "password_changed", object_type="user", object_id=str(user.get("id", "")), details="Пользователь сменил пароль")
+            deps.AUTH.record_audit(user, "password_changed", object_type="user", object_id=str(user.get("id", "")), details="Пользователь сменил пароль")
             # Смена пароля завершает старые сеансы, поэтому нужно войти снова.
             self.end_app_session()
         else:
@@ -1369,31 +1369,31 @@ class QueueHTTPHandlerMixin:
         object_id = str(form.get("user_id", "") or "")
         if action == "create":
             temporary = form.get("temporary_password", "") == "1"
-            ok, notice, created_id = app.AUTH.create_user(
+            ok, notice, created_id = deps.AUTH.create_user(
                 form.get("username", ""), form.get("display_name", ""), form.get("password", ""),
                 role=form.get("role", "employee"), must_change_password=temporary,
             )
             object_id = str(created_id or "")
         elif action == "toggle":
-            ok, notice = app.AUTH.set_enabled(self.form_int(form, "user_id"), form.get("enabled", "0") == "1")
+            ok, notice = deps.AUTH.set_enabled(self.form_int(form, "user_id"), form.get("enabled", "0") == "1")
         elif action == "role":
-            ok, notice = app.AUTH.set_role(self.form_int(form, "user_id"), form.get("role", "employee"))
+            ok, notice = deps.AUTH.set_role(self.form_int(form, "user_id"), form.get("role", "employee"))
         elif action == "password":
-            ok, notice = app.AUTH.set_password(self.form_int(form, "user_id"), form.get("password", ""), must_change_password=form.get("temporary_password", "") == "1")
+            ok, notice = deps.AUTH.set_password(self.form_int(form, "user_id"), form.get("password", ""), must_change_password=form.get("temporary_password", "") == "1")
         elif action == "theme":
             theme = str(form.get("theme", "") or "").strip().lower()
-            ok, notice = app.AUTH.set_user_preference(self.form_int(form, "user_id"), "theme", theme)
+            ok, notice = deps.AUTH.set_user_preference(self.form_int(form, "user_id"), "theme", theme)
             if ok:
                 notice = "Тема пользователя сохранена"
         elif action == "employee_link":
             employee_name = form.get("employee_name", "")
-            if employee_name and employee_name not in app.EMPLOYEES:
+            if employee_name and employee_name not in deps.EMPLOYEES:
                 ok, notice = False, "Сотрудник не найден в списке"
             else:
-                ok, notice = app.AUTH.set_employee_link(self.form_int(form, "user_id"), employee_name)
+                ok, notice = deps.AUTH.set_employee_link(self.form_int(form, "user_id"), employee_name)
         elif action == "delete":
             target_user_id = self.form_int(form, "user_id")
-            target_user = app.AUTH.get_user(target_user_id) if target_user_id > 0 else None
+            target_user = deps.AUTH.get_user(target_user_id) if target_user_id > 0 else None
             actor_user_id = int(actor_user.get("id", 0) or 0)
             if actor_user_id > 0 and target_user_id == actor_user_id:
                 ok, notice = False, "Нельзя удалить собственную учётную запись"
@@ -1401,19 +1401,19 @@ class QueueHTTPHandlerMixin:
                 ok, notice = False, "Пользователь не найден"
             else:
                 target_name = str(target_user.get("username") or target_user.get("display_name") or target_user_id)
-                ok, delete_notice = app.AUTH.delete_user(target_user_id)
+                ok, delete_notice = deps.AUTH.delete_user(target_user_id)
                 notice = (
                     f"Пользователь @{target_name} удалён. Его активные сессии завершены"
                     if ok else delete_notice
                 )
         elif action == "revoke_session":
-            ok = app.AUTH.revoke_session_hash(form.get("session_hash", ""))
+            ok = deps.AUTH.revoke_session_hash(form.get("session_hash", ""))
             notice = "Сессия завершена" if ok else "Сессия уже завершена или не найдена"
             object_id = str(form.get("session_hash", ""))[:12]
         else:
             ok, notice = False, "Неизвестное действие"
         if ok:
-            app.AUTH.record_audit(actor_user, f"user_{action}", object_type="auth", object_id=object_id, details=notice)
+            deps.AUTH.record_audit(actor_user, f"user_{action}", object_type="auth", object_id=object_id, details=notice)
         prefix = "" if ok else "Ошибка: "
         self.redirect(f"/admin/users?notice={quote(prefix + notice)}")
 
@@ -1424,7 +1424,7 @@ class QueueHTTPHandlerMixin:
         mode = form.get("mode", "field")
         field_name = form.get("field_name", "problem")
         updated, notice = queue_contextual_tickets.apply_history_item(
-            app.STORE, ticket_id, history_id, field_name, work_actor(), mode=mode
+            deps.STORE, ticket_id, history_id, field_name, work_actor(), mode=mode
         )
         if not updated and not notice:
             notice = "Не удалось применить запись истории"
@@ -1437,7 +1437,7 @@ class QueueHTTPHandlerMixin:
             self.json_response({"updated": False, "error": "Чат не найден"}, HTTPStatus.BAD_REQUEST)
             return
         favorite = str(form.get("favorite", "0")).lower() in {"1", "true", "yes", "on"}
-        updated, canonical = app.set_chat_favorite(chat_id, favorite)
+        updated, canonical = deps.set_chat_favorite(chat_id, favorite)
         self.json_response({"updated": updated, "chat_id": canonical, "favorite": favorite},
                            HTTPStatus.OK if updated else HTTPStatus.BAD_REQUEST)
 
@@ -1445,7 +1445,7 @@ class QueueHTTPHandlerMixin:
         # POST /group-mute
         chat_id = valid_group_id(form.get("chat_id", ""))
         muted = form.get("muted", "0") in {"1", "true", "yes", "on"}
-        updated = app.STORE.set_whatsapp_group_muted(chat_id, muted)
+        updated = deps.STORE.set_whatsapp_group_muted(chat_id, muted)
         if not updated:
             self.json_response({"updated": False, "error": "group_not_found"}, HTTPStatus.NOT_FOUND)
         else:
@@ -1459,7 +1459,7 @@ class QueueHTTPHandlerMixin:
             count = int(form.get("employee_count", "0"))
         except ValueError:
             count = 0
-        if count < 1 or count > app.MAX_EMPLOYEES:
+        if count < 1 or count > deps.MAX_EMPLOYEES:
             self.redirect(f"/admin/employees?notice={quote('Некорректное количество сотрудников')}")
             return
         names = [
@@ -1472,18 +1472,18 @@ class QueueHTTPHandlerMixin:
         if len({name.casefold() for name in names}) != len(names):
             self.redirect(f"/admin/employees?count={count}&notice={quote('Имена сотрудников должны отличаться')}")
             return
-        old_names = list(app.EMPLOYEES)
+        old_names = list(deps.EMPLOYEES)
         old_active = active_employee()
-        app.STORE.set_setting("employees_json", json.dumps(names, ensure_ascii=False))
-        app.EMPLOYEES[:] = names
+        deps.STORE.set_setting("employees_json", json.dumps(names, ensure_ascii=False))
+        deps.EMPLOYEES[:] = names
         if old_active in old_names:
             old_index = old_names.index(old_active)
             if old_index < len(names):
-                app.STORE.set_setting("active_employee", names[old_index])
+                deps.STORE.set_setting("active_employee", names[old_index])
             else:
-                app.STORE.set_setting("active_employee", names[0])
+                deps.STORE.set_setting("active_employee", names[0])
         elif old_active not in names:
-            app.STORE.set_setting("active_employee", names[0])
+            deps.STORE.set_setting("active_employee", names[0])
         self.redirect(f"/admin/employees?notice={quote('Список сотрудников сохранён')}")
 
     def _post_admin_ticket_delete(self, parsed, form) -> None:
@@ -1491,7 +1491,7 @@ class QueueHTTPHandlerMixin:
         if not self.require_admin():
             return
         ticket_id = self.form_int(form, "ticket_id")
-        deleted = app.STORE.delete_ticket(ticket_id, f"Администратор · {work_actor()}")
+        deleted = deps.STORE.delete_ticket(ticket_id, f"Администратор · {work_actor()}")
         notice = (
             f"Заявка №{ticket_id} удалена только из системы. Сообщение пользователю не отправлялось"
             if deleted else "Заявка не найдена"
@@ -1505,8 +1505,8 @@ class QueueHTTPHandlerMixin:
         action = form.get("action", "save")
         if action == "delete":
             contact_chat_id = valid_chat_id(form.get("chat_id", ""))
-            existing_contact = app.STORE.manual_whatsapp_contact(contact_chat_id, "")
-            deleted = app.STORE.delete_whatsapp_contact(contact_chat_id)
+            existing_contact = deps.STORE.manual_whatsapp_contact(contact_chat_id, "")
+            deleted = deps.STORE.delete_whatsapp_contact(contact_chat_id)
             if deleted:
                 # После удаления из исключений следующий текст снова должен
                 # запускать обычную автоматику, а не продолжать старый контекст
@@ -1518,19 +1518,19 @@ class QueueHTTPHandlerMixin:
                         reset_keys.add(f"{contact_phone.lstrip('+')}@c.us")
                 for reset_key in reset_keys:
                     if reset_key:
-                        app.STORE.set_conversation_context(reset_key, app.MENU_CONTEXT, 0, False)
+                        deps.STORE.set_conversation_context(reset_key, MENU_CONTEXT, 0, False)
             notice = "Контакт удалён. Автообработка для него снова включена" if deleted else "Контакт не найден"
             self.redirect(f"/admin/contacts?notice={quote(notice)}")
             return
         name = normalize_message(form.get("name", ""))[:100]
         phone = normalize_phone(form.get("phone", ""))
         chat_id = f"{phone.lstrip('+')}@c.us" if phone else ""
-        existing = app.STORE.manual_whatsapp_contact(chat_id, phone) if phone else None
+        existing = deps.STORE.manual_whatsapp_contact(chat_id, phone) if phone else None
         if existing:
             notice = f"Номер {display_phone(phone)} уже добавлен как {existing.get('name') or 'контакт'}"
             self.redirect(f"/admin/contacts?notice={quote(notice)}")
             return
-        saved = app.STORE.save_whatsapp_contact(name, phone, chat_id)
+        saved = deps.STORE.save_whatsapp_contact(name, phone, chat_id)
         notice = "Контакт добавлен" if saved else "Проверьте имя и мобильный номер"
         self.redirect(f"/admin/contacts?notice={quote(notice)}")
 
@@ -1542,12 +1542,12 @@ class QueueHTTPHandlerMixin:
         if employee not in assignment_names():
             employee = work_actor()
         category = form.get("category", "general")
-        if category not in app.CATEGORIES:
+        if category not in CATEGORIES:
             category = "general"
         status = form.get("status", "new")
-        if status not in app.STATUSES:
+        if status not in STATUSES:
             status = "new"
-        ticket_id = app.STORE.create_ticket(
+        ticket_id = deps.STORE.create_ticket(
             {
                 "source": "admin_manual",
                 "sender": employee,
@@ -1568,27 +1568,27 @@ class QueueHTTPHandlerMixin:
             return
         action = form.get("action", "")
         if action == "cleanup":
-            result = queue_workflow.cleanup_retention(app.STORE)
+            result = queue_workflow.cleanup_retention(deps.STORE)
             notice = f"Очистка завершена: сообщений {result.get('messages',0)}, медиа {result.get('media_rows',0)}, заявок {result.get('tickets',0)}"
         elif action == "retry_failed":
-            count = app.STORE.retry_failed_outbound()
+            count = deps.STORE.retry_failed_outbound()
             notice = f"На повторную отправку возвращено: {count}"
         elif action == "backup_now":
-            ok, info = app.create_scheduled_backup("manual_admin")
+            ok, info = deps.create_scheduled_backup("manual_admin")
             notice = f"Резервная копия создана: {info}" if ok else f"Ошибка резервной копии: {info}"
         elif action == "backup_settings":
             try:
                 hours=max(1,min(168,int(form.get("backup_hours","24"))))
                 keep=max(2,min(90,int(form.get("backup_keep","14"))))
-                app.STORE.set_setting("scheduled_backup_hours",str(hours)); app.STORE.set_setting("scheduled_backup_keep",str(keep))
+                deps.STORE.set_setting("scheduled_backup_hours",str(hours)); deps.STORE.set_setting("scheduled_backup_keep",str(keep))
                 notice=f"Расписание сохранено: каждые {hours} ч., хранить {keep} копий"
             except ValueError:
                 notice="Некорректные параметры расписания"
         else:
             notice = "Неизвестное действие"
-        app.AUTH.record_audit(self.effective_user() or {}, f"system_{action}", object_type="system", details=notice)
+        deps.AUTH.record_audit(self.effective_user() or {}, f"system_{action}", object_type="system", details=notice)
         try:
-            with app.MONITOR_LOG_PATH.open("a", encoding="utf-8") as log:
+            with deps.MONITOR_LOG_PATH.open("a", encoding="utf-8") as log:
                 log.write(f"{datetime.now(timezone.utc).isoformat()} ADMIN {notice}\n")
         except OSError:
             pass
@@ -1600,23 +1600,23 @@ class QueueHTTPHandlerMixin:
             return
         action = form.get("action", "save")
         if action == "refresh":
-            app.STORE.set_setting("group_refresh_request", secrets.token_urlsafe(18))
+            deps.STORE.set_setting("group_refresh_request", secrets.token_urlsafe(18))
             notice = "Запрос отправлен QR-коннектору. Список обновится примерно через 5–7 секунд"
             self.redirect(f"/groups?notice={quote(notice)}&refresh=1")
             return
         if action == "delete":
-            deleted = app.STORE.delete_whatsapp_group(valid_group_id(form.get("chat_id", "")))
+            deleted = deps.STORE.delete_whatsapp_group(valid_group_id(form.get("chat_id", "")))
             notice = "Группа удалена" if deleted else "Группа не найдена"
         elif action == "add_discovered":
             chat_id = valid_group_id(form.get("chat_id", ""))
             discovered = next(
-                (item for item in app.STORE.list_discovered_whatsapp_groups() if str(item.get("chat_id", "")) == chat_id),
+                (item for item in deps.STORE.list_discovered_whatsapp_groups() if str(item.get("chat_id", "")) == chat_id),
                 None,
             )
-            saved = app.STORE.save_whatsapp_group(str(discovered.get("name", "")), chat_id) if discovered else None
+            saved = deps.STORE.save_whatsapp_group(str(discovered.get("name", "")), chat_id) if discovered else None
             notice = "Группа добавлена" if saved else "Группа не найдена в списке WhatsApp"
         else:
-            saved = app.STORE.save_whatsapp_group(
+            saved = deps.STORE.save_whatsapp_group(
                 form.get("name", ""),
                 valid_group_id(form.get("chat_id", "")),
             )
@@ -1630,7 +1630,7 @@ class QueueHTTPHandlerMixin:
         report_id = self.form_int(form, "report_id")
         status = form.get("status", "new")
         admin_note = normalize_message(form.get("admin_note", ""))[:3000]
-        updated = app.STORE.update_error_report(report_id, status, admin_note, f"Администратор · {work_actor()}")
+        updated = deps.STORE.update_error_report(report_id, status, admin_note, f"Администратор · {work_actor()}")
         notice = "Репорт обновлён" if updated else "Репорт не найден"
         self.redirect(f"/admin/error?id={report_id}&notice={quote(notice)}")
 
@@ -1638,19 +1638,19 @@ class QueueHTTPHandlerMixin:
         # POST /admin/categories: greeting and menu categories of the bot, stored in the database
         if not self.require_admin():
             return
-        current = queue_generic_profile.load_profile(app.STORE, app.ROOT)
+        current = queue_generic_profile.load_profile(deps.STORE, deps.ROOT)
         try:
             saved = queue_generic_profile.save_profile(
-                app.STORE, queue_generic_profile.profile_from_form(form, current))
+                deps.STORE, queue_generic_profile.profile_from_form(form, current))
         except ValueError as error:
             self.redirect(f"/admin/categories?notice={quote(str(error))}")
             return
         kept = {str(row["key"]) for row in saved["categories"]}
         for row in current["categories"]:
             if str(row["key"]) not in kept:
-                app.CATEGORY_ARCHIVE[str(row["key"])] = str(row["label_ru"])
-        app.STORE.set_setting("request_category_archive_json", json.dumps(app.CATEGORY_ARCHIVE, ensure_ascii=False))
-        app.apply_bot_profile(saved)
+                deps.CATEGORY_ARCHIVE[str(row["key"])] = str(row["label_ru"])
+        deps.STORE.set_setting("request_category_archive_json", json.dumps(deps.CATEGORY_ARCHIVE, ensure_ascii=False))
+        deps.apply_bot_profile(saved)
         self.redirect(f"/admin/categories?notice={quote('Сохранено. Бот уже использует новое меню')}")
 
     def _post_active_employee(self, parsed, form) -> None:
@@ -1661,7 +1661,7 @@ class QueueHTTPHandlerMixin:
         # POST /handoff
         ticket_id = self.form_int(form, "ticket_id")
         action = form.get("action", "transfer")
-        updated = app.STORE.set_ticket_handoff(
+        updated = deps.STORE.set_ticket_handoff(
             ticket_id, action != "accept", work_actor()
         )
         notice = (
@@ -1676,18 +1676,18 @@ class QueueHTTPHandlerMixin:
     def _post_status(self, parsed, form) -> None:
         # POST /status
         ticket_id = self.form_int(form, "ticket_id")
-        ticket = app.STORE.get_ticket(ticket_id)
+        ticket = deps.STORE.get_ticket(ticket_id)
         assignee = form.get("employee", "")
         if assignee not in assignment_names():
             assignee = str((ticket or {}).get("assigned_to", "")) or work_actor()
         requested_status = form.get("status", "")
         close_reason = form.get("close_reason", "")
         close_comment = form.get("close_comment", "")
-        valid_close, close_error = queue_workflow.validate_close(app.STORE, ticket_id, requested_status, close_reason, close_comment)
+        valid_close, close_error = queue_workflow.validate_close(deps.STORE, ticket_id, requested_status, close_reason, close_comment)
         if not valid_close:
             self.redirect(f"/ticket?id={ticket_id}&notice={quote(close_error)}")
             return
-        updated, _message_id = app.update_ticket_status(
+        updated, _message_id = deps.update_ticket_status(
             ticket_id,
             requested_status,
             work_actor(),
@@ -1697,7 +1697,7 @@ class QueueHTTPHandlerMixin:
             close_comment=close_comment,
         )
         if updated:
-            queue_workflow.record_close_meta(app.STORE, ticket_id, requested_status, close_reason, close_comment, work_actor())
+            queue_workflow.record_close_meta(deps.STORE, ticket_id, requested_status, close_reason, close_comment, work_actor())
         notice = "" if updated else "Отработанную заявку может вернуть в работу только администратор"
         suffix = f"&notice={quote(notice)}" if notice else ""
         self.redirect(f"/ticket?id={ticket_id}{suffix}")
@@ -1705,17 +1705,17 @@ class QueueHTTPHandlerMixin:
     def _post_quick_status(self, parsed, form) -> None:
         # POST /quick-status
         ticket_id = self.form_int(form, "ticket_id")
-        ticket = app.STORE.get_ticket(ticket_id)
+        ticket = deps.STORE.get_ticket(ticket_id)
         actor = work_actor()
         requested_status = form.get("status", "")
         assignee = actor if requested_status == "in_progress" else (str((ticket or {}).get("assigned_to", "")) or actor)
         close_reason = form.get("close_reason", "")
         close_comment = form.get("close_comment", "")
-        valid_close, close_error = queue_workflow.validate_close(app.STORE, ticket_id, requested_status, close_reason, close_comment)
+        valid_close, close_error = queue_workflow.validate_close(deps.STORE, ticket_id, requested_status, close_reason, close_comment)
         if not valid_close:
             self.json_response({"updated":False,"error":close_error}, HTTPStatus.BAD_REQUEST)
             return
-        updated, message_id = app.update_ticket_status(
+        updated, message_id = deps.update_ticket_status(
             ticket_id,
             requested_status,
             actor,
@@ -1725,7 +1725,7 @@ class QueueHTTPHandlerMixin:
             close_comment=close_comment,
         )
         if updated:
-            queue_workflow.record_close_meta(app.STORE, ticket_id, requested_status, close_reason, close_comment, actor)
+            queue_workflow.record_close_meta(deps.STORE, ticket_id, requested_status, close_reason, close_comment, actor)
         self.json_response(
             {
                 "updated": updated,
@@ -1742,7 +1742,7 @@ class QueueHTTPHandlerMixin:
     def _post_quick_priority(self, parsed, form) -> None:
         # POST /quick-priority
         ticket_id = self.form_int(form, "ticket_id")
-        updated = app.STORE.update_priority(
+        updated = deps.STORE.update_priority(
             ticket_id,
             form.get("priority", ""),
             work_actor(),
@@ -1755,7 +1755,7 @@ class QueueHTTPHandlerMixin:
     def _post_classification(self, parsed, form) -> None:
         # POST /classification
         ticket_id = self.form_int(form, "ticket_id")
-        updated = app.STORE.update_priority(
+        updated = deps.STORE.update_priority(
             ticket_id,
             form.get("priority", ""),
             work_actor(),
@@ -1766,7 +1766,7 @@ class QueueHTTPHandlerMixin:
     def _post_send_reply(self, parsed, form) -> None:
         # POST /send-reply
         ticket_id = self.form_int(form, "ticket_id")
-        ticket = app.STORE.get_ticket(ticket_id)
+        ticket = deps.STORE.get_ticket(ticket_id)
         linked_chat_id = valid_conversation_id(str((ticket or {}).get("chat_id", "") or ""))
         if linked_chat_id and not self.claim_conversation_write(linked_chat_id):
             return
@@ -1774,7 +1774,7 @@ class QueueHTTPHandlerMixin:
             reply = form.get("custom_reply", "")
         else:
             reply = form.get("quick_reply", "")
-        message_id = app.STORE.queue_outbound_message(
+        message_id = deps.STORE.queue_outbound_message(
             ticket_id,
             reply,
             work_actor(),
@@ -1793,7 +1793,7 @@ class QueueHTTPHandlerMixin:
         chat_id = valid_chat_id(form.get("chat_id", ""))
         if not self.claim_conversation_write(chat_id):
             return
-        message_id = app.STORE.queue_direct_message(
+        message_id = deps.STORE.queue_direct_message(
             chat_id,
             form.get("message", ""),
             work_actor(),
@@ -1818,8 +1818,8 @@ class QueueHTTPHandlerMixin:
         if not raw_chat_id:
             self.json_response({"updated": False, "error": "Выберите личный чат"}, HTTPStatus.BAD_REQUEST)
             return
-        chat_id = app.STORE.canonical_whatsapp_chat_id(raw_chat_id) or raw_chat_id
-        if app.STORE.manual_whatsapp_contact(chat_id, ""):
+        chat_id = deps.STORE.canonical_whatsapp_chat_id(raw_chat_id) or raw_chat_id
+        if deps.STORE.manual_whatsapp_contact(chat_id, ""):
             self.json_response({
                 "updated": False,
                 "manual_contact": True,
@@ -1831,10 +1831,10 @@ class QueueHTTPHandlerMixin:
 
         if action in {"disable", "pause", "off"}:
             actor = work_actor()
-            app.STORE.enable_manual_chat_mode(chat_id, actor)
+            deps.STORE.enable_manual_chat_mode(chat_id, actor)
             if raw_chat_id != chat_id:
-                app.STORE.enable_manual_chat_mode(raw_chat_id, actor)
-            manual_mode = app.STORE.manual_chat_mode(chat_id) or app.STORE.manual_chat_mode(raw_chat_id) or {}
+                deps.STORE.enable_manual_chat_mode(raw_chat_id, actor)
+            manual_mode = deps.STORE.manual_chat_mode(chat_id) or deps.STORE.manual_chat_mode(raw_chat_id) or {}
             queue_realtime.notify("chat")
             self.json_response({
                 "updated": True,
@@ -1846,9 +1846,9 @@ class QueueHTTPHandlerMixin:
 
         if action in {"enable", "resume", "on"}:
             actor = work_actor()
-            app.STORE.disable_manual_chat_mode(chat_id, actor)
+            deps.STORE.disable_manual_chat_mode(chat_id, actor)
             if raw_chat_id != chat_id:
-                app.STORE.disable_manual_chat_mode(raw_chat_id, actor)
+                deps.STORE.disable_manual_chat_mode(raw_chat_id, actor)
             queue_realtime.notify("chat")
             self.json_response({
                 "updated": True,
@@ -1864,11 +1864,11 @@ class QueueHTTPHandlerMixin:
 
         # Existing per-user hard reset. It also guarantees that auto-replies
         # are enabled again after the reset.
-        app.STORE.disable_manual_chat_mode(chat_id, work_actor())
+        deps.STORE.disable_manual_chat_mode(chat_id, work_actor())
         if raw_chat_id != chat_id:
-            app.STORE.disable_manual_chat_mode(raw_chat_id, work_actor())
+            deps.STORE.disable_manual_chat_mode(raw_chat_id, work_actor())
         try:
-            with app.STORE.connection() as db:
+            with deps.STORE.connection() as db:
                 db.execute(
                     "UPDATE contact_meta SET auto_reply_blocked = 0 WHERE chat_id IN (?, ?)",
                     (chat_id, raw_chat_id),
@@ -1883,21 +1883,21 @@ class QueueHTTPHandlerMixin:
         for reset_key in dict.fromkeys((chat_id, raw_chat_id)):
             if not reset_key:
                 continue
-            app.STORE.clear_conversation_draft(reset_key)
+            deps.STORE.clear_conversation_draft(reset_key)
             try:
-                queue_dialog_flow.save(app.STORE, reset_key, {})
+                queue_dialog_flow.save(deps.STORE, reset_key, {})
             except Exception as exc:
                 print(f"Bot hard-reset dialog-flow warning for {reset_key}: {exc}", flush=True)
             try:
-                queue_contextual_tickets.reset_context(app.STORE, reset_key, "")
+                queue_contextual_tickets.reset_context(deps.STORE, reset_key, "")
             except Exception as exc:
                 print(f"Bot hard-reset contextual-flow warning for {reset_key}: {exc}", flush=True)
-            app.STORE.set_conversation_context(reset_key, app.MENU_CONTEXT, 0, False)
+            deps.STORE.set_conversation_context(reset_key, MENU_CONTEXT, 0, False)
 
         reset_token = secrets.token_urlsafe(18)
-        app.STORE.set_setting(f"bot_hard_reset_v1:{chat_id}", reset_token)
+        deps.STORE.set_setting(f"bot_hard_reset_v1:{chat_id}", reset_token)
         if raw_chat_id != chat_id:
-            app.STORE.set_setting(f"bot_hard_reset_v1:{raw_chat_id}", reset_token)
+            deps.STORE.set_setting(f"bot_hard_reset_v1:{raw_chat_id}", reset_token)
 
         queue_realtime.notify("chat")
         print(f"Bot hard reset completed for {chat_id}", flush=True)
@@ -1920,7 +1920,7 @@ class QueueHTTPHandlerMixin:
             item for item in form.get("mentions", "").split(",")
             if valid_conversation_id(item.strip()) or valid_group_id(item.strip())
         ]
-        message_id = app.STORE.queue_direct_message(
+        message_id = deps.STORE.queue_direct_message(
             chat_id,
             form.get("message", ""),
             work_actor(),
@@ -1942,7 +1942,7 @@ class QueueHTTPHandlerMixin:
             return
         message_key = normalize_message(form.get("message_id", ""))[:160]
         action = form.get("action", "")
-        message = app.STORE.get_whatsapp_message(chat_id, message_key) if chat_id and message_key else None
+        message = deps.STORE.get_whatsapp_message(chat_id, message_key) if chat_id and message_key else None
         if not message or bool(message.get("deleted")):
             self.json_response({"queued": False, "error": "Недоступное сообщение"}, HTTPStatus.BAD_REQUEST)
             return
@@ -1955,7 +1955,7 @@ class QueueHTTPHandlerMixin:
         action_body = form.get("message", "")
         if action == "react":
             action_body = str(action_body or "")[:32]
-            if action_body and action_body not in app.REACTION_EMOJIS:
+            if action_body and action_body not in deps.REACTION_EMOJIS:
                 self.json_response({"queued": False, "error": "Эта реакция пока не поддерживается"}, HTTPStatus.BAD_REQUEST)
                 return
         if action == "delete":
@@ -1968,7 +1968,7 @@ class QueueHTTPHandlerMixin:
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
-        action_id = app.STORE.queue_whatsapp_action(action, chat_id, message_key, action_body, work_actor())
+        action_id = deps.STORE.queue_whatsapp_action(action, chat_id, message_key, action_body, work_actor())
         if action_id:
             queue_realtime.notify_outbound()
         self.json_response(
@@ -2000,12 +2000,12 @@ class QueueHTTPHandlerMixin:
             "status": form.get("status", "new"),
             "assigned_to": employee,
         }
-        similar = app.STORE.find_similar_open_ticket(manual_payload, hours=72)
+        similar = deps.STORE.find_similar_open_ticket(manual_payload, hours=72)
         if similar:
             similar_id = int(similar.get("id", 0) or 0)
             self.redirect(f"/ticket?id={similar_id}&notice={quote(f'Похожая открытая заявка уже существует: №{similar_id}. Новая заявка не создана')}")
             return
-        ticket_id = app.STORE.create_ticket(manual_payload)
+        ticket_id = deps.STORE.create_ticket(manual_payload)
         self.redirect(f"/ticket?id={ticket_id}")
 
     # before sign-in
@@ -2103,17 +2103,17 @@ class QueueHTTPHandlerMixin:
         if view not in {"", "mine", "handoff", "open", "urgent"}:
             view = ""
         employee = work_actor()
-        total = app.STORE.count_tickets(status, category, priority, search, view, employee)
-        pages = max(1, (total + app.PAGE_SIZE - 1) // app.PAGE_SIZE)
+        total = deps.STORE.count_tickets(status, category, priority, search, view, employee)
+        pages = max(1, (total + deps.PAGE_SIZE - 1) // deps.PAGE_SIZE)
         page = min(query_page(query), pages)
-        tickets = app.STORE.list_tickets(
-            status, category, priority, search, app.PAGE_SIZE, (page - 1) * app.PAGE_SIZE, view, employee
+        tickets = deps.STORE.list_tickets(
+            status, category, priority, search, deps.PAGE_SIZE, (page - 1) * deps.PAGE_SIZE, view, employee
         )
         self.json_response(
             {
-                "version": app.STORE.dashboard_version(),
+                "version": deps.STORE.dashboard_version(),
                 "rows_html": render_ticket_rows(tickets),
-                "counts": app.STORE.counts(),
+                "counts": deps.STORE.counts(),
                 "pagination_html": render_pagination(query, total, page),
             }
         )
@@ -2152,7 +2152,7 @@ class QueueHTTPHandlerMixin:
 
     def read_authorized_json(self, max_bytes: int = 2_000_000) -> dict[str, object] | None:
         supplied = self.headers.get("X-Webhook-Token", "").encode("utf-8", "surrogateescape")
-        if not secrets.compare_digest(supplied, app.WEBHOOK_TOKEN.encode("utf-8")):
+        if not secrets.compare_digest(supplied, deps.WEBHOOK_TOKEN.encode("utf-8")):
             self.json_response({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
             return None
         try:
@@ -2179,7 +2179,7 @@ class QueueHTTPHandlerMixin:
         supplied = self.headers.get("X-CSRF-Token", "")
         if not supplied and self.headers.get("Content-Type", "").startswith("application/x-www-form-urlencoded"):
             supplied = self.read_form().get("csrf_token", "")
-        if app.csrf_token_valid(supplied):
+        if deps.csrf_token_valid(supplied):
             return True
         message = "Страница устарела. Обновите её и повторите действие"
         if path.startswith("/api/") or self.headers.get("X-Requested-With") == "fetch" or "X-CSRF-Token" in self.headers:
@@ -2234,8 +2234,8 @@ class QueueHTTPHandlerMixin:
         # 1.00.6.14: global kill-switch for bot replies. The inbound webhook is
         # still processed normally, so chats, contexts and tickets keep working;
         # only the automatic response returned to the WhatsApp connector is muted.
-        if urlparse(self.path).path == "/api/whatsapp" and not app.global_auto_reply_enabled():
-            payload = app.suppress_inbound_auto_reply(payload)
+        if urlparse(self.path).path == "/api/whatsapp" and not deps.global_auto_reply_enabled():
+            payload = deps.suppress_inbound_auto_reply(payload)
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")

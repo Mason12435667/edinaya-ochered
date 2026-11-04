@@ -10,6 +10,7 @@ from urllib.parse import urlparse, parse_qs
 
 import queue_realtime
 from queue_core import log_suppressed
+from queue_work_context import work_actor
 
 MAX_FILE = 512 * 1024 * 1024
 CHUNK = 512 * 1024
@@ -124,7 +125,7 @@ def safe_mime(value):
     return value if re.fullmatch(r'[a-z0-9.+-]+/[a-z0-9.+-]+',value) else 'application/octet-stream'
 
 
-def post(handler, app):
+def post(handler, deps):
     parsed=urlparse(handler.path)
     if not parsed.path.startswith('/upload/'): return False
     user = handler.effective_user() or {}
@@ -134,24 +135,24 @@ def post(handler, app):
             payload=handler.read_json_body(20000)
             if payload is None: return True
             if not handler.claim_conversation_write(str(payload.get('chat_id', ''))): return True
-            result=app.UPLOADS.start(payload,app.work_actor(),owner=owner)
+            result=deps.UPLOADS.start(payload,work_actor(),owner=owner)
         elif parsed.path == '/upload/chunk':
             q=parse_qs(parsed.query)
-            app.UPLOADS.authorized_chat(q.get('id',[''])[0],owner)
+            deps.UPLOADS.authorized_chat(q.get('id',[''])[0],owner)
             length=int(handler.headers.get('Content-Length','0'))
             if length<=0 or length>CHUNK: raise ValueError('Недопустимый размер части')
             data=handler.read_body(CHUNK)
             if data is None or len(data)!=length: raise ValueError('Передача прервана')
-            result=app.UPLOADS.append(q.get('id',[''])[0],int(q.get('offset',['0'])[0]),data)
+            result=deps.UPLOADS.append(q.get('id',[''])[0],int(q.get('offset',['0'])[0]),data)
         elif parsed.path in {'/upload/finish','/upload/cancel'}:
             payload=handler.read_json_body(2000)
             if payload is None: return True
             token=str(payload.get('upload_id',''))
-            chat = app.UPLOADS.authorized_chat(token,owner)
+            chat = deps.UPLOADS.authorized_chat(token,owner)
             if parsed.path.endswith('/finish') and not handler.claim_conversation_write(chat): return True
             if parsed.path.endswith('/cancel'):
-                app.UPLOADS.cancel(token); result={'cancelled':True}
-            else: result=app.UPLOADS.finish(token)
+                deps.UPLOADS.cancel(token); result={'cancelled':True}
+            else: result=deps.UPLOADS.finish(token)
         else:
             handler.json_response({'error':'Неизвестная операция'},404); return True
         handler.json_response(result)
@@ -163,7 +164,7 @@ def post(handler, app):
     return True
 
 
-def preserve_sent_attachment(app, message_id):
+def preserve_sent_attachment(deps, message_id):
     """Keep a local copy of a successfully sent attachment for chat history.
 
     The WhatsApp queue deletes its temporary outbound file after a successful send.
@@ -171,7 +172,7 @@ def preserve_sent_attachment(app, message_id):
     local bubble can later contain only the caption.  Preserve first, then let the
     queue clean the temporary file.
     """
-    with app.STORE.connection() as db:
+    with deps.STORE.connection() as db:
         row = db.execute(
             'SELECT media_path,media_mime,media_name FROM outbound_messages WHERE id=?',
             (message_id,),
@@ -179,7 +180,7 @@ def preserve_sent_attachment(app, message_id):
     if not row:
         return {}
 
-    destination = app.MEDIA_DIR / ('outbound-' + str(message_id) + '.bin')
+    destination = deps.MEDIA_DIR / ('outbound-' + str(message_id) + '.bin')
     destination.parent.mkdir(parents=True, exist_ok=True)
     mime = str(row['media_mime'] or 'application/octet-stream')
     name = str(row['media_name'] or 'Вложение')
@@ -193,9 +194,9 @@ def preserve_sent_attachment(app, message_id):
 
     if not row['media_path']: return {}
     source = Path(str(row['media_path'])).resolve()
-    allowed_roots = [app.OUTBOUND_MEDIA_DIR.resolve()]
+    allowed_roots = [deps.OUTBOUND_MEDIA_DIR.resolve()]
     try:
-        allowed_roots.append(Path(app.UPLOADS.root).resolve())
+        allowed_roots.append(Path(deps.UPLOADS.root).resolve())
     except Exception:
         log_suppressed("queue_uploads.preserve_sent_attachment")
     if not any(root == source.parent or root in source.parents for root in allowed_roots):
@@ -218,7 +219,7 @@ def preserve_sent_attachment(app, message_id):
 
 
 
-def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, body='', message_type=''):
+def recover_clipboard_attachment(deps, chat_id, message_id, message_timestamp=0, body='', message_type=''):
     """Recover a Win+Shift+S attachment from the outbound queue by chat and time.
 
     WhatsApp can successfully deliver a clipboard screenshot while whatsapp-web.js
@@ -243,7 +244,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
         return {}
 
     try:
-        canonical = app.STORE.canonical_whatsapp_chat_id(safe_chat) or safe_chat
+        canonical = deps.STORE.canonical_whatsapp_chat_id(safe_chat) or safe_chat
     except Exception:
         log_suppressed("queue_uploads.recover_clipboard_attachment")
         canonical = safe_chat
@@ -253,7 +254,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
     observed_cmp = '' if observed.casefold() in placeholders else observed
 
     try:
-        with app.STORE.connection() as db:
+        with deps.STORE.connection() as db:
             rows = db.execute(
                 """
                 SELECT id, chat_id, body, status, provider_id, media_path,
@@ -277,7 +278,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
             # A different WhatsApp ID means this queue row was already paired.
             continue
         try:
-            row_chat = app.STORE.canonical_whatsapp_chat_id(str(row['chat_id'] or '')) or str(row['chat_id'] or '')
+            row_chat = deps.STORE.canonical_whatsapp_chat_id(str(row['chat_id'] or '')) or str(row['chat_id'] or '')
         except Exception:
             log_suppressed("queue_uploads.recover_clipboard_attachment")
             row_chat = str(row['chat_id'] or '')
@@ -314,7 +315,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
     row = candidates[0][2]
     queue_id = int(row['id'])
 
-    preserved = preserve_sent_attachment(app, queue_id)
+    preserved = preserve_sent_attachment(deps, queue_id)
     if not preserved:
         return {}
 
@@ -322,7 +323,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
     # uncertain queue item did reach WhatsApp.  Finalize it only after the bytes
     # were preserved, so complete_outbound_message may safely remove the temp.
     try:
-        app.STORE.complete_outbound_message(queue_id, True, '', safe_message)
+        deps.STORE.complete_outbound_message(queue_id, True, '', safe_message)
     except Exception:
         # The media itself is already safe; history can still use it.
         log_suppressed("queue_uploads.recover_clipboard_attachment")

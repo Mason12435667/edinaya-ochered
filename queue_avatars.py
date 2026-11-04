@@ -6,10 +6,11 @@ from pathlib import Path
 import os
 import tempfile
 from urllib.parse import urlencode
+from queue_core import valid_conversation_id
 
 
-def cache_path(app, chat_id):
-    return app.DATA_DIR / 'avatars' / (hashlib.sha256(chat_id.encode()).hexdigest()+'.img')
+def cache_path(deps, chat_id):
+    return deps.DATA_DIR / 'avatars' / (hashlib.sha256(chat_id.encode()).hexdigest()+'.img')
 
 
 def image_mime(data):
@@ -19,17 +20,17 @@ def image_mime(data):
     return ''
 
 
-def url(app, chat_id):
-    path = cache_path(app,chat_id)
+def url(deps, chat_id):
+    path = cache_path(deps,chat_id)
     try: version = path.stat().st_mtime_ns
     except OSError: return ''
     return '/api/avatar?' + urlencode({'chat_id':chat_id,'v':version})
 
 
-def save(app, payload):
-    chat = app.valid_conversation_id(str(payload.get('chat_id','')))
+def save(deps, payload):
+    chat = valid_conversation_id(str(payload.get('chat_id','')))
     if not chat: raise ValueError('Неизвестный чат')
-    path = cache_path(app,chat)
+    path = cache_path(deps,chat)
     if payload.get('missing') is True:
         # A transient missing photo is not a deletion request.
         return
@@ -50,9 +51,9 @@ def save(app, payload):
         temp.unlink(missing_ok=True)
 
 
-def serve(handler,app,chat):
-    chat=app.valid_conversation_id(chat)
-    path=cache_path(app,chat)
+def serve(handler,deps,chat):
+    chat=valid_conversation_id(chat)
+    path=cache_path(deps,chat)
     if not chat or not path.is_file():
         handler.send_error(404); return
     data=path.read_bytes()

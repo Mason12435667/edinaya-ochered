@@ -157,8 +157,10 @@ python -m unittest discover -s tests -t .
 (`.github/workflows/tests.yml`). Они проверяют диалог бота в WhatsApp, создание и смену статуса заявок,
 вход, раздачу статических файлов и проверку `config/company.json`.
 
-Модули, вынесенные из `app.py`, получают общие сервисы через `bind(app_module)`
-и обращаются к ним явно: `app.STORE`, `app.AUTH` и т. д. Маршруты POST описаны
+Модули, вынесенные из `app.py`, получают общие сервисы объектом
+`AppDependencies` (`queue_app_deps.py`): `deps.STORE`, `deps.AUTH`, `deps.bot_menu()`
+и т. д. Всё, что модулям нужно от `app.py`, перечислено в этом классе; тест
+`tests/test_app_deps.py` следит, чтобы модули не обращались к необъявленному. Маршруты POST описаны
 таблицами `*_POST_ROUTES` в `queue_http_handler.py`; порядок таблиц в `do_POST`
 задаёт этапы обработки (вход, авторизация, режим обслуживания, аудит форм).
 Порядок CSS-файлов (`MAIN_STYLESHEETS` в `queue_ticket_views.py`) — это порядок

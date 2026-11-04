@@ -14,6 +14,11 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 from queue_core import log_suppressed
+import queue_contextual_tickets
+import queue_productivity
+import queue_realtime
+import queue_user_locale
+from ticketing import MENU_CONTEXT, MENU_GATE_CONTEXT
 
 DEFAULT_MINUTES = 30
 DEFAULT_SCAN_SECONDS = 60
@@ -103,25 +108,25 @@ def _request_already_queued(store: Any, request_id: str) -> bool:
         ).fetchone()
     return bool(row)
 
-def _safe_context(app: Any, chat_id: str) -> tuple[bool, dict[str, Any] | None]:
-    context = app.STORE.get_conversation_context(chat_id)
+def _safe_context(deps: Any, chat_id: str) -> tuple[bool, dict[str, Any] | None]:
+    context = deps.STORE.get_conversation_context(chat_id)
     if not context:
         return True, None
     mode = str(context.get("pending_category", "") or "")
-    allowed = {"", str(app.MENU_CONTEXT), str(app.MENU_GATE_CONTEXT), str(app.USER_PROFILE_CONTEXT)}
+    allowed = {"", str(MENU_CONTEXT), str(MENU_GATE_CONTEXT), str(deps.USER_PROFILE_CONTEXT)}
     # Do not break a user who is already entering details for a selected category,
     # following an active ticket, or being handed to staff.
     return mode in allowed, context
 
 
-def recover_once(app: Any, now_epoch: int | None = None) -> int:
-    if not bool(app.global_auto_reply_enabled()):
+def recover_once(deps: Any, now_epoch: int | None = None) -> int:
+    if not bool(deps.global_auto_reply_enabled()):
         return 0
 
     minutes, _scan_seconds, max_hours = settings()
     now_value = int(now_epoch if now_epoch is not None else time.time())
     candidates = _candidate_rows(
-        app.STORE,
+        deps.STORE,
         now_value,
         delay_seconds=minutes * 60,
         max_age_seconds=max_hours * 3600,
@@ -134,52 +139,52 @@ def recover_once(app: Any, now_epoch: int | None = None) -> int:
         timestamp = int(row.get("message_timestamp", 0) or 0)
         if not chat_id or not message_key or timestamp <= 0:
             continue
-        if app.STORE.manual_whatsapp_contact(chat_id, phone):
+        if deps.STORE.manual_whatsapp_contact(chat_id, phone):
             continue
-        if app.STORE.manual_chat_mode(chat_id):
+        if deps.STORE.manual_chat_mode(chat_id):
             continue
-        if app.queue_productivity.auto_reply_blocked(app.STORE, chat_id):
+        if queue_productivity.auto_reply_blocked(deps.STORE, chat_id):
             continue
-        if _has_queued_reply_after(app.STORE, chat_id, timestamp):
+        if _has_queued_reply_after(deps.STORE, chat_id, timestamp):
             continue
-        safe, _context = _safe_context(app, chat_id)
+        safe, _context = _safe_context(deps, chat_id)
         if not safe:
             continue
 
-        language = app.get_contact_language(chat_id, phone)
-        active = app.STORE.active_context_ticket(chat_id)
+        language = deps.get_contact_language(chat_id, phone)
+        active = deps.STORE.active_context_ticket(chat_id)
         active_id = int(active["id"]) if active else 0
 
         if not language:
-            text = app.language_selection_text_v3()
+            text = deps.language_selection_text_v3()
             # Keep the context neutral: the normal inbound flow will persist the
             # language choice and then continue with profile/menu recovery.
         else:
-            app.queue_user_locale.set_language(language)
-            profile = app.get_contact_profile(chat_id, phone)
+            queue_user_locale.set_language(language)
+            profile = deps.get_contact_profile(chat_id, phone)
             if not profile:
-                app.STORE.set_conversation_context(
+                deps.STORE.set_conversation_context(
                     chat_id,
-                    app.USER_PROFILE_CONTEXT,
+                    deps.USER_PROFILE_CONTEXT,
                     active_id,
                     bool(active),
                 )
-                text = app.profile_prompt_text()
+                text = deps.profile_prompt_text()
             else:
-                app.STORE.clear_conversation_draft(chat_id)
-                app.queue_contextual_tickets.reset_context(app.STORE, chat_id, "")
-                app.STORE.set_conversation_context(
+                deps.STORE.clear_conversation_draft(chat_id)
+                queue_contextual_tickets.reset_context(deps.STORE, chat_id, "")
+                deps.STORE.set_conversation_context(
                     chat_id,
-                    app.MENU_CONTEXT,
+                    MENU_CONTEXT,
                     active_id,
                     bool(active),
                 )
-                text = app.BOT_MENU.text()
+                text = deps.bot_menu().text()
 
         request_id = _request_id(chat_id, message_key)
-        if _request_already_queued(app.STORE, request_id):
+        if _request_already_queued(deps.STORE, request_id):
             continue
-        message_id = app.STORE.queue_direct_message(
+        message_id = deps.STORE.queue_direct_message(
             chat_id,
             text,
             "Система: восстановление меню",
@@ -188,7 +193,7 @@ def recover_once(app: Any, now_epoch: int | None = None) -> int:
         if not message_id:
             continue
         try:
-            app.queue_realtime.notify_outbound()
+            queue_realtime.notify_outbound()
         except Exception:
             log_suppressed("queue_stale_menu.recover_once")
         sent += 1
@@ -200,14 +205,14 @@ def recover_once(app: Any, now_epoch: int | None = None) -> int:
     return sent
 
 
-def worker_loop(app: Any) -> None:
+def worker_loop(deps: Any) -> None:
     # Delay the first pass very slightly so DB initialization and the connector
     # can finish starting. Afterwards the worker is intentionally lightweight.
     time.sleep(5)
     while True:
         _minutes, scan_seconds, _max_hours = settings()
         try:
-            recover_once(app)
+            recover_once(deps)
         except Exception as error:
             print(f"[STALE MENU] ошибка фоновой проверки: {error}", flush=True)
         time.sleep(scan_seconds)

@@ -10,6 +10,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from queue_core import log_suppressed
+import queue_avatars
+from queue_chat_state import connector_state_snapshot
+from queue_work_context import ticket_sla_state
 
 DANGEROUS_EXTENSIONS = {
     '.exe','.com','.scr','.pif','.msi','.msp','.bat','.cmd','.ps1','.psm1','.vbs','.vbe','.js','.jse',
@@ -248,21 +251,21 @@ def message_info(store, chat_id: str, message_key: str) -> dict[str,Any] | None:
     return item
 
 
-def request_profile_refresh(app, chat_id: str) -> None:
+def request_profile_refresh(deps, chat_id: str) -> None:
     chat_id = str(chat_id or '').strip()[:120]
     if not chat_id:
         raise ValueError('Чат не выбран')
     try:
-        with app.CHAT_LOCK:
-            app.CHAT_STATE['requested_chat_id'] = chat_id
-            profiles = app.CHAT_STATE.get('contact_profiles')
+        with deps.CHAT_LOCK:
+            deps.CHAT_STATE['requested_chat_id'] = chat_id
+            profiles = deps.CHAT_STATE.get('contact_profiles')
             if isinstance(profiles,dict): profiles.pop(chat_id,None)
-            presence = app.CHAT_STATE.get('presence')
+            presence = deps.CHAT_STATE.get('presence')
             if isinstance(presence,dict): presence.pop(chat_id,None)
     except Exception:
         log_suppressed("queue_reliability.request_profile_refresh")
     try:
-        path = app.queue_avatars.cache_path(app,chat_id)
+        path = queue_avatars.cache_path(deps,chat_id)
         if path.is_file(): path.unlink()
     except Exception:
         log_suppressed("queue_reliability.request_profile_refresh")
@@ -304,24 +307,24 @@ def verify_backups(data_dir: Path) -> list[dict[str,Any]]:
     return out
 
 
-def diagnostic_snapshot(app) -> dict[str,Any]:
-    db = database_check(app.DATABASE_PATH)
+def diagnostic_snapshot(deps) -> dict[str,Any]:
+    db = database_check(deps.DATABASE_PATH)
     try:
-        usage=shutil.disk_usage(app.DATA_DIR); disk={'total':usage.total,'used':usage.used,'free':usage.free}
+        usage=shutil.disk_usage(deps.DATA_DIR); disk={'total':usage.total,'used':usage.used,'free':usage.free}
     except OSError: disk={'total':0,'used':0,'free':0}
-    try: connector=app.connector_state_snapshot()
+    try: connector=connector_state_snapshot()
     except Exception:
         log_suppressed("queue_reliability.diagnostic_snapshot")
         connector={}
-    problems=queue_problem_rows(app.STORE,100)
-    backups=verify_backups(app.DATA_DIR)
-    legacy_secret=app.ROOT/'.connector_token'
+    problems=queue_problem_rows(deps.STORE,100)
+    backups=verify_backups(deps.DATA_DIR)
+    legacy_secret=deps.ROOT/'.connector_token'
     secret_env=bool(os.getenv('WEBHOOK_TOKEN','').strip())
     return {
         'database':db,'disk':disk,'connector':connector,'queue_problems':problems,
-        'backups':backups,'maintenance':maintenance_active(app.STORE),
+        'backups':backups,'maintenance':maintenance_active(deps.STORE),
         'secret_storage':{'env':secret_env,'legacy_file':legacy_secret.is_file(),'legacy_path':str(legacy_secret)},
-        'max_media_bytes':int(getattr(app,'MAX_MEDIA_BYTES',12*1024*1024)),
+        'max_media_bytes':int(deps.MAX_MEDIA_BYTES),
     }
 
 
@@ -426,15 +429,15 @@ def resolve_persisted_alert(store, alert_key: str) -> bool:
     return True
 
 
-def refresh_active_alerts(app) -> dict[str,Any]:
+def refresh_active_alerts(deps) -> dict[str,Any]:
     """Run the checks that can safely be revalidated on demand from the bell UI."""
-    run_health_checks(app)
+    run_health_checks(deps)
     backup_bad: list[dict[str,Any]] = []
     try:
-        backups = verify_backups(app.DATA_DIR)
+        backups = verify_backups(deps.DATA_DIR)
         backup_bad = [x for x in backups[:3] if not x.get('ok')]
         _upsert_alert(
-            app.STORE,
+            deps.STORE,
             'backup-integrity','backup','critical','Проблема резервной копии',
             str(backup_bad[0].get('path') or backup_bad[0].get('detail') or '') if backup_bad else '',
             bool(backup_bad),
@@ -461,26 +464,26 @@ def _upsert_alert(store, key: str, kind: str, level: str, title: str, detail: st
             db.execute("DELETE FROM reliability_notification_dismissals WHERE event_id=?",(event_id,))
 
 
-def run_health_checks(app) -> None:
-    db=database_check(app.DATABASE_PATH)
-    _upsert_alert(app.STORE,'db-integrity','database','critical','Ошибка целостности базы',str(db.get('detail','')),not db.get('ok'))
+def run_health_checks(deps) -> None:
+    db=database_check(deps.DATABASE_PATH)
+    _upsert_alert(deps.STORE,'db-integrity','database','critical','Ошибка целостности базы',str(db.get('detail','')),not db.get('ok'))
     try:
-        disk=shutil.disk_usage(app.DATA_DIR)
+        disk=shutil.disk_usage(deps.DATA_DIR)
         low = disk.free < max(1_000_000_000, int(disk.total*0.05))
-        _upsert_alert(app.STORE,'disk-space','disk','warning','Заканчивается место на диске',f'Свободно {disk.free} байт',low)
+        _upsert_alert(deps.STORE,'disk-space','disk','warning','Заканчивается место на диске',f'Свободно {disk.free} байт',low)
     except OSError: pass
     try:
-        conn=app.connector_state_snapshot(); connected=bool(conn.get('connected'))
-        _upsert_alert(app.STORE,'connector','whatsapp','critical','WhatsApp-коннектор недоступен',str(conn.get('status') or 'Нет связи'),not connected)
+        conn=connector_state_snapshot(); connected=bool(conn.get('connected'))
+        _upsert_alert(deps.STORE,'connector','whatsapp','critical','WhatsApp-коннектор недоступен',str(conn.get('status') or 'Нет связи'),not connected)
     except Exception:
         log_suppressed("queue_reliability.run_health_checks")
 
 
-def reliability_notification_events(app, limit: int = 20) -> tuple[int,list[dict[str,Any]]]:
+def reliability_notification_events(deps, limit: int = 20) -> tuple[int,list[dict[str,Any]]]:
     events: list[dict[str,Any]]=[]
     # Persisted infrastructure alerts.
     try:
-        with app.STORE.connection() as db:
+        with deps.STORE.connection() as db:
             rows=db.execute("SELECT * FROM reliability_alerts WHERE active=1 ORDER BY updated_at DESC LIMIT ?",(int(limit),)).fetchall()
         for r in rows:
             events.append({'event_id':'reliability:'+str(r['alert_key']),'kind':'system','title':str(r['title']),
@@ -489,11 +492,11 @@ def reliability_notification_events(app, limit: int = 20) -> tuple[int,list[dict
     except Exception:
         log_suppressed("queue_reliability.reliability_notification_events")
     # SLA warning / overdue events are calculated live, without mutating ticket status.
-    if str(app.STORE.get_setting('sla_alerts_enabled','1')).lower() in {'1','true','yes','on'}:
+    if str(deps.STORE.get_setting('sla_alerts_enabled','1')).lower() in {'1','true','yes','on'}:
         try:
-            tickets=app.STORE.list_tickets('new','','','',500,0)
+            tickets=deps.STORE.list_tickets('new','','','',500,0)
             for t in tickets:
-                state=app.ticket_sla_state(t)
+                state=ticket_sla_state(t)
                 if not state.get('active') or not (state.get('warning') or state.get('overdue')): continue
                 tid=int(t.get('id') or 0); overdue=bool(state.get('overdue')); remain=int(state.get('remaining_seconds') or 0)
                 title=f"SLA {'ПРОСРОЧЕН' if overdue else 'приближается'} · заявка #{tid}"
@@ -503,28 +506,28 @@ def reliability_notification_events(app, limit: int = 20) -> tuple[int,list[dict
         except Exception:
             log_suppressed("queue_reliability.reliability_notification_events")
     events.sort(key=lambda x:int(x.get('timestamp',0) or 0),reverse=True)
-    reconcile_notification_dismissals(app.STORE,[e.get('event_id') for e in events],('reliability:','sla:'))
-    events=filter_dismissed_notifications(app.STORE,events)
+    reconcile_notification_dismissals(deps.STORE,[e.get('event_id') for e in events],('reliability:','sla:'))
+    events=filter_dismissed_notifications(deps.STORE,events)
     return len(events),events[:limit]
 
 
-def worker_loop(app, stop: threading.Event | None = None) -> None:
+def worker_loop(deps, stop: threading.Event | None = None) -> None:
     stop=stop or threading.Event(); last_health=0.0; last_backup=0.0
     while not stop.wait(1.0):
-        try: dispatch_due(app.STORE,25)
+        try: dispatch_due(deps.STORE,25)
         except Exception as exc: print(f'Отложенная отправка: {exc}',flush=True)
         now=time.monotonic()
         if now-last_health >= 300:
             last_health=now
-            try: run_health_checks(app)
+            try: run_health_checks(deps)
             except Exception as exc: print(f'Диагностика: {exc}',flush=True)
         if now-last_backup >= 21600:
             last_backup=now
             try:
-                backups=verify_backups(app.DATA_DIR)
+                backups=verify_backups(deps.DATA_DIR)
                 if backups:
                     bad=[x for x in backups[:3] if not x.get('ok')]
-                    _upsert_alert(app.STORE,'backup-integrity','backup','critical','Проблема резервной копии',
+                    _upsert_alert(deps.STORE,'backup-integrity','backup','critical','Проблема резервной копии',
                                   (str(bad[0].get('path')) if bad else ''),bool(bad))
             except Exception:
                 log_suppressed("queue_reliability.worker_loop")
