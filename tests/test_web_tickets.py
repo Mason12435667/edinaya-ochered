@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import re
 import unittest
+from unittest import mock
 from urllib.parse import parse_qs, urlparse
+
+import queue_productivity
 
 from tests import support
 from tests.support import WhatsAppUser, admin_cookie, get, post_form
@@ -50,6 +53,14 @@ class AuthenticationTests(unittest.TestCase):
     def test_foreign_host_header_is_rejected(self):
         response = support.request("GET", "/health", headers={"Host": "evil.example.com"})
         self.assertEqual(response.status, 421)
+
+
+class BackupsPageTests(unittest.TestCase):
+    def test_unwritable_backup_dir_does_not_break_the_page(self):
+        with mock.patch.object(queue_productivity, "backup_dir", side_effect=PermissionError("no access")):
+            with self.assertLogs("queue", "WARNING"):
+                response = get("/admin/backups", admin_cookie())
+        self.assertEqual(response.status, 200)
 
 
 class StaticFilesTests(unittest.TestCase):

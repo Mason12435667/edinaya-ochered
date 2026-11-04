@@ -42,6 +42,9 @@ os.environ.update({
     "QUEUE_DATA_DIR": str(_DATA_DIR / "data"),
     "QUEUE_WHATSAPP_AUTH_DIR": str(_DATA_DIR / "wa"),
     "QUEUE_GENERIC_CONFIG": str(_COMPANY_CONFIG),
+    # defaults point at /var/..., which tests must not touch
+    "QUEUE_MANUAL_BACKUP_DIR": str(_DATA_DIR / "backups"),
+    "QUEUE_SOURCE_CACHE_DIR": str(_DATA_DIR / "source-cache"),
     "QUEUE_PROFILE": "generic",
 })
 os.environ.pop("QUEUE_ALLOW_LAN", None)
