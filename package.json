@@ -6,7 +6,8 @@
   "main": "whatsapp_qr_connector.js",
   "scripts": {
     "start": "node whatsapp_qr_connector.js",
-    "test": "node --check whatsapp_qr_connector.js"
+    "test": "node --test tests/*.test.js",
+    "check:connector": "node scripts/check_connector.js"
   },
   "engines": {
     "node": ">=18"
