@@ -403,9 +403,9 @@ class AuthStore:
             if int(admin_row["amount"] if admin_row else 0) < 1:
                 connection.rollback()
                 return False, "Сначала должен быть создан администратор", 0
-            # 1.00.6.84: самостоятельная регистрация сотрудников больше не
-            # ограничена одним аккаунтом на всю систему. Ограничение остаётся
-            # только на уникальность логина и наличие хотя бы одного администратора.
+            # Самостоятельно зарегистрированный аккаунт создаётся выключенным:
+            # доступ к переписке и заявкам появляется только после того, как
+            # администратор включит его в разделе «Пользователи».
             try:
                 cursor = connection.execute(
                     """
@@ -414,10 +414,10 @@ class AuthStore:
                         must_change_password, created_at, updated_at
                     ) VALUES(?,?,?,?,?,?,?,?,?)
                     """,
-                    (username, display_name, "employee", display_name[:80], encoded, 1, 0, now, now),
+                    (username, display_name, "employee", display_name[:80], encoded, 0, 0, now, now),
                 )
                 connection.commit()
-                return True, "Аккаунт сотрудника создан", int(cursor.lastrowid)
+                return True, "Заявка на доступ отправлена. Войти можно после одобрения администратором", int(cursor.lastrowid)
             except sqlite3.IntegrityError:
                 connection.rollback()
                 return False, "Такой логин уже существует", 0
@@ -737,7 +737,7 @@ class AuthStore:
             if not bool(row["enabled"]):
                 self._record_login_event_conn(connection, user_id=int(row["id"]), username=username, success=False, reason="disabled", client_ip=client_ip, user_agent=user_agent)
                 connection.commit()
-                return {"ok": False, "error": "Учётная запись отключена администратором"}
+                return {"ok": False, "error": "Учётная запись отключена или ещё не одобрена администратором"}
             locked_until = _parse_iso(row["locked_until"])
             now = _utcnow()
             if locked_until and locked_until > now:

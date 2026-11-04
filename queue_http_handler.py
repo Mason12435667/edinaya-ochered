@@ -1046,18 +1046,8 @@ class QueueHTTPHandlerMixin:
         if not ok:
             self.html_response(app.render_register(message), HTTPStatus.BAD_REQUEST)
             return
-        result = app.AUTH.authenticate(
-            form.get("username", ""), password,
-            client_ip=self.client_address[0] if self.client_address else "",
-            user_agent=self.headers.get("User-Agent", ""),
-        )
-        if not result.get("ok"):
-            self.html_response(app.render_login({}, "Аккаунт создан. Войдите с новым логином и паролем"), HTTPStatus.OK)
-            return
-        register_user = result.get("user") or {}
-        if str(register_user.get("role", "")) == "employee":
-            app.activate_employee_shift(register_user)
-        self.start_app_session(str(result["token"]), "/")
+        # The new account is disabled until an administrator approves it: no session yet.
+        self.html_response(app.render_login({}, message), HTTPStatus.OK)
 
     def _post_forgot_password(self, parsed) -> None:
         # POST /forgot-password

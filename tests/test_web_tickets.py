@@ -55,6 +55,45 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status, 421)
 
 
+class RegistrationTests(unittest.TestCase):
+    PASSWORD = "Stranger-Pass-2026!"
+
+    def register(self, username: str):
+        return post_form("/register", {"username": username, "display_name": "Незнакомец",
+                                       "password": self.PASSWORD, "password2": self.PASSWORD})
+
+    def login(self, username: str):
+        return post_form("/login", {"username": username, "password": self.PASSWORD, "next": "/"})
+
+    def test_self_registered_account_has_no_access_until_approved(self):
+        admin_cookie()  # registration requires an existing administrator
+        response = self.register("stranger1")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.cookies(), "", "registration must not start a session")
+        self.assertIn("одобрения администратором", response.text)
+
+        denied = self.login("stranger1")
+        self.assertEqual(denied.status, 401)
+        self.assertEqual(denied.cookies(), "")
+
+        user = next(u for u in support.app.AUTH.list_users() if u["username"] == "stranger1")
+        self.assertFalse(user["enabled"])
+        approve = post_form("/admin/users", {"action": "toggle", "user_id": user["id"], "enabled": "1"}, admin_cookie())
+        self.assertIn(approve.status, (302, 303))
+
+        allowed = self.login("stranger1")
+        self.assertIn(allowed.status, (302, 303))
+        self.assertEqual(get("/", allowed.cookies()).status, 200)
+
+    def test_unapproved_account_cannot_reach_chats_or_tickets(self):
+        admin_cookie()
+        self.register("stranger2")
+        for path in ("/", "/whatsapp", "/ticket?id=1", "/api/chat-state"):
+            with self.subTest(path=path):
+                response = get(path)
+                self.assertIn(response.status, (302, 303, 401, 403))
+
+
 class BackupsPageTests(unittest.TestCase):
     def test_unwritable_backup_dir_does_not_break_the_page(self):
         with mock.patch.object(queue_productivity, "backup_dir", side_effect=PermissionError("no access")):
