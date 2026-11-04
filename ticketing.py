@@ -501,6 +501,9 @@ class TicketStore:
             finally:
                 self._transaction_state.connection = None
 
+    # One transaction for any group of writes that must commit (or roll back) together.
+    atomic = atomic_inbound
+
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
         shared = getattr(self._transaction_state, "connection", None)
@@ -965,6 +968,9 @@ class TicketStore:
 
     def canonical_whatsapp_chat_id(self, chat_id: str) -> str:
         """Return the persistent canonical private-chat id used by the UI."""
+        clean = normalize_message(chat_id)[:120]
+        if not clean or clean.endswith("@g.us") or clean.endswith("@c.us"):
+            return clean  # only @lid aliases need the database
         with self.connection() as connection:
             return self._canonical_whatsapp_chat_id(connection, chat_id)
 
@@ -3617,16 +3623,33 @@ class TicketStore:
                 "WHERE status='sending' AND claimed_at<>'' AND claimed_at < ?",
                 (now, stale_cutoff),
             )
-            # Если коннектор взял сообщение и умер до результата, запись не теряется.
+            # Если коннектор взял сообщение и умер до результата, запись не теряется:
+            # она возвращается в очередь, а при исчерпанных попытках становится
+            # failed, чтобы попасть в список проблемных и в ручной повтор.
             connection.execute(
                 """
                 UPDATE outbound_messages
-                SET status='pending', claimed_at='', next_attempt_at='',
-                    last_error=CASE WHEN last_error='' THEN 'Повтор после зависшей отправки' ELSE last_error END,
+                SET status=CASE WHEN attempt_count >= max_attempts THEN 'failed' ELSE 'pending' END,
+                    failed_at=CASE WHEN attempt_count >= max_attempts THEN ? ELSE failed_at END,
+                    claimed_at='', next_attempt_at='',
+                    last_error=CASE
+                        WHEN attempt_count >= max_attempts THEN 'Попытки отправки исчерпаны: коннектор не вернул результат'
+                        WHEN last_error='' THEN 'Повтор после зависшей отправки'
+                        ELSE last_error END,
                     updated_at=?
                 WHERE status='processing' AND claimed_at <> '' AND claimed_at < ?
                 """,
-                (now, stale_cutoff),
+                (now, now, stale_cutoff),
+            )
+            # Записи, которые раньше застряли в pending без оставшихся попыток.
+            connection.execute(
+                """
+                UPDATE outbound_messages
+                SET status='failed', failed_at=?, updated_at=?,
+                    last_error='Попытки отправки исчерпаны: коннектор не вернул результат'
+                WHERE status='pending' AND attempt_count >= max_attempts
+                """,
+                (now, now),
             )
             # Очередь постоянная: после перезапуска коннектора старые pending
             # сообщения не теряются и продолжают отправляться.

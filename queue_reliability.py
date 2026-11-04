@@ -168,12 +168,16 @@ def dispatch_due(store, limit: int = 25) -> int:
     for raw in rows:
         row = dict(raw)
         try:
-            outbound_id = int(store.queue_direct_message(row['chat_id'], row['body'], row['actor']) or 0)
-            if outbound_id <= 0:
-                raise RuntimeError('Не удалось поставить сообщение во внутреннюю очередь WhatsApp')
-            with store.connection() as db:
-                db.execute("UPDATE reliability_scheduled_messages SET status='queued',outbound_id=?,last_error='' WHERE id=? AND status='scheduled'",
-                           (outbound_id,int(row['id'])))
+            # Queueing and marking the schedule as queued commit together; the
+            # request id additionally makes a repeated pass reuse the same message.
+            with store.atomic():
+                outbound_id = int(store.queue_direct_message(
+                    row['chat_id'], row['body'], row['actor'], request_id=f"scheduled:{int(row['id'])}") or 0)
+                if outbound_id <= 0:
+                    raise RuntimeError('Не удалось поставить сообщение во внутреннюю очередь WhatsApp')
+                with store.connection() as db:
+                    db.execute("UPDATE reliability_scheduled_messages SET status='queued',outbound_id=?,last_error='' WHERE id=? AND status='scheduled'",
+                               (outbound_id,int(row['id'])))
             moved += 1
         except Exception as exc:
             with store.connection() as db:
