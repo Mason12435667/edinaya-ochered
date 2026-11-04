@@ -166,58 +166,6 @@ def post(handler, app):
     return True
 
 
-def preserve_sent_attachment(app, message_id):
-    """Keep a local copy of a successfully sent attachment for chat history.
-
-    The WhatsApp queue deletes its temporary outbound file after a successful send.
-    Without this preserved copy the remote WhatsApp message is correct, but the
-    local bubble can later contain only the caption.  Preserve first, then let the
-    queue clean the temporary file.
-    """
-    with app.STORE.connection() as db:
-        row = db.execute(
-            'SELECT media_path,media_mime,media_name FROM outbound_messages WHERE id=?',
-            (message_id,),
-        ).fetchone()
-    if not row:
-        return {}
-
-    destination = app.MEDIA_DIR / ('outbound-' + str(message_id) + '.bin')
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    mime = str(row['media_mime'] or 'application/octet-stream')
-    name = str(row['media_name'] or 'Вложение')
-
-    # Idempotent result callbacks must keep returning the already-preserved copy.
-    if destination.is_file():
-        return {
-            'media_path': str(destination), 'media_mime': mime, 'media_name': name,
-            'type': 'image' if mime.startswith('image/') else 'video' if mime.startswith('video/') else 'audio' if mime.startswith('audio/') else 'document',
-        }
-
-    if not row['media_path']: return {}
-    source = Path(str(row['media_path'])).resolve()
-    allowed_roots = [app.OUTBOUND_MEDIA_DIR.resolve()]
-    try:
-        allowed_roots.append(Path(app.UPLOADS.root).resolve())
-    except Exception:
-        log_suppressed("queue_uploads.preserve_sent_attachment")
-    if not any(root == source.parent or root in source.parents for root in allowed_roots):
-        return {}
-    if not source.is_file():
-        return {}
-
-    try:
-        # Same data volume in the normal install: zero-copy and safe.
-        os.link(source, destination)
-    except OSError:
-        # Cross-filesystem fallback.  Keep the source until the queue marks the
-        # send complete, instead of moving it out from under the sender.
-        shutil.copy2(source, destination)
-
-    return {
-        'media_path': str(destination), 'media_mime': mime, 'media_name': name,
-        'type': 'image' if mime.startswith('image/') else 'video' if mime.startswith('video/') else 'audio' if mime.startswith('audio/') else 'document',
-    }
 
 
 
@@ -317,7 +265,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
     row = candidates[0][2]
     queue_id = int(row['id'])
 
-    preserved = preserve_sent_attachment(app, queue_id)
+    preserved = app.ATTACHMENTS.preserve(queue_id)
     if not preserved:
         return {}
 

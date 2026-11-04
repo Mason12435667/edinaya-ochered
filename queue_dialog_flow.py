@@ -1,6 +1,7 @@
 # EO_GENERIC_GENERIC_FLOW_V140
 """Durable pre-menu context and bounded, explainable clarification helpers."""
 import json
+from datetime import datetime, timedelta, timezone
 import re
 import time
 from queue_user_locale import tr
@@ -57,3 +58,17 @@ def other_topic(text, category):
 def topic_prompt():
     return tr('Это дополнение к текущей заявке или новая проблема?\nНапишите «Дополнение» либо «Новая». Для новой заявки потребуется выбрать категорию.',
               'Бұл ағымдағы өтінімге қосымша ма, әлде жаңа мәселе ме?\n«Қосымша» немесе «Жаңа» деп жазыңыз. Жаңа өтінім үшін санатты таңдау қажет.')
+
+
+def pending_context_category(context: dict[str, object] | None, categories) -> str:
+    if not context or context.get("pending_category") not in categories:
+        return ""
+    try:
+        updated = datetime.fromisoformat(str(context["updated_at"]).replace("Z", "+00:00"))
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError, KeyError):
+        return ""
+    if datetime.now(timezone.utc) - updated > timedelta(hours=24):
+        return ""
+    return str(context["pending_category"])

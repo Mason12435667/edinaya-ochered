@@ -68,8 +68,6 @@
 
 // Show a concise human explanation for failed interactive API calls without changing their response body.
 (() => {
-  const originalFetch = window.fetch;
-  if (!originalFetch || originalFetch.__uq107) return;
   const recent = new Map();
   const toast = (text) => {
     const message = window.queueFriendlyError(text);
@@ -81,20 +79,13 @@
     stack.appendChild(el); setTimeout(() => el.remove(), 6500);
   };
   const quiet = /\/api\/(notifications|chat-state|group-state|performance-state|admin\/connector-state)/;
-  const wrapped = async (...args) => {
-    try {
-      const response = await originalFetch(...args);
-      const url = String(args[0]?.url || args[0] || '');
-      if (!response.ok && !quiet.test(url)) {
-        const ct = response.headers.get('content-type') || '';
-        if (ct.includes('json')) response.clone().json().then((x) => { if (x?.error) toast(x.error); }).catch(() => {});
-      }
-      return response;
-    } catch (error) {
-      const url = String(args[0]?.url || args[0] || '');
-      if (!quiet.test(url)) toast(error?.message || error);
-      throw error;
-    }
-  };
-  wrapped.__uq107 = true; window.fetch = wrapped;
+  window.QueueHTTP.subscribe({
+    match: ({url, response}) => url.origin === location.origin && !quiet.test(url.pathname)
+      && (!response || (!response.ok && (response.headers.get('content-type') || '').includes('json'))),
+    response: async ({response}) => {
+      const data = await response.json();
+      if (data?.error) toast(data.error);
+    },
+    error: ({error}) => toast(error?.message || error),
+  });
 })();
