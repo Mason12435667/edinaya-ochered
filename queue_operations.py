@@ -2,6 +2,7 @@
 import html
 import secrets
 from urllib.parse import urlparse,quote
+from queue_core import log_suppressed
 
 
 def initialize(store):
@@ -54,7 +55,7 @@ def get(handler,app):
         cards.append(f'''<section class="panel"><h2><a href="/ticket?id={t['id']}">#{t['id']} · {app.e(t['title'])}</a></h2>
         <p>Исполнитель: {app.e(t['assigned_to'] or 'Не назначен')}</p>{handoff_history(app.STORE,t['id'])}
         <form method="post" action="/handoff"><input type="hidden" name="ticket_id" value="{t['id']}">
-        <input type="hidden" name="revision" value="{t['revision']}"><input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}">
+        <input type="hidden" name="revision" value="{t['revision']}"><input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}">
         <input type="hidden" name="next" value="/shift-handoff">{note}<button class="button" name="action" value="{action}">{label}</button></form></section>''')
     handler.html_response(app.layout('Передача смены','<h1>Передача смены</h1><p>До 200 незавершённых заявок. Принятие записывается от имени вашего аккаунта.</p>'+(''.join(cards) or '<p>Незавершённых заявок нет</p>'),show_admin=handler.is_admin()))
     return True
@@ -81,7 +82,7 @@ def post(handler,app):
         return True
     if path not in {'/status','/quick-status','/quick-priority','/classification','/handoff'}:return False
     form=handler.read_form()
-    if not secrets.compare_digest(form.get('csrf_token',''),app.ADMIN_FORM_TOKEN):
+    if not secrets.compare_digest(form.get('csrf_token',''),app.csrf_token()):
         handler.json_response({'error':'Обновите страницу: сессия формы устарела'},403);return True
     try:
         tid=int(form.get('ticket_id','0'));revision=int(form.get('revision','-1'))
@@ -118,6 +119,7 @@ def post(handler,app):
         if path.startswith('/quick-'):handler.json_response({'updated':False,'error':str(error)},code)
         else:handler.html_response(app.layout('Изменение не сохранено','<section class="panel"><h1>Изменение не сохранено</h1><p>'+app.e(str(error))+'</p><a href="/ticket?id='+str(handler.form_int(form,'ticket_id'))+'">Открыть актуальную заявку</a></section>',show_admin=handler.is_admin()),code)
     except Exception:
+        log_suppressed("queue_operations.post")
         handler.json_response({'updated':False,'error':'Не удалось сохранить изменение. Данные не изменены, повторите позже'},503)
     return True
 

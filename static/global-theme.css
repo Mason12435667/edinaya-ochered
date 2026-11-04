@@ -109,7 +109,7 @@ nav { gap: 6px; }
 }
 .shift-form select, .theme-toggle, .notification-button {
   border-color: rgba(111,178,156,.34) !important;
-  background: rgba(18,59,49,.76) !important;
+  background: rgba(18,59,49,.76);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
 }
 .theme-toggle, .notification-button { transition: transform .18s ease, background .18s ease, border-color .18s ease; }
@@ -340,8 +340,8 @@ footer { opacity: .82; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .page, .instruction-shell, .toast-card { animation: none !important; }
-  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+  .page, .instruction-shell, .toast-card { animation: none; }
+  *, *::before, *::after { transition-duration: .01ms; animation-duration: .01ms !important; animation-iteration-count: 1; }
 }
 
 /* 3.3.88: keep the group participants popover above chat messages.
@@ -365,7 +365,7 @@ footer { opacity: .82; }
   z-index: 2000;
 }
 .participants-list {
-  z-index: 2100 !important;
+  z-index: 2100;
 }
 .chat-messages {
   position: relative;

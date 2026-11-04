@@ -1,18 +1,30 @@
 from __future__ import annotations
 
+import re
+import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import quote
+
+import queue_auth
+import queue_avatars
 import queue_dialog_flow
+import queue_message_identity
+import queue_names
+import queue_productivity
+import queue_reliability
+from queue_core import epoch_time, log_suppressed, normalized_phone_digits, valid_chat_id, valid_conversation_id, valid_group_id
+from queue_work_context import cached_snapshot_value, mark_whatsapp_read_throttled
+from ticketing import normalize_message
 
-APP_MODULE: Any = None
+# Application module (app.py): shared services, settings and helpers it defines.
+app: Any = None
 
-def bind(context: dict[str, Any], app_module: Any) -> None:
-    global APP_MODULE
-    APP_MODULE = app_module
-    protected = {"bind", "APP_MODULE", "Any"}
-    for name, value in context.items():
-        if name.startswith("__") or name in protected:
-            continue
-        globals()[name] = value
+
+def bind(app_module: Any) -> None:
+    global app
+    app = app_module
+
 
 def lock_owned_by_current_user(lock: dict[str, object] | None) -> bool:
     if not lock:
@@ -31,7 +43,7 @@ def conversation_lock_snapshot(conversation_id: str) -> dict[str, object]:
     conversation_id = str(conversation_id or "").strip()
     if not conversation_id:
         return {"locked": False, "owned_by_me": False, "can_write": False, "owner": {}}
-    lock = AUTH.conversation_lock(conversation_id)
+    lock = app.AUTH.conversation_lock(conversation_id)
     if not lock:
         return {"locked": False, "owned_by_me": False, "can_write": True, "owner": {}}
     owned_by_me = lock_owned_by_current_user(lock)
@@ -102,7 +114,7 @@ def whatsapp_display_name(value: object) -> str:
 
 
 def pending_context_category(context: dict[str, object] | None) -> str:
-    if not context or context.get("pending_category") not in CATEGORIES:
+    if not context or context.get("pending_category") not in app.CATEGORIES:
         return ""
     try:
         updated = datetime.fromisoformat(str(context["updated_at"]).replace("Z", "+00:00"))
@@ -151,7 +163,7 @@ def latest_deleted_chat_previews() -> dict[str, dict[str, object]]:
     preview is corrected from the newest saved message without deleting history.
     """
     try:
-        with sqlite3.connect(DATABASE_PATH, timeout=5.0) as connection:
+        with sqlite3.connect(app.DATABASE_PATH, timeout=5.0) as connection:
             rows = connection.execute(
                 """
                 SELECT m.chat_id, m.message_timestamp, m.from_me
@@ -193,7 +205,7 @@ def apply_deleted_preview_override(chats: list[dict[str, object]]) -> list[dict[
         chat_id = valid_conversation_id(str(chat.get("id", "")))
         if not chat_id:
             continue
-        canonical = STORE.canonical_whatsapp_chat_id(chat_id) or chat_id
+        canonical = app.STORE.canonical_whatsapp_chat_id(chat_id) or chat_id
         tombstone = tombstones.get(canonical) or tombstones.get(chat_id)
         if not tombstone:
             continue
@@ -215,12 +227,12 @@ def forward_targets_snapshot() -> list[dict[str, str]]:
     def load() -> list[dict[str, str]]:
         targets: list[dict[str, str]] = []
         seen: set[str] = set()
-        for chat in STORE.list_saved_whatsapp_chats(120):
+        for chat in app.STORE.list_saved_whatsapp_chats(120):
             chat_id = valid_chat_id(str(chat.get("id", "")))
             if chat_id and chat_id not in seen:
                 seen.add(chat_id)
                 targets.append({"id": chat_id, "name": whatsapp_display_name(chat.get("name", "")) or "Пользователь WhatsApp"})
-        for group in STORE.list_whatsapp_groups():
+        for group in app.STORE.list_whatsapp_groups():
             chat_id = valid_group_id(str(group.get("chat_id", "")))
             if chat_id and chat_id not in seen:
                 seen.add(chat_id)
@@ -231,11 +243,11 @@ def forward_targets_snapshot() -> list[dict[str, str]]:
 
 def display_names():
     def load():
-        manual = STORE.list_manual_whatsapp_contacts()
-        with CHAT_LOCK:
-            records = [dict(x) for x in CHAT_STATE.get("chats", []) if isinstance(x, dict)]
-            records += [dict(x, id=k) for k,x in CHAT_STATE.get("profiles", {}).items() if isinstance(x, dict)]
-            for participants in CHAT_STATE.get("group_participants", {}).values():
+        manual = app.STORE.list_manual_whatsapp_contacts()
+        with app.CHAT_LOCK:
+            records = [dict(x) for x in app.CHAT_STATE.get("chats", []) if isinstance(x, dict)]
+            records += [dict(x, id=k) for k,x in app.CHAT_STATE.get("profiles", {}).items() if isinstance(x, dict)]
+            for participants in app.CHAT_STATE.get("group_participants", {}).values():
                 records.extend(dict(x) for x in participants if isinstance(x, dict))
         return queue_names.Names(manual, records)
     return cached_snapshot_value("display_names_356", 1.0, load)
@@ -273,8 +285,8 @@ def _group_preview_mention_map(chat_id: str, mentions=None) -> dict[str, str]:
 
     if str(chat_id).endswith("@g.us"):
         try:
-            with CHAT_LOCK:
-                participants_map = CHAT_STATE.get("group_participants", {})
+            with app.CHAT_LOCK:
+                participants_map = app.CHAT_STATE.get("group_participants", {})
                 participants = list(participants_map.get(chat_id, [])) if isinstance(participants_map, dict) else []
             for participant in participants:
                 if not isinstance(participant, dict):
@@ -285,14 +297,14 @@ def _group_preview_mention_map(chat_id: str, mentions=None) -> dict[str, str]:
                 add(participant.get("resolved_id", ""), name, own)
                 add(participant.get("phone", ""), name, own)
         except Exception:
-            pass
+            log_suppressed("queue_chat_state._group_preview_mention_map")
     return mapping
 
 
 def _latest_group_preview_mentions(chat_id: str) -> list[dict[str, object]]:
     def load():
         try:
-            page = STORE.list_saved_whatsapp_messages_page(chat_id, 3)
+            page = app.STORE.list_saved_whatsapp_messages_page(chat_id, 3)
             rows = [dict(item) for item in page.get("messages", []) if isinstance(item, dict)]
             if not rows:
                 return []
@@ -300,6 +312,7 @@ def _latest_group_preview_mentions(chat_id: str) -> list[dict[str, object]]:
             value = latest.get("mentions", [])
             return value if isinstance(value, list) else []
         except Exception:
+            log_suppressed("queue_chat_state.load")
             return []
     return list(cached_snapshot_value(f"group_preview_mentions_10067:{chat_id}", 2.5, load))
 
@@ -320,12 +333,12 @@ def humanize_group_preview_mentions(chat_id: str, body: object) -> str:
 
 def enrich_chat_list(chats):
     # Personal chats and groups share the same persisted favorites setting.
-    favorites = favorite_chat_ids()
-    activity = cached_snapshot_value("chat_activity_356", 1.0, STORE.chat_activity)
-    manual = {row["chat_id"]: row["name"] for row in cached_snapshot_value("manual_contacts", 2.5, STORE.list_manual_whatsapp_contacts)}
+    favorites = app.favorite_chat_ids()
+    activity = cached_snapshot_value("chat_activity_356", 1.0, app.STORE.chat_activity)
+    manual = {row["chat_id"]: row["name"] for row in cached_snapshot_value("manual_contacts", 2.5, app.STORE.list_manual_whatsapp_contacts)}
     for chat in chats:
         cid = str(chat.get("id", ""))
-        canonical = cid if cid.endswith("@g.us") else (STORE.canonical_whatsapp_chat_id(cid) or cid)
+        canonical = cid if cid.endswith("@g.us") else (app.STORE.canonical_whatsapp_chat_id(cid) or cid)
         row = dict(activity.get(cid, {}))
         chat.update(row)
         chat["favorite"] = cid in favorites or canonical in favorites
@@ -341,16 +354,16 @@ def enrich_chat_list(chats):
         sid = str(row.get("last_sender_id", ""))
         if manual.get(sid):
             chat["last_sender"] = manual[sid]
-        chat["last_sender_avatar_url"] = queue_avatars.url(APP_MODULE, sid) if sid else ""
+        chat["last_sender_avatar_url"] = queue_avatars.url(app, sid) if sid else ""
     return chats
 
 
 def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False) -> dict[str, object]:
-    requested = STORE.canonical_whatsapp_chat_id(valid_chat_id(requested_chat_id))
+    requested = app.STORE.canonical_whatsapp_chat_id(valid_chat_id(requested_chat_id))
     if requested and read_visible:
         mark_whatsapp_read_throttled(requested)
-    stored_chats: list[dict[str, object]] = list(STORE.list_saved_whatsapp_chats(100))
-    manual_contacts = list(cached_snapshot_value("manual_contacts", 2.5, STORE.list_manual_whatsapp_contacts))
+    stored_chats: list[dict[str, object]] = list(app.STORE.list_saved_whatsapp_chats(100))
+    manual_contacts = list(cached_snapshot_value("manual_contacts", 2.5, app.STORE.list_manual_whatsapp_contacts))
     manual_by_chat: dict[str, dict[str, object]] = {}
     for manual in manual_contacts:
         if not isinstance(manual, dict):
@@ -368,7 +381,7 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
             item["name"] = str(manual.get("name", "")) or item.get("name", "")
             item["manual_contact"] = True
     known_stored_ids = {str(item.get("id", "")) for item in stored_chats}
-    stored_contacts = list(cached_snapshot_value("whatsapp_contacts", 2.5, lambda: STORE.list_whatsapp_contacts(100)))
+    stored_contacts = list(cached_snapshot_value("whatsapp_contacts", 2.5, lambda: app.STORE.list_whatsapp_contacts(100)))
     for contact in stored_contacts:
         chat_id = valid_chat_id(str(contact.get("id", "")))
         if not chat_id or chat_id in known_stored_ids:
@@ -384,20 +397,20 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
                 "manual_contact": bool(contact.get("manual")),
             }
         )
-    with CHAT_LOCK:
+    with app.CHAT_LOCK:
         if requested:
-            CHAT_STATE["requested_chat_id"] = requested
-            live_chat_items = CHAT_STATE.get("chats", [])
+            app.CHAT_STATE["requested_chat_id"] = requested
+            live_chat_items = app.CHAT_STATE.get("chats", [])
             if isinstance(live_chat_items, list):
                 for item in live_chat_items:
                     if isinstance(item, dict) and item.get("id") == requested:
                         item["unread_count"] = 0
         selected = requested
-        messages_by_chat = CHAT_STATE.get("messages", {})
+        messages_by_chat = app.CHAT_STATE.get("messages", {})
         live_messages: list[dict[str, object]] = []
         if isinstance(messages_by_chat, dict):
             live_messages = list(messages_by_chat.get(selected, []))
-        updated_at = str(CHAT_STATE.get("updated_at", ""))
+        updated_at = str(app.CHAT_STATE.get("updated_at", ""))
         connection_is_fresh = False
         if updated_at:
             try:
@@ -407,11 +420,11 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
                 connection_is_fresh = datetime.now(timezone.utc) - updated < timedelta(seconds=45)
             except ValueError:
                 pass
-        live_chats = list(CHAT_STATE.get("chats", []))
-        discovered_contacts = list(CHAT_STATE.get("discovered_contacts", []))
-        profiles_snapshot = dict(CHAT_STATE.get("contact_profiles", {})) if isinstance(CHAT_STATE.get("contact_profiles", {}), dict) else {}
-        presence_snapshot = dict(CHAT_STATE.get("presence", {})) if isinstance(CHAT_STATE.get("presence", {}), dict) else {}
-        connected = bool(CHAT_STATE.get("connected")) and connection_is_fresh
+        live_chats = list(app.CHAT_STATE.get("chats", []))
+        discovered_contacts = list(app.CHAT_STATE.get("discovered_contacts", []))
+        profiles_snapshot = dict(app.CHAT_STATE.get("contact_profiles", {})) if isinstance(app.CHAT_STATE.get("contact_profiles", {}), dict) else {}
+        presence_snapshot = dict(app.CHAT_STATE.get("presence", {})) if isinstance(app.CHAT_STATE.get("presence", {}), dict) else {}
+        connected = bool(app.CHAT_STATE.get("connected")) and connection_is_fresh
 
     # WhatsApp contact discovery/profile data is authoritative for the visible name.
     # It repairs old rows that were accidentally renamed to "Система" by our own
@@ -435,7 +448,7 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
         if str(manual.get("name", "")).strip():
             whatsapp_names[manual_id] = str(manual["name"]).strip()
 
-    history_page = STORE.list_saved_whatsapp_messages_page(selected, 50) if selected else {"messages": [], "has_more": False, "cursor": ""}
+    history_page = app.STORE.list_saved_whatsapp_messages_page(selected, 50) if selected else {"messages": [], "has_more": False, "cursor": ""}
     stored_messages = list(history_page.get("messages", []))
     merged_messages: dict[str, dict[str, object]] = {}
     for item in stored_messages:
@@ -465,7 +478,7 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
         key=lambda item: int(item.get("timestamp", 0) or 0),
     )[-50:]
     raw_messages = dedupe_whatsapp_messages(raw_messages)
-    messages = decorate_chat_messages(selected, raw_messages) if selected else []
+    messages = app.decorate_chat_messages(selected, raw_messages) if selected else []
     merged_chats: dict[str, dict[str, object]] = {}
     for item in stored_chats:
         chat_id = str(item.get("id", ""))
@@ -479,7 +492,7 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
     for item in live_chats:
         if not isinstance(item, dict) or not item.get("id"):
             continue
-        chat_id = STORE.canonical_whatsapp_chat_id(str(item["id"]))
+        chat_id = app.STORE.canonical_whatsapp_chat_id(str(item["id"]))
         if not chat_id:
             continue
         item = {**item, "id": chat_id}
@@ -524,7 +537,7 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
             phone_digits = re.sub(r"\D", "", str(chat.get("phone", "")))
             if not phone_digits and cid.endswith("@c.us"):
                 phone_digits = re.sub(r"\D", "", cid.split("@", 1)[0])
-            canonical_cid = STORE.canonical_whatsapp_chat_id(cid)
+            canonical_cid = app.STORE.canonical_whatsapp_chat_id(cid)
             target_id = f"{phone_digits}@c.us" if phone_digits else canonical_cid
             # Важно: ключ дедупликации тоже строим по каноническому ID.
             # Раньше @lid и его уже известный @c.us могли получить одинаковый
@@ -571,15 +584,15 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
         return {"known": bool(raw.get("known")), "online": bool(raw.get("online")), "state": str(raw.get("state", "") or "")}
     for chat in chats:
         chat_id = str(chat["id"])
-        chat["avatar_url"] = queue_avatars.url(APP_MODULE,chat_id)
+        chat["avatar_url"] = queue_avatars.url(app,chat_id)
         if not chat_id.endswith("@g.us"):
             chat["presence"] = fresh_presence(chat_id)
-    manual_mode = STORE.manual_chat_mode(selected) if selected else None
+    manual_mode = app.STORE.manual_chat_mode(selected) if selected else None
     selected_manual = manual_by_chat.get(selected) if selected else None
     profile = dict(profiles_snapshot.get(selected, {})) if selected else {}
     selected_presence = fresh_presence(selected) if selected else {"known": False, "online": False}
     if selected:
-        profile["profile_pic_url"] = queue_avatars.url(APP_MODULE,selected)
+        profile["profile_pic_url"] = queue_avatars.url(app,selected)
         profile["presence"] = selected_presence
     if profile:
         profile["name"] = display_names().name(selected, whatsapp_names.get(selected) or profile.get("name", ""), profile.get("phone", ""))
@@ -594,14 +607,16 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
             raw_phone = f"+{digits}" if digits else ""
         try:
             cache_key = f"ui_active_tickets:{selected}:{raw_phone}"
-            active_rows = cached_snapshot_value(cache_key, 2.5, lambda: STORE.list_active_user_tickets(selected, raw_phone, 8))
+            active_rows = cached_snapshot_value(cache_key, 2.5, lambda: app.STORE.list_active_user_tickets(selected, raw_phone, 8))
         except Exception:
+            log_suppressed("queue_chat_state.chat_state_snapshot")
             active_rows = []
         active_items: list[dict[str, object]] = []
         for raw_row in active_rows:
             try:
                 row = dict(raw_row)
             except Exception:
+                log_suppressed("queue_chat_state.chat_state_snapshot")
                 row = raw_row if isinstance(raw_row, dict) else {}
             try:
                 ticket_id = int(row.get("id", 0) or 0)
@@ -611,7 +626,7 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
                 continue
             active_items.append({
                 "id": ticket_id,
-                "category": str(CATEGORIES.get(str(row.get("category", "")), row.get("category_name") or "Заявка")),
+                "category": str(app.CATEGORIES.get(str(row.get("category", "")), row.get("category_name") or "Заявка")),
                 "category_key": str(row.get("category", "")),
                 "status": str(row.get("status", "") or ""),
                 "priority": str(row.get("priority", "") or ""),
@@ -628,7 +643,7 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
         "history_has_more": bool(history_page.get("has_more")),
         "history_cursor": str(history_page.get("cursor", "")),
         "manual_mode": manual_mode or {},
-        "dialog_review": queue_dialog_flow.review_state(STORE, selected) if selected else {},
+        "dialog_review": queue_dialog_flow.review_state(app.STORE, selected) if selected else {},
         "manual_contact": bool(selected_manual),
         "profile": profile,
         "presence": selected_presence,
@@ -642,7 +657,7 @@ def group_state_snapshot(requested_group_id: str = "", read_visible: bool = Fals
     requested = valid_group_id(requested_group_id)
     if requested and read_visible:
         mark_whatsapp_read_throttled(requested)
-    groups = STORE.list_whatsapp_groups()
+    groups = app.STORE.list_whatsapp_groups()
     group_preview_rows = [
         {
             "id": str(group.get("chat_id", "")),
@@ -661,16 +676,16 @@ def group_state_snapshot(requested_group_id: str = "", read_visible: bool = Fals
             group["last_timestamp"] = int(override.get("timestamp", group.get("last_timestamp", 0)) or 0)
             group["last_from_me"] = bool(override.get("last_from_me", group.get("last_from_me")))
     selected = requested or (str(groups[0]["chat_id"]) if groups else "")
-    with CHAT_LOCK:
+    with app.CHAT_LOCK:
         if selected:
-            CHAT_STATE["requested_group_id"] = selected
-        participants_map = CHAT_STATE.get("group_participants", {})
+            app.CHAT_STATE["requested_group_id"] = selected
+        participants_map = app.CHAT_STATE.get("group_participants", {})
         participants = (
             list(participants_map.get(selected, []))
             if isinstance(participants_map, dict) and selected
             else []
         )
-        presence_snapshot = dict(CHAT_STATE.get("presence", {})) if isinstance(CHAT_STATE.get("presence", {}), dict) else {}
+        presence_snapshot = dict(app.CHAT_STATE.get("presence", {})) if isinstance(app.CHAT_STATE.get("presence", {}), dict) else {}
     participant_rows: list[dict[str, object]] = []
     for raw_participant in participants:
         if not isinstance(raw_participant, dict):
@@ -680,7 +695,7 @@ def group_state_snapshot(requested_group_id: str = "", read_visible: bool = Fals
         for avatar_id in (str(participant.get("resolved_id", "") or "").strip(), str(participant.get("mention_id", "") or "").strip()):
             if not avatar_id:
                 continue
-            avatar_url = queue_avatars.url(APP_MODULE, avatar_id)
+            avatar_url = queue_avatars.url(app, avatar_id)
             if avatar_url:
                 participant["avatar_url"] = avatar_url
                 break
@@ -706,7 +721,7 @@ def group_state_snapshot(requested_group_id: str = "", read_visible: bool = Fals
         participant_rows.append(participant)
     participants = participant_rows
     connection = connector_state_snapshot()
-    history_page = STORE.list_saved_whatsapp_messages_page(selected, 50) if selected else {"messages": [], "has_more": False, "cursor": ""}
+    history_page = app.STORE.list_saved_whatsapp_messages_page(selected, 50) if selected else {"messages": [], "has_more": False, "cursor": ""}
     raw_messages = dedupe_whatsapp_messages(list(history_page.get("messages", [])))
     return {
         "connected": connection["connected"],
@@ -715,7 +730,7 @@ def group_state_snapshot(requested_group_id: str = "", read_visible: bool = Fals
         "chats": enrich_chat_list([
             {
                 "id": str(group["chat_id"]),
-                "avatar_url": queue_avatars.url(APP_MODULE,str(group["chat_id"])),
+                "avatar_url": queue_avatars.url(app,str(group["chat_id"])),
                 "name": str(group["name"]),
                 "last_message": str(group.get("last_message", "")),
                 "timestamp": int(group.get("last_timestamp", 0) or 0),
@@ -730,7 +745,7 @@ def group_state_snapshot(requested_group_id: str = "", read_visible: bool = Fals
             }
             for group in groups
         ]),
-        "messages": decorate_chat_messages(selected, raw_messages) if selected else [],
+        "messages": app.decorate_chat_messages(selected, raw_messages) if selected else [],
         "history_has_more": bool(history_page.get("has_more")),
         "history_cursor": str(history_page.get("cursor", "")),
         "participants": participants,
@@ -740,10 +755,10 @@ def group_state_snapshot(requested_group_id: str = "", read_visible: bool = Fals
 
 
 def connector_state_snapshot() -> dict[str, object]:
-    with CHAT_LOCK:
-        updated_at = str(CHAT_STATE.get("updated_at", ""))
-        status = str(CHAT_STATE.get("connector_status", "offline"))
-        qr_data_url = str(CHAT_STATE.get("qr_data_url", ""))
+    with app.CHAT_LOCK:
+        updated_at = str(app.CHAT_STATE.get("updated_at", ""))
+        status = str(app.CHAT_STATE.get("connector_status", "offline"))
+        qr_data_url = str(app.CHAT_STATE.get("qr_data_url", ""))
         fresh = False
         if updated_at:
             try:
@@ -753,7 +768,7 @@ def connector_state_snapshot() -> dict[str, object]:
                 fresh = datetime.now(timezone.utc) - updated < timedelta(seconds=45)
             except ValueError:
                 pass
-        connected = bool(CHAT_STATE.get("connected")) and fresh
+        connected = bool(app.CHAT_STATE.get("connected")) and fresh
     if not fresh and status != "qr":
         status = "offline"
     return {
@@ -786,7 +801,7 @@ def _decorate_notification_event(event: dict[str, object]) -> dict[str, object]:
     event_ts = int(item.get("timestamp", 0) or 0)
     row = None
     try:
-        with STORE.connection() as connection:
+        with app.STORE.connection() as connection:
             row = connection.execute(
                 """SELECT message_key, sender, sender_id, body, media_path, media_mime, media_name, message_timestamp
                    FROM whatsapp_chat_messages
@@ -795,6 +810,7 @@ def _decorate_notification_event(event: dict[str, object]) -> dict[str, object]:
                 (chat_id, str(item.get("message_key", ""))),
             ).fetchone()
     except Exception:
+        log_suppressed("queue_chat_state._decorate_notification_event")
         row = None
 
     avatar_candidates: list[str] = []
@@ -808,7 +824,7 @@ def _decorate_notification_event(event: dict[str, object]) -> dict[str, object]:
     for avatar_id in avatar_candidates:
         if not avatar_id:
             continue
-        avatar_url = queue_avatars.url(APP_MODULE, avatar_id)
+        avatar_url = queue_avatars.url(app, avatar_id)
         if avatar_url:
             item["avatar_url"] = avatar_url
             break
@@ -826,23 +842,24 @@ def _decorate_notification_event(event: dict[str, object]) -> dict[str, object]:
 
 
 def notifications_snapshot() -> dict[str, object]:
-    counts = queue_productivity.notification_counts(STORE, STORE.notification_counts())
-    base_events = [_decorate_notification_event(item) for item in STORE.notification_events(20)]
-    base_events = queue_productivity.filter_notification_events(STORE, base_events)
+    counts = queue_productivity.notification_counts(app.STORE, app.STORE.notification_counts())
+    base_events = [_decorate_notification_event(item) for item in app.STORE.notification_events(20)]
+    base_events = queue_productivity.filter_notification_events(app.STORE, base_events)
     connector = connector_state_snapshot()
     reminder_count, reminder_events = 0, []  # QUEUE_1_00_4: reminders removed
-    system_events = queue_productivity.system_alerts(STORE, DATA_DIR, connector)
+    system_events = queue_productivity.system_alerts(app.STORE, app.DATA_DIR, connector)
     # 3.3.104: if the live connector is already healthy, immediately retire the
     # persisted reliability alert instead of waiting up to five minutes for the
     # background health loop. This prevents a stale red warning after reconnect.
     if bool(connector.get("connected")):
-        try: queue_reliability.resolve_persisted_alert(STORE, "connector")
-        except Exception: pass
-    reliability_count, reliability_events = queue_reliability.reliability_notification_events(APP_MODULE)
+        try: queue_reliability.resolve_persisted_alert(app.STORE, "connector")
+        except Exception:
+            log_suppressed("queue_chat_state.notifications_snapshot")
+    reliability_count, reliability_events = queue_reliability.reliability_notification_events(app)
     queue_reliability.reconcile_notification_dismissals(
-        STORE, [item.get("id") or item.get("event_id") for item in system_events], ("system:",)
+        app.STORE, [item.get("id") or item.get("event_id") for item in system_events], ("system:",)
     )
-    system_events = queue_reliability.filter_dismissed_notifications(STORE, system_events)
+    system_events = queue_reliability.filter_dismissed_notifications(app.STORE, system_events)
     # 3.3.103: normalise reliability/SLA events so they behave like every other
     # notification in the UI. queue_reliability historically used event_id, while
     # the notification centre expects id/href/source. Keep the original payload too.
@@ -873,7 +890,7 @@ def notifications_snapshot() -> dict[str, object]:
     return {
         "counts": counts,
         "total": total,
-        "group_chat_id": queue_productivity.first_unmuted_chat(STORE, True),
-        "contact_chat_id": queue_productivity.first_unmuted_chat(STORE, False),
+        "group_chat_id": queue_productivity.first_unmuted_chat(app.STORE, True),
+        "contact_chat_id": queue_productivity.first_unmuted_chat(app.STORE, False),
         "events": events[:20],
     }

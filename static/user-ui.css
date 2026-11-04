@@ -48,10 +48,10 @@ button, .button, .nav-link, summary { -webkit-tap-highlight-color: transparent; 
   font-size: 13px;
   font-weight: 720;
 }
-.notification-button, .theme-toggle, .auth-user-chip { min-height: 40px; border-radius: 11px !important; }
-.auth-user-chip { padding: 6px 10px !important; }
+.notification-button, .theme-toggle, .auth-user-chip { min-height: 40px; border-radius: 11px; }
+.auth-user-chip { padding: 6px 10px; }
 .auth-user-chip strong { max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.auth-profile-popover, .notification-popover { border-radius: 16px !important; box-shadow: 0 22px 65px rgba(18, 39, 33, .18) !important; }
+.auth-profile-popover, .notification-popover { border-radius: 16px; box-shadow: 0 22px 65px rgba(18, 39, 33, .18) !important; }
 
 /* Main workspace */
 .page {
@@ -196,11 +196,11 @@ tbody tr { transition: background .14s ease; }
 .chat-sidebar { padding: 12px; }
 .chat-sidebar-head h2, .chat-header h2 { letter-spacing: -.015em; }
 .chat-sidebar input { min-height: 42px; border-radius: 11px; }
-.chat-list-item { border-radius: 12px !important; margin-bottom: 4px; }
+.chat-list-item { border-radius: 12px; margin-bottom: 4px; }
 .chat-list-item:hover { transform: translateX(1px); }
 .chat-header, .chat-composer { padding-inline: 14px; }
 .chat-composer textarea { border-radius: 12px; min-height: 44px; }
-.composer-send { min-width: 92px; border-radius: 11px !important; }
+.composer-send { min-width: 92px; border-radius: 11px; }
 
 /* Admin navigation is easier to scan without changing structure */
 .admin-tabs {
@@ -209,7 +209,7 @@ tbody tr { transition: background .14s ease; }
   overflow-x: auto;
   scrollbar-width: thin;
   padding: 7px;
-  border-radius: 14px !important;
+  border-radius: 14px;
   margin-bottom: 16px;
 }
 .admin-tab {
@@ -218,7 +218,7 @@ tbody tr { transition: background .14s ease; }
   display: inline-flex;
   align-items: center;
   padding: 7px 11px;
-  border-radius: 9px !important;
+  border-radius: 9px;
   white-space: nowrap;
   font-size: 12px;
   font-weight: 720;
@@ -270,7 +270,7 @@ tbody tr { transition: background .14s ease; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .button, .panel, .metric, .chat-list-item { transition: none !important; transform: none !important; }
+  .button, .panel, .metric, .chat-list-item { transition: none; transform: none !important; }
 }
 
 

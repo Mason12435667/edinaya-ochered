@@ -25,49 +25,49 @@
 @media (min-width: 1001px) {
   .topbar{
     display:flex!important;
-    flex-wrap:nowrap!important;
-    align-items:center!important;
-    gap:8px!important;
+    flex-wrap:nowrap;
+    align-items:center;
+    gap:8px;
     min-height:72px;
-    padding:8px max(14px,1.7vw)!important;
+    padding:8px max(14px,1.7vw);
   }
   .topbar .brand{
-    flex:0 0 auto!important;
-    min-width:max-content!important;
-    white-space:nowrap!important;
+    flex:0 0 auto;
+    min-width:max-content;
+    white-space:nowrap;
     gap:8px!important;
   }
   .topbar .brand>span:last-child{
     display:inline!important;
-    white-space:nowrap!important;
+    white-space:nowrap;
   }
   .topbar nav{
-    flex:1 1 auto!important;
-    min-width:0!important;
+    flex:1 1 auto;
+    min-width:0;
     display:flex!important;
-    flex-wrap:nowrap!important;
-    align-items:center!important;
-    gap:3px!important;
-    overflow-x:auto!important;
-    overflow-y:hidden!important;
+    flex-wrap:nowrap;
+    align-items:center;
+    gap:3px;
+    overflow-x:auto;
+    overflow-y:hidden;
     scrollbar-width:none;
     overscroll-behavior-inline:contain;
   }
   .topbar nav::-webkit-scrollbar{display:none}
   .topbar .nav-link{
-    flex:0 0 auto!important;
-    white-space:nowrap!important;
-    min-height:38px!important;
-    padding:8px 10px!important;
-    line-height:1.1!important;
+    flex:0 0 auto;
+    white-space:nowrap;
+    min-height:38px;
+    padding:8px 10px;
+    line-height:1.1;
   }
   .workflow-connection-pill,
   .notification-button,
   .workflow-handover-button,
   .shift-form,
   .theme-toggle{
-    flex:0 0 auto!important;
-    white-space:nowrap!important;
+    flex:0 0 auto;
+    white-space:nowrap;
   }
   .workflow-handover-button{
     min-height:40px!important;
@@ -85,16 +85,16 @@
     max-width:160px!important;
   }
   .theme-toggle{
-    min-height:40px!important;
-    padding-inline:12px!important;
+    min-height:40px;
+    padding-inline:12px;
   }
   .notification-button{
     width:40px!important;
-    height:40px!important;
+    height:40px;
     margin-left:0!important;
   }
 }
 @media (min-width:1001px) and (max-width:1450px){
   .workflow-connection-pill{display:none!important}
-  .topbar .nav-link{padding-inline:8px!important}
+  .topbar .nav-link{padding-inline:8px}
 }

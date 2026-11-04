@@ -121,10 +121,10 @@ tbody tr { transition: background .15s ease, box-shadow .15s ease; }
 :root[data-theme="light"] .notification-button,
 :root[data-theme="light"] .shift-form select,
 :root[data-theme="light"] .auth-user-chip {
-  color: #28463d !important;
+  color: #28463d;
   border-color: #d1e1dc !important;
-  background: rgba(248,252,250,.94) !important;
-  box-shadow: 0 2px 8px rgba(25,74,60,.05) !important;
+  background: rgba(248,252,250,.94);
+  box-shadow: 0 2px 8px rgba(25,74,60,.05);
 }
 :root[data-theme="light"] .theme-toggle:hover,
 :root[data-theme="light"] .notification-button:hover,
@@ -326,10 +326,10 @@ html[data-theme="light"] .auth-theme-toggle {
 :root[data-theme="pink"] .notification-button,
 :root[data-theme="pink"] .shift-form select,
 :root[data-theme="pink"] .auth-user-chip {
-  color: #8c4166 !important;
+  color: #8c4166;
   border-color: #ecc4d7 !important;
-  background: rgba(255,250,253,.94) !important;
-  box-shadow: 0 2px 8px rgba(185,63,120,.06) !important;
+  background: rgba(255,250,253,.94);
+  box-shadow: 0 2px 8px rgba(185,63,120,.06);
 }
 :root[data-theme="pink"] .theme-toggle:hover,
 :root[data-theme="pink"] .notification-button:hover,
@@ -487,5 +487,5 @@ html[data-theme="pink"] .auth-theme-toggle {
   .topbar { padding-inline: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  *, *::before, *::after { scroll-behavior: auto; transition-duration: .01ms; animation-duration: .01ms !important; }
 }

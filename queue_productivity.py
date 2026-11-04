@@ -578,7 +578,13 @@ def backup_integrity(path: Path) -> tuple[bool,str]:
 
 def list_backups(data_dir: Path) -> list[dict[str,Any]]:
     result=[]
-    for path in sorted(backup_dir(data_dir).glob('tickets-*.db'),key=lambda p:p.stat().st_mtime,reverse=True)[:100]:
+    try:
+        directory=backup_dir(data_dir)
+    except OSError:
+        # e.g. no permission for /var/backups: show an empty list instead of failing the page
+        queue_core.log_suppressed("queue_productivity.list_backups")
+        return result
+    for path in sorted(directory.glob('tickets-*.db'),key=lambda p:p.stat().st_mtime,reverse=True)[:100]:
         ok,detail=backup_integrity(path)
         stat=path.stat()
         result.append({"name":path.name,"size":stat.st_size,"mtime":stat.st_mtime,"ok":ok,"detail":detail})

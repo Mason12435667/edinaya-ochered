@@ -3,7 +3,18 @@ from __future__ import annotations
 from typing import Any, Callable
 
 
-ASSET_VERSION = "1.00.6.84"
+# Bump on every change to static/; appended as ?v= to bust browser caches.
+ASSET_VERSION = "143.2"
+
+AUTH_STYLESHEETS = ("auth.css", "pink-theme.css", "polish.css")
+
+
+def stylesheet_tags(names) -> str:
+    return "\n".join(f'  <link rel="stylesheet" href="/static/{name}?v={ASSET_VERSION}">' for name in names)
+
+
+def script_tags(names) -> str:
+    return "\n".join(f'  <script src="/static/{name}?v={ASSET_VERSION}" defer></script>' for name in names)
 
 
 def _head(title: str) -> str:
@@ -14,14 +25,12 @@ def _head(title: str) -> str:
   <title>{title} · Единая очередь</title>
   <link rel="icon" type="image/png" href="/static/favicon.png">
   <script>document.documentElement.dataset.theme = localStorage.getItem("queue-theme") || "dark";</script>
-  <link rel="stylesheet" href="/static/auth100615.css?v={ASSET_VERSION}">
-  <link rel="stylesheet" href="/static/pink-theme.css?v=1.00.6.40">
-  <link rel="stylesheet" href="/static/ui-polish-1.00.6.40.css?v=1.00.6.40">
+{stylesheet_tags(AUTH_STYLESHEETS)}
 </head>'''
 
 
 def _script() -> str:
-    return f'<script src="/static/auth100618.js?v={ASSET_VERSION}" defer></script>'
+    return f'<script src="/static/account.js?v={ASSET_VERSION}" defer></script>'
 
 
 def render_login(
@@ -162,6 +171,7 @@ def render_account(
     *,
     user: dict[str, Any] | None,
     escape: Callable[[Any], str],
+    csrf_token: str = "",
 ) -> str:
     user = user or {}
     notice = str(query.get("notice", [""])[0] or "")
@@ -178,6 +188,7 @@ def render_account(
     <p>После смены временного пароля откроется доступ к рабочей системе.</p>
     {notice_html}
     <form class="auth-form" method="post" action="/account/password">
+      <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
       <input type="hidden" name="next" value="/">
       <label>Текущий пароль<input type="password" name="current_password" autocomplete="current-password" required autofocus></label>
       <label>Новый пароль<input type="password" name="new_password" minlength="10" autocomplete="new-password" required></label>

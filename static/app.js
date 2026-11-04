@@ -1156,13 +1156,7 @@ window.QueueVoice = (() => {
       overlay.addEventListener('click', (event) => { if (event.target === overlay) dismiss(); });
       document.addEventListener('keydown', onKey); document.body.append(overlay); close.focus();
     }
-    const sidebarHead = conversationPage.querySelector('.chat-sidebar-head');
-    if (sidebarHead && !sidebarHead.querySelector('[data-open-message-bookmarks]')) {
-      const openBookmarks = document.createElement('button');
-      openBookmarks.type = 'button'; openBookmarks.className = 'button compact ghost';
-      openBookmarks.dataset.openMessageBookmarks = '1'; openBookmarks.textContent = '★ Закладки';
-      openBookmarks.addEventListener('click', showMessageBookmarks); sidebarHead.append(openBookmarks);
-    }
+    // Bookmarks open through /bookmarks (?bookmarks=1); the sidebar has no button for them.
     refreshMessageBookmarks(true).catch(() => {});
     if (new URLSearchParams(location.search).get('bookmarks') === '1') {
       showMessageBookmarks();
@@ -1792,58 +1786,7 @@ window.QueueVoice = (() => {
             bubble.append(body);
           }
         }
-        if (!message.deleted && message.transcript && String(message.media_mime || "").startsWith("audio/")) {
-          const details = document.createElement("details");
-          details.className = "chat-file-text";
-          details.open = true;
-          const summary = document.createElement("summary");
-          summary.textContent = "Расшифровка";
-          const text = document.createElement("p");
-          text.textContent = String(message.transcript || "").slice(0, 12000);
-          details.append(summary, text);
-          bubble.append(details);
-        }
-        if (!message.deleted && !message.transcript && message.media_url && String(message.media_mime || "").startsWith("audio/")) {
-          const transcribe = document.createElement("button");
-          transcribe.type = "button";
-          transcribe.className = "button compact voice-transcribe";
-          transcribe.textContent = "Расшифровать голосовое";
-          const transcribeError = document.createElement("div");
-          transcribeError.className = "voice-transcribe-error";
-          transcribeError.hidden = true;
-          transcribe.addEventListener("click", async () => {
-            const voiceChat = selectedChatId;
-            transcribeError.hidden = true;
-            transcribeError.textContent = "";
-            transcribe.disabled = true;
-            transcribe.textContent = "В очереди распознавания...";
-            try {
-              const response = await postForm("/voice-transcribe", {
-                chat_id: voiceChat, message_id: message.id,
-                csrf_token: document.querySelector('meta[name="queue-csrf"]').content,
-              });
-              let result = await response.json();
-              while (["queued", "running"].includes(result.status)) {
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                const poll = await fetch("/api/voice-job?" + new URLSearchParams({chat_id:voiceChat,message_id:message.id}));
-                if (!poll.ok) throw new Error("Не удалось проверить расшифровку");
-                result = await poll.json();
-                if (selectedChatId !== voiceChat) return;
-              }
-              if (result.status !== "done") throw new Error(result.reason || "Речь не обнаружена");
-              lastMessageSignature = "";
-              loadChatState(true);
-            } catch (error) {
-              const reason = String(error?.message || "Неизвестная ошибка распознавания");
-              transcribe.textContent = "Не удалось расшифровать · повторить";
-              transcribe.title = reason;
-              transcribeError.textContent = `Причина: ${reason}`;
-              transcribeError.hidden = false;
-              transcribe.disabled = false;
-            }
-          });
-          bubble.append(transcribe, transcribeError);
-        }
+        // Voice transcription is not shown in the chat UI.
         if (!message.deleted && Array.isArray(message.reactions) && message.reactions.length) {
           const reactionBar = document.createElement("div");
           reactionBar.className = "chat-reactions";

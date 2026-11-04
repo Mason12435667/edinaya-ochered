@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from queue_core import log_suppressed
 
 TERMINAL = {"done", "invalid"}
 DEFAULT_RETENTION = 20
@@ -664,6 +665,7 @@ def bulk_update(store, ticket_ids: list[int], actor: str, *, status: str = "", p
             result = quick_ticket_update(store, ticket_id, status=status, priority=priority, employee=employee, actor=actor, reason=reason, comment=comment)
             updated += int(bool(result.get("updated")))
         except Exception:
+            log_suppressed("queue_workflow.bulk_update")
             failed += 1
     return {"selected": len(ids), "updated": updated, "failed": failed}
 
@@ -1125,6 +1127,7 @@ def export_pdf(store, chat_id: str) -> tuple[str, bytes]:
         from reportlab.pdfbase.ttfonts import TTFont
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     except Exception:
+        log_suppressed("queue_workflow.export_pdf")
         return name, _export_pdf_native(name, rows)
 
     font_name = "Helvetica"
@@ -1138,7 +1141,7 @@ def export_pdf(store, chat_id: str) -> tuple[str, bytes]:
                 font_name = "QueueUnicode"
                 break
             except Exception:
-                pass
+                log_suppressed("queue_workflow.export_pdf")
 
     if font_name == "Helvetica" and any(ord(ch) > 255 for ch in name):
         return name, _export_pdf_native(name, rows)

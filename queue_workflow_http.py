@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import queue_workflow as qw
+from queue_core import log_suppressed
 
 
 def _value(query, key, default=""):
@@ -13,7 +14,7 @@ def _value(query, key, default=""):
 
 
 def _csrf(handler, app, form) -> bool:
-    if secrets.compare_digest(str(form.get("csrf_token", "")), str(app.ADMIN_FORM_TOKEN)):
+    if secrets.compare_digest(str(form.get("csrf_token", "")), str(app.csrf_token())):
         return True
     handler.json_response({"error": "Обновите страницу и попробуйте снова"}, 403)
     return False
@@ -32,6 +33,7 @@ def _human_bytes(app, value: int) -> str:
     try:
         return app.human_bytes(int(value or 0))
     except Exception:
+        log_suppressed("queue_workflow_http._human_bytes")
         size = float(value or 0)
         for unit in ("Б", "КБ", "МБ", "ГБ"):
             if size < 1024 or unit == "ГБ":
@@ -72,6 +74,7 @@ def _workflow_admin_page(handler, app, query):
     try:
         category_items = list(app.active_ticket_category_items())
     except Exception:
+        log_suppressed("queue_workflow_http._workflow_admin_page")
         category_items = [(k, v) for k, v in getattr(app, "CATEGORIES", {}).items()]
     checks = ''.join(
         f'<label class="workflow-check"><input type="checkbox" name="required_category__{app.e(key)}" value="1" {"checked" if key in required else ""}><span>{app.e(label)}</span></label>'
@@ -86,7 +89,7 @@ def _workflow_admin_page(handler, app, query):
       <section class="page-heading"><div><p class="eyebrow">Хранение и процессы</p><h1>Рабочие настройки</h1><p>Сроки хранения, очистка медиа и правила закрытия заявок</p></div></section>
       <section class="workflow-admin-grid">
         <form class="panel workflow-settings-card" method="post" action="/admin/workflow">
-          <input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}"><input type="hidden" name="action" value="retention">
+          <input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}"><input type="hidden" name="action" value="retention">
           <h2>Срок хранения</h2><p class="muted">Активные заявки и связанные с ними медиа автоматически не удаляются.</p>
           <label>Сообщения, дней<input type="number" name="messages" min="1" max="3650" value="{settings['messages']}"></label>
           <label>Медиа, дней<input type="number" name="media" min="1" max="3650" value="{settings['media']}"></label>
@@ -95,7 +98,7 @@ def _workflow_admin_page(handler, app, query):
         </form>
         <section class="panel workflow-settings-card"><h2>Медиа на диске</h2><div class="stats-grid workflow-media-stats">{media_cards}</div>
           <form class="workflow-cleanup-form" method="post" action="/admin/workflow">
-            <input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}"><input type="hidden" name="action" value="media_cleanup">
+            <input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}"><input type="hidden" name="action" value="media_cleanup">
             <label>Тип<select name="kind"><option value="all">Все типы</option><option value="photo">Фото</option><option value="video">Видео</option><option value="voice">Голосовые</option><option value="file">Документы</option></select></label>
             <label>Минимальный размер, МБ<input type="number" name="min_mb" min="0" max="10240" step="1" value="0"></label>
             <label>Старше, дней<input type="number" name="older_days" min="0" max="3650" value="0"></label>
@@ -104,7 +107,7 @@ def _workflow_admin_page(handler, app, query):
         </section>
       </section>
       <section class="panel workflow-required-card"><h2>Обязательный комментарий при закрытии</h2><p class="muted">Выберите категории, которые нельзя закрыть без служебного комментария.</p>
-        <form method="post" action="/admin/workflow"><input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}"><input type="hidden" name="action" value="close_categories"><div class="workflow-check-grid">{checks or '<span class="muted">Категории не найдены</span>'}</div><button class="button primary" type="submit">Сохранить правило</button></form>
+        <form method="post" action="/admin/workflow"><input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}"><input type="hidden" name="action" value="close_categories"><div class="workflow-check-grid">{checks or '<span class="muted">Категории не найдены</span>'}</div><button class="button primary" type="submit">Сохранить правило</button></form>
       </section>
       <section class="panel"><h2>Экспорт истории</h2><p>TXT, PDF и ZIP с вложениями доступны из открытого WhatsApp-чата через кнопку «Экспорт».</p></section>
     '''
@@ -249,6 +252,7 @@ def _post_impl(handler, app):
             try:
                 ids = sorted({int(x) for x in json.loads(form.get("ticket_ids", "[]")) if int(x) > 0})[:200]
             except Exception:
+                log_suppressed("queue_workflow_http._post_impl")
                 ids = []
             actor = app.work_actor(); updated = failed = 0
             status = form.get("status", ""); priority = form.get("priority", ""); employee = form.get("employee", "")
@@ -272,6 +276,7 @@ def _post_impl(handler, app):
                         changed = True
                     updated += int(changed)
                 except Exception:
+                    log_suppressed("queue_workflow_http._post_impl")
                     failed += 1
             handler.json_response({"selected":len(ids),"updated":updated,"failed":failed})
         elif path == "/admin/workflow":
@@ -340,6 +345,7 @@ def post(handler, app):
     except (ValueError, TypeError) as error:
         data, status = {"error": str(error)}, 400
     except Exception:
+        log_suppressed("queue_workflow_http.post")
         data, status = {"error": "Изменения не сохранены. Повторите позже"}, 503
     finally:
         handler.read_form, handler.json_response = read_form, respond

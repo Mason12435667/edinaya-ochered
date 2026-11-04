@@ -200,8 +200,8 @@
   const tabDefs = [
     ["private", "Личные"], ["groups", "Группы"], ["unread", "Непрочитанные"],
   ];
-  let activeTab = String(pageSettings.tab || (isGroups ? "groups" : "private"));
-  if (!["private", "groups", "unread"].includes(activeTab)) activeTab = isGroups ? "groups" : "private";
+  // WhatsApp always opens on "Личные", Groups on "Группы".
+  let activeTab = isGroups ? "groups" : "private";
   const needsButton = sidebar.querySelector(".reply-queue-toggle");
   if (needsButton) needsButton.remove();
   function setNeedsQueue(_wanted) { /* obsolete queue removed */ }
@@ -213,7 +213,12 @@
       else if (activeTab === "favorite") visible = Boolean(row.querySelector(".chat-favorite-toggle.active"));
       row.classList.toggle("uq-filter-hidden", !visible);
     });
-    tabs.querySelectorAll("button[data-tab]").forEach((button) => button.classList.toggle("active", button.dataset.tab === activeTab));
+    tabs.querySelectorAll("button[data-tab]").forEach((button) => {
+      const active = button.dataset.tab === activeTab;
+      button.classList.toggle("active", active);
+      button.classList.toggle("queue-filter-active", active);
+      button.setAttribute("aria-current", active ? "true" : "false");
+    });
   }
   function chooseTab(tab) {
     if (tab === "private" && isGroups) { location.href = "/whatsapp"; return; }

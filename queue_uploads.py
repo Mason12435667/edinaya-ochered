@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 import queue_realtime
+from queue_core import log_suppressed
 
 MAX_FILE = 512 * 1024 * 1024
 CHUNK = 512 * 1024
@@ -24,7 +25,7 @@ def _media_log(message: str) -> None:
         with (log_dir / 'media-upload.log').open('a', encoding='utf-8') as handle:
             handle.write(f'[{stamp}] {message}\n')
     except Exception:
-        pass
+        log_suppressed("queue_uploads._media_log")
 
 
 class Uploads:
@@ -126,7 +127,7 @@ def safe_mime(value):
 def post(handler, app):
     parsed=urlparse(handler.path)
     if not parsed.path.startswith('/upload/'): return False
-    if not secrets.compare_digest(handler.headers.get('X-CSRF-Token',''),app.ADMIN_FORM_TOKEN):
+    if not secrets.compare_digest(handler.headers.get('X-CSRF-Token',''),app.csrf_token()):
         handler.json_response({'error':'Обновите страницу перед загрузкой'},403)
         return True
     user = handler.effective_user() or {}
@@ -142,8 +143,8 @@ def post(handler, app):
             app.UPLOADS.authorized_chat(q.get('id',[''])[0],owner)
             length=int(handler.headers.get('Content-Length','0'))
             if length<=0 or length>CHUNK: raise ValueError('Недопустимый размер части')
-            data=handler.rfile.read(length)
-            if len(data)!=length: raise ValueError('Передача прервана')
+            data=handler.read_body(CHUNK)
+            if data is None or len(data)!=length: raise ValueError('Передача прервана')
             result=app.UPLOADS.append(q.get('id',[''])[0],int(q.get('offset',['0'])[0]),data)
         elif parsed.path in {'/upload/finish','/upload/cancel'}:
             payload=handler.read_json_body(2000)
@@ -199,7 +200,7 @@ def preserve_sent_attachment(app, message_id):
     try:
         allowed_roots.append(Path(app.UPLOADS.root).resolve())
     except Exception:
-        pass
+        log_suppressed("queue_uploads.preserve_sent_attachment")
     if not any(root == source.parent or root in source.parents for root in allowed_roots):
         return {}
     if not source.is_file():
@@ -247,6 +248,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
     try:
         canonical = app.STORE.canonical_whatsapp_chat_id(safe_chat) or safe_chat
     except Exception:
+        log_suppressed("queue_uploads.recover_clipboard_attachment")
         canonical = safe_chat
 
     placeholders = {'[фото]', 'фото', '[image]', 'image', '[вложение]', 'вложение'}
@@ -267,6 +269,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
                 """
             ).fetchall()
     except Exception:
+        log_suppressed("queue_uploads.recover_clipboard_attachment")
         return {}
 
     from datetime import datetime, timezone
@@ -279,6 +282,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
         try:
             row_chat = app.STORE.canonical_whatsapp_chat_id(str(row['chat_id'] or '')) or str(row['chat_id'] or '')
         except Exception:
+            log_suppressed("queue_uploads.recover_clipboard_attachment")
             row_chat = str(row['chat_id'] or '')
         if row_chat != canonical:
             continue
@@ -292,6 +296,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
                 created = created.replace(tzinfo=timezone.utc)
             created_ts = int(created.timestamp())
         except Exception:
+            log_suppressed("queue_uploads.recover_clipboard_attachment")
             continue
         delta = abs(ts - created_ts)
         # Real observations in the diagnosed server were 5-11 seconds after
@@ -323,7 +328,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
         app.STORE.complete_outbound_message(queue_id, True, '', safe_message)
     except Exception:
         # The media itself is already safe; history can still use it.
-        pass
+        log_suppressed("queue_uploads.recover_clipboard_attachment")
 
     return {
         **preserved,

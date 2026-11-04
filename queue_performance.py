@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import os
-import resource
 import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from queue_core import log_suppressed
 
 _LOCK = threading.RLock()
 _CONNECTOR: dict[str, Any] = {}
@@ -54,10 +54,14 @@ def update_connector_telemetry(payload: dict[str, Any]) -> None:
 
 def _server_rss_mb() -> float:
     try:
+        import resource  # Unix only; on Windows the metric is reported as 0
         value = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         # Linux ru_maxrss is KiB, macOS bytes. Production target is Ubuntu.
         return round(value / 1024.0, 1)
+    except ImportError:
+        return 0.0
     except Exception:
+        log_suppressed("queue_performance._server_rss_mb")
         return 0.0
 
 
@@ -110,7 +114,7 @@ def snapshot(app) -> dict[str, Any]:
             voice["running"] = sum(1 for x in values if isinstance(x, dict) and x.get("status") == "running")
             voice["cached"] = sum(1 for x in values if isinstance(x, dict) and x.get("status") == "done")
     except Exception:
-        pass
+        log_suppressed("queue_performance.snapshot")
     return {
         "server_rss_mb": _server_rss_mb(),
         "connector": connector,
@@ -154,5 +158,5 @@ def worker_loop(app) -> None:
                 except OSError:
                     pass
         except Exception:
-            pass
+            log_suppressed("queue_performance.worker_loop")
         time.sleep(300)

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 import queue_auth
 import queue_features
-from queue_core import directory_size, display_phone, e, human_time, parse_iso_datetime
+from queue_core import directory_size, display_phone, e, human_time, log_suppressed, parse_iso_datetime
 from ticketing import TicketStore, normalize_message
 
 PAGE_SIZE = 25
@@ -134,16 +134,17 @@ def activate_employee_shift(user: dict[str, object] | None) -> dict[str, object]
         try:
             handed_off = int(_deps.store.switch_shift(previous, employee) or 0)
         except Exception:
+            log_suppressed("queue_work_context.activate_employee_shift")
             handed_off = 0
         try:
             queue_features.announce_shift(_deps.store, previous, employee)
         except Exception:
-            pass
+            log_suppressed("queue_work_context.activate_employee_shift")
     _deps.store.set_setting("active_employee", employee)
     try:
         _deps.auth.record_audit(user, "shift_auto_login", object_type="shift", object_id=employee, details=f"Автоматически на смене после входа; передано заявок: {handed_off}")
     except Exception:
-        pass
+        log_suppressed("queue_work_context.activate_employee_shift")
     return {"updated": previous != employee, "employee": employee, "handed_off": handed_off}
 
 
@@ -187,7 +188,7 @@ def audit_admin_form_submission(path: str, form: dict[str, str], actor: dict[str
     try:
         _deps.auth.record_audit(actor or {}, "admin_settings_submit", object_type="admin_settings", object_id=path, details=details)
     except Exception:
-        pass
+        log_suppressed("queue_work_context.audit_admin_form_submission")
 
 
 def monitor_log_entries(limit: int = 40) -> list[str]:

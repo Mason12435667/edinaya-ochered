@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
 import queue_reliability as qr
+from queue_core import log_suppressed
 
 
 def _value(query,key,default=''):
@@ -14,7 +15,7 @@ def _value(query,key,default=''):
 
 
 def _csrf(handler, app, form) -> bool:
-    if secrets.compare_digest(str(form.get('csrf_token','')),str(app.ADMIN_FORM_TOKEN)):
+    if secrets.compare_digest(str(form.get('csrf_token','')),str(app.csrf_token())):
         return True
     handler.json_response({'error':'Обновите страницу и попробуйте снова'},403)
     return False
@@ -22,7 +23,9 @@ def _csrf(handler, app, form) -> bool:
 
 def _human(app,n):
     try:return app.human_bytes(int(n or 0))
-    except Exception:return str(n or 0)
+    except Exception:
+        log_suppressed("queue_reliability_http._human")
+        return str(n or 0)
 
 
 def _admin_page(handler,app,query):
@@ -33,8 +36,8 @@ def _admin_page(handler,app,query):
     problem_rows=''.join(
         f'''<tr><td>#{int(x['id'])}</td><td>{app.e(str(x['status']))}</td><td>{app.e(str(x.get('chat_id','')))}</td>
         <td>{app.e(str(x.get('media_name') or x.get('body') or '')[:90])}</td><td>{app.e(str(x.get('last_error') or '')[:180])}</td>
-        <td><form method="post" action="/admin/reliability" class="inline-form"><input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}"><input type="hidden" name="action" value="retry"><input type="hidden" name="message_id" value="{int(x['id'])}"><button class="button compact" type="submit">Повторить</button></form>
-        {f'<form method="post" action="/admin/reliability" class="inline-form"><input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}"><input type="hidden" name="action" value="retry_media"><input type="hidden" name="message_id" value="{int(x["id"])}"><button class="button compact ghost" type="submit">Только файл</button></form>' if x.get('media_path') else ''}</td></tr>'''
+        <td><form method="post" action="/admin/reliability" class="inline-form"><input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}"><input type="hidden" name="action" value="retry"><input type="hidden" name="message_id" value="{int(x['id'])}"><button class="button compact" type="submit">Повторить</button></form>
+        {f'<form method="post" action="/admin/reliability" class="inline-form"><input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}"><input type="hidden" name="action" value="retry_media"><input type="hidden" name="message_id" value="{int(x["id"])}"><button class="button compact ghost" type="submit">Только файл</button></form>' if x.get('media_path') else ''}</td></tr>'''
         for x in probs
     ) or '<tr><td colspan="6" class="muted">Ошибочных или зависших отправок нет</td></tr>'
     backup_rows=''.join(
@@ -53,7 +56,7 @@ def _admin_page(handler,app,query):
         <article class="panel reliability-card"><span>Лимит вложения</span><strong>{_human(app,snap.get('max_media_bytes',0))}</strong><small>опасные исполняемые расширения блокируются до отправки</small></article>
       </section>
       <section class="panel reliability-maintenance"><div><h2>Режим обслуживания</h2><p>При включении сотрудники могут просматривать систему, но изменения и отправка сообщений блокируются. Коннектор продолжает синхронизацию.</p></div>
-        <form method="post" action="/admin/reliability"><input type="hidden" name="csrf_token" value="{app.e(app.ADMIN_FORM_TOKEN)}"><input type="hidden" name="action" value="maintenance"><input type="hidden" name="enabled" value="{'0' if maintenance else '1'}"><button class="button {'danger' if not maintenance else 'primary'}" type="submit">{'Выключить обслуживание' if maintenance else 'Включить обслуживание'}</button></form></section>
+        <form method="post" action="/admin/reliability"><input type="hidden" name="csrf_token" value="{app.e(app.csrf_token())}"><input type="hidden" name="action" value="maintenance"><input type="hidden" name="enabled" value="{'0' if maintenance else '1'}"><button class="button {'danger' if not maintenance else 'primary'}" type="submit">{'Выключить обслуживание' if maintenance else 'Включить обслуживание'}</button></form></section>
       <section class="panel"><h2>Хранение секретов</h2><p>{'WEBHOOK_TOKEN берётся из окружения systemd.' if secret.get('env') else 'Сейчас используется совместимый локальный token-файл. Для полной изоляции задайте WEBHOOK_TOKEN через EnvironmentFile systemd; патч не переносит рабочий токен автоматически, чтобы не оборвать коннектор.'}</p></section>
       <section class="panel"><div class="section-heading"><div><h2>Неотправленные / зависшие</h2><p>Точная причина ошибки и ручной повтор. «Только файл» создаёт новую отправку без повторения текста.</p></div></div><div class="table-scroll"><table><thead><tr><th>ID</th><th>Статус</th><th>Чат</th><th>Сообщение</th><th>Причина</th><th>Действия</th></tr></thead><tbody>{problem_rows}</tbody></table></div></section>
       <section class="panel"><div class="section-heading"><div><h2>Проверка резервных копий</h2><p>SQLite quick_check выполняется только на чтение.</p></div></div><div class="table-scroll"><table><thead><tr><th>Копия</th><th>Размер</th><th>Дата</th><th>Проверка</th></tr></thead><tbody>{backup_rows}</tbody></table></div></section>

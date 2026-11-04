@@ -20,9 +20,6 @@ from ticketing import (
 )
 from queue_user_locale import tr, is_kz
 
-QUEUE_1_00_6_CONTEXTUAL_TICKETS = True
-QUEUE_1_00_6_1_OFFICIAL_CATEGORY_REQUIREMENTS = True
-
 FIELD_LABELS_RU: dict[str, str] = {**REQUEST_FIELD_LABELS_RU}
 FIELD_LABELS_KZ: dict[str, str] = {**REQUEST_FIELD_LABELS_KZ}
 # Internal/admin history keeps the Russian label map. Ordinary-user replies use
@@ -679,59 +676,12 @@ PROMPT_REQUIRED_FIELD_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("reference", re.compile(r"\b(?:номер\s+(?:заявки|заказа|договора|документа)|идентификатор\w*|\bID\b)", re.IGNORECASE)),
     ("problem", re.compile(r"\b(?:описание\s+проблемы|описать\s+проблему|мәселенің\s+сипаттамасы|мәселені\s+сипатта|не\s+жұмыс\s+істемейді|қате\s+мәтіні|сұрағыңызды|что\s+не\s+работает|текст\s+ошибки|описание\s+ошибки|ваш\s+вопрос)\b", re.IGNORECASE)),
 )
-_REQUIREMENT_WORDS_RE = re.compile(
-    r"\b(?:нужно|необходимо|требуется|требуются|укажите|указать|предоставьте|предоставить|пришлите|направьте|көрсетіңіз|көрсету|ұсыну|жіберіңіз)\b",
-    re.IGNORECASE,
-)
-
-
-def infer_required_fields(category: str, prompt: str = "") -> list[str]:
-    """Определить обязательные поля по фактическому тексту категории.
-
-    Стандартные категории сохраняют свой безопасный базовый набор. Если
-    администратор явно добавил в текст обязательное поле (например,
-    «необходимо указать электронную почту»), оно добавляется к набору.
-    Для пользовательских категорий явные требования из текста становятся
-    основным набором обязательных полей.
-    """
-    text = normalize_message(prompt)
-    inferred: list[str] = []
-    optional_words = re.compile(
-        r"\b(?:необязательно|не обязательно|по желанию|при желании|если есть|если известн\w*|можно добавить)\b",
-        re.IGNORECASE,
-    )
-    for chunk in (text.splitlines() or [text]):
-        stripped = chunk.strip()
-        if not stripped or optional_words.search(stripped):
-            continue
-        explicit_requirement = bool(_REQUIREMENT_WORDS_RE.search(stripped))
-        structured_field = bool(
-            re.match(r"^(?:[•*-]|\d{1,2}[.)-])?\s*[^:]{1,80}:?\s*$", stripped)
-            and (stripped.endswith(":") or bool(re.match(r"^(?:[•*-]|\d{1,2}[.)-])\s*", stripped)))
-        )
-        if not explicit_requirement and not structured_field:
-            continue
-        for field_name, pattern in PROMPT_REQUIRED_FIELD_PATTERNS:
-            if pattern.search(stripped) and field_name not in inferred:
-                inferred.append(field_name)
-
-    base = list(REQUIRED_FIELDS.get(category, []))
-    if base:
-        for field_name in inferred:
-            if field_name not in base:
-                base.append(field_name)
-        return base
-    return inferred or ["problem"]
 
 
 def required_fields(category: str, override: list[str] | None = None) -> list[str]:
     if override:
         return [field for field in override if field in ALLOWED_FIELD_NAMES]
     return list(REQUIRED_FIELDS.get(category, ["problem"]))
-
-
-def optional_fields(category: str) -> list[str]:
-    return list(OPTIONAL_FIELDS.get(category, ["fio", "post", "reference"]))
 
 
 def missing_required(category: str, draft: dict[str, str], override: list[str] | None = None) -> list[str]:

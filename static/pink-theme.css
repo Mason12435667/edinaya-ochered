@@ -94,9 +94,9 @@
 :root[data-theme="pink"] .theme-toggle,
 :root[data-theme="pink"] .notification-button,
 :root[data-theme="pink"] .shift-form select {
-  color: #fff !important;
-  border-color: rgba(255,255,255,.45) !important;
-  background: rgba(116,32,75,.18) !important;
+  color: #fff;
+  border-color: rgba(255,255,255,.45);
+  background: rgba(116,32,75,.18);
 }
 :root[data-theme="pink"] .theme-toggle:hover,
 :root[data-theme="pink"] .notification-button:hover {
@@ -219,5 +219,5 @@ html[data-theme="pink"] .auth-theme-toggle {
 html[data-theme="pink"] .auth-brand-mark { background:linear-gradient(145deg,#ffadd0,#ef78ad); color:#7a234d; }
 
 @media (prefers-reduced-motion: reduce) {
-  :root[data-theme="pink"] * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  :root[data-theme="pink"] * { transition-duration: .01ms; animation-duration: .01ms !important; }
 }

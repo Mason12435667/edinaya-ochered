@@ -1,24 +1,32 @@
 from __future__ import annotations
 
+import json
 from typing import Any
+from urllib.parse import quote
 
-def bind(context: dict[str, Any]) -> None:
-    protected = {"bind", "Any"}
-    for name, value in context.items():
-        if name.startswith("__") or name in protected:
-            continue
-        globals()[name] = value
+from queue_admin_pages import avatar_html
+from queue_core import e, human_time, valid_group_id
+from queue_ticket_views import layout
+
+# Application module (app.py): shared services, settings and helpers it defines.
+app: Any = None
+
+
+def bind(app_module: Any) -> None:
+    global app
+    app = app_module
+
 
 def render_groups(query: dict[str, list[str]], show_admin: bool = False) -> str:
     initial_group_id = valid_group_id(query.get("chat_id", [""])[0])
     notice = query.get("notice", [""])[0]
     notice_html = f'<div class="notice">{e(notice)}</div>' if notice else ""
     rows = []
-    for group in STORE.list_whatsapp_groups():
+    for group in app.STORE.list_whatsapp_groups():
         chat_id = str(group["chat_id"])
         admin_action = (
             f'''<form method="post" action="/admin/groups" onsubmit="return confirm('Удалить группу из системы?')">
-                  <input type="hidden" name="csrf_token" value="{e(ADMIN_FORM_TOKEN)}">
+                  <input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="chat_id" value="{e(chat_id)}">
                   <button class="button ghost" type="submit">Удалить</button>
@@ -34,7 +42,7 @@ def render_groups(query: dict[str, list[str]], show_admin: bool = False) -> str:
     auto_refresh_html = ""
     if show_admin:
         sync_status_html = ""
-        raw_sync_status = STORE.get_setting("group_sync_status", "")
+        raw_sync_status = app.STORE.get_setting("group_sync_status", "")
         if raw_sync_status:
             try:
                 sync_status = json.loads(raw_sync_status)
@@ -57,7 +65,7 @@ def render_groups(query: dict[str, list[str]], show_admin: bool = False) -> str:
                 )
             except (ValueError, TypeError, json.JSONDecodeError):
                 sync_status_html = ""
-        discovered_groups = STORE.list_discovered_whatsapp_groups()
+        discovered_groups = app.STORE.list_discovered_whatsapp_groups()
         discovered_rows = []
         for group in discovered_groups:
             group_id = str(group["chat_id"])
@@ -67,7 +75,7 @@ def render_groups(query: dict[str, list[str]], show_admin: bool = False) -> str:
                   <td>{int(group.get('participant_count', 0) or 0) or 'Не определено'}</td>
                   <td>
                     <form method="post" action="/admin/groups">
-                      <input type="hidden" name="csrf_token" value="{e(ADMIN_FORM_TOKEN)}">
+                      <input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">
                       <input type="hidden" name="action" value="add_discovered">
                       <input type="hidden" name="chat_id" value="{e(group_id)}">
                       <button class="button primary" type="submit">Добавить</button>
@@ -87,7 +95,7 @@ def render_groups(query: dict[str, list[str]], show_admin: bool = False) -> str:
             <div class="section-heading">
               <div><h2>Добавить группу из WhatsApp</h2><p>Система сама получает группы рабочего аккаунта. ID искать и вводить не нужно.</p></div>
               <form method="post" action="/admin/groups">
-                <input type="hidden" name="csrf_token" value="{e(ADMIN_FORM_TOKEN)}">
+                <input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">
                 <input type="hidden" name="action" value="refresh">
                 <button class="button primary" type="submit">Обновить список из WhatsApp</button>
               </form>

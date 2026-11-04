@@ -1,16 +1,39 @@
 from __future__ import annotations
 
-from typing import Any
+import json
 import os
+import re
+from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import quote
 
+import queue_auth
+import queue_contextual_tickets
 import queue_operations
+import queue_reliability
+from queue_auth_views import script_tags, stylesheet_tags
+from queue_core import display_phone, e, human_time, log_suppressed, normalize_phone, parse_iso_datetime
+from queue_work_context import active_employee, category_options, employee_identity, employee_options, priority_badge, priority_options, query_page, render_pagination, render_ticket_rows, sla_badge, status_badge, ticket_sla_state, work_actor
 
-def bind(context: dict[str, Any]) -> None:
-    protected = {"bind", "Any"}
-    for name, value in context.items():
-        if name.startswith("__") or name in protected:
-            continue
-        globals()[name] = value
+# Application module (app.py): shared services, settings and helpers it defines.
+app: Any = None
+
+
+def bind(app_module: Any) -> None:
+    global app
+    app = app_module
+
+
+# Load order is the CSS cascade order: later files override earlier ones.
+MAIN_STYLESHEETS = (
+    "style.css", "ui.css", "instruction.css", "global-theme.css", "productivity.css", "workflow.css",
+    "notifications.css", "chat.css", "auth.css", "pink-theme.css", "polish.css", "user-ui.css",
+)
+MAIN_SCRIPTS = (
+    "csrf.js", "ui.js", "app.js", "productivity.js", "workflow.js", "reliability.js",
+    "chat-layout.js", "performance.js", "attachments.js", "account.js",
+)
+
 
 def layout(
     title: str,
@@ -22,7 +45,7 @@ def layout(
         ("tickets", "/", "Заявки", ""),
         ("whatsapp", "/whatsapp", "WhatsApp", ""),
         ("groups", "/groups", "Группы", ""),
-        ("instruction", INSTRUCTION_URL, "Инструкция", ""),
+        ("instruction", app.INSTRUCTION_URL, "Инструкция", ""),
     ]
     if os.getenv('QUEUE_PROFILE', 'generic').strip().lower() == 'generic':
         nav_items = [item for item in nav_items if item[0] != 'instruction']
@@ -38,13 +61,14 @@ def layout(
     auth_name = str(auth_user.get("display_name") or auth_user.get("username") or "Администратор")
     auth_role = "Администратор" if str(auth_user.get("role")) == "admin" else "Сотрудник"
     user_id = int(auth_user.get("id", 0) or 0)
-    user_prefs = AUTH.get_user_preferences(user_id) if user_id > 0 else {}
+    user_prefs = app.AUTH.get_user_preferences(user_id) if user_id > 0 else {}
     preferred_theme = str(user_prefs.get("theme") or "").strip()
     if preferred_theme not in {"light", "dark", "pink"}:
         preferred_theme = ""
     shift_note = "Работает от имени аккаунта" if str(auth_user.get("role")) == "admin" else f"На смене автоматически: {e(employee_identity(auth_user) or current_employee)}"
     legacy_note = bool(auth_user.get("legacy"))
     password_form = "" if legacy_note else f'''<form class="auth-profile-password" method="post" action="/account/password">
+          <input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">
           <input type="hidden" name="next" value="/">
           <label>Текущий пароль<input type="password" name="current_password" autocomplete="current-password" required></label>
           <label>Новый пароль<input type="password" name="new_password" minlength="10" autocomplete="new-password" required></label>
@@ -66,32 +90,18 @@ def layout(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="queue-csrf" content="{e(ADMIN_FORM_TOKEN)}">
+  <meta name="queue-csrf" content="{e(app.csrf_token())}">
   <title>{e(title)} · Единая очередь</title>
   <meta name="theme-color" content="#112a25">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png?v=3.3.79">
   <link rel="apple-touch-icon" href="/static/favicon.png?v=3.3.79">
   <script>document.documentElement.dataset.theme = {json.dumps(preferred_theme)} || localStorage.getItem("queue-theme") || "light";</script>
-  <link rel="stylesheet" href="/static/style.css?v=1.00.3">
-  <link rel="stylesheet" href="/static/ui.css?v=3.3.79">
-  <link rel="stylesheet" href="/static/instruction.css?v=1.00.6.96">
-  <link rel="stylesheet" href="/static/global-theme.css?v=1.00.5">
-  <link rel="stylesheet" href="/static/productivity.css?v=3.3.90">
-  <link rel="stylesheet" href="/static/workflow.css?v=3.3.97">
-  <link rel="stylesheet" href="/static/reliability.css?v=3.3.99">
-  <link rel="stylesheet" href="/static/notification-hotfix.css?v=3.3.104">
-  <link rel="stylesheet" href="/static/interface105.css?v=3.3.111">
-  <link rel="stylesheet" href="/static/performance107.css?v=3.3.107">
-  <link rel="stylesheet" href="/static/hotfix10069.css?v=1.00.6.10">
-  <link rel="stylesheet" href="/static/auth100615.css?v=1.00.6.40">
-  <link rel="stylesheet" href="/static/pink-theme.css?v=1.00.6.40">
-  <link rel="stylesheet" href="/static/ui-polish-1.00.6.40.css?v=1.00.6.40">
-  <link rel="stylesheet" href="/static/user-ui-1.00.6.97.css?v=1.00.6.97">
+{stylesheet_tags(MAIN_STYLESHEETS)}
 </head>
 <body data-admin="{'1' if show_admin else '0'}" data-auth-user-id="{user_id}">
   <header class="topbar">
     <a class="brand" href="/"><span class="brand-mark">Q</span><span>Единая очередь</span></a>
-    {'<span class="local-mode-badge">WINDOWS · ТЕСТ</span>' if LOCAL_MODE else ''}
+    {'<span class="local-mode-badge">WINDOWS · ТЕСТ</span>' if app.LOCAL_MODE else ''}
     <nav>{nav}</nav>
     <button class="notification-button" type="button" data-notification-center aria-label="Уведомления">
       <span aria-hidden="true">🔔</span><b data-notification-count hidden>0</b>
@@ -103,18 +113,10 @@ def layout(
     <button class="theme-toggle" type="button" data-theme-toggle aria-label="Сменить оформление">Тёмная тема</button>
   </header>
   <div class="toast-stack" data-toast-stack aria-live="polite" aria-atomic="false"></div>
-  {'<div class="maintenance-banner">Режим обслуживания включён: просмотр доступен, изменения сотрудников временно заблокированы.</div>' if queue_reliability.maintenance_active(STORE) else ''}
+  {'<div class="maintenance-banner">Режим обслуживания включён: просмотр доступен, изменения сотрудников временно заблокированы.</div>' if queue_reliability.maintenance_active(app.STORE) else ''}
   <main class="page">{content}</main>
   <footer>Единая очередь · рабочая система обработки заявок</footer>
-  <script src="/static/ui.js?v=3.3.79" defer></script>
-  <script src="/static/app.js?v=1.00.6.85" defer></script>
-  <script src="/static/productivity.js?v=1.00.6.36" defer></script>
-  <script src="/static/workflow.js?v=1.00.6.85" defer></script>
-  <script src="/static/reliability.js?v=3.3.99" defer></script>
-  <script src="/static/interface105.js?v=1.00.6.36" defer></script>
-  <script src="/static/performance107.js?v=3.3.107" defer></script>
-  <script src="/static/hotfix10068.js?v=1.00.6.10" defer></script>
-  <script src="/static/auth100618.js?v=1.00.6.40" defer></script>
+{script_tags(MAIN_SCRIPTS)}
 </body>
 </html>"""
 
@@ -146,32 +148,32 @@ def render_dashboard(query: dict[str, list[str]], show_admin: bool = False) -> s
         no_answer_minutes = 0
     current_employee = work_actor()
     if no_answer_minutes:
-        all_filtered = STORE.list_tickets(
+        all_filtered = app.STORE.list_tickets(
             selected_status, selected_category, selected_priority, search, 5000, 0, selected_view, current_employee,
         )
         all_filtered = [item for item in all_filtered if ticket_sla_state(item).get("active") and int(ticket_sla_state(item).get("elapsed_seconds",0) or 0) >= no_answer_minutes * 60]
         total = len(all_filtered)
-        pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        pages = max(1, (total + app.PAGE_SIZE - 1) // app.PAGE_SIZE)
         page = min(query_page(query), pages)
-        tickets = all_filtered[(page - 1) * PAGE_SIZE:page * PAGE_SIZE]
+        tickets = all_filtered[(page - 1) * app.PAGE_SIZE:page * app.PAGE_SIZE]
     else:
-        total = STORE.count_tickets(
+        total = app.STORE.count_tickets(
             selected_status, selected_category, selected_priority, search, selected_view, current_employee,
         )
-        pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        pages = max(1, (total + app.PAGE_SIZE - 1) // app.PAGE_SIZE)
         page = min(query_page(query), pages)
-        tickets = STORE.list_tickets(
+        tickets = app.STORE.list_tickets(
             selected_status,
             selected_category,
             selected_priority,
             search,
-            PAGE_SIZE,
-            (page - 1) * PAGE_SIZE,
+            app.PAGE_SIZE,
+            (page - 1) * app.PAGE_SIZE,
             selected_view,
             current_employee,
         )
-    counts = STORE.counts()
-    shift_summary = STORE.shift_summary(current_employee)
+    counts = app.STORE.counts()
+    shift_summary = app.STORE.shift_summary(current_employee)
     cards = "".join(
         f"""<a class="metric metric-{key}" href="/{'?status=' + key if key != 'all' else ''}">
           <span>{label}</span><strong data-count-status="{key}">{counts.get(key, 0)}</strong>
@@ -198,10 +200,10 @@ def render_dashboard(query: dict[str, list[str]], show_admin: bool = False) -> s
     shift_note = f'<small>Предыдущая смена: {e(previous_employee)}</small>' if previous_employee else '<small>Передача начнёт заполняться при смене сотрудника</small>'
     status_options = '<option value="">Все статусы</option>' + "".join(
         f'<option value="{e(key)}" {"selected" if key == selected_status else ""}>{e(label)}</option>'
-        for key, label in STATUSES.items()
+        for key, label in app.STATUSES.items()
     )
     table_body = render_ticket_rows(tickets)
-    handoff_tickets = [item for item in STORE.list_tickets("", "", "", "", 500, 0) if int(item.get("shift_handoff", 0) or 0)][:20]
+    handoff_tickets = [item for item in app.STORE.list_tickets("", "", "", "", 500, 0) if int(item.get("shift_handoff", 0) or 0)][:20]
     if handoff_tickets:
         handoff_items = "".join(
             f'<a class="handoff-item" href="/ticket?id={int(item["id"])}"><strong>#{int(item["id"])} · {e(str(item.get("title", "Заявка")))}</strong><span>{e(str(item.get("sender", "")))}</span><small>Передал: {e(str(item.get("handoff_from", "")))} · {e(human_time(str(item.get("handoff_at", ""))))}</small></a>'
@@ -231,7 +233,7 @@ def render_dashboard(query: dict[str, list[str]], show_admin: bool = False) -> s
           <a class="button ghost" href="/">Сбросить</a>
         </form>
       </section>
-      <section class="panel table-panel" data-dashboard data-dashboard-version="{e(STORE.dashboard_version())}">
+      <section class="panel table-panel" data-dashboard data-dashboard-version="{e(app.STORE.dashboard_version())}">
         <div class="table-hint"><span>Приоритет меняется в левом столбце. Правой кнопкой мыши по заявке можно быстро изменить статус.</span><span id="auto-refresh-state">Автообновление включено</span></div>
         <div class="table-scroll"><table>
           <thead><tr><th>Приоритет</th><th>№</th><th>Источник</th><th>Отправитель</th><th>Запрос</th><th>Статус</th><th>Время</th></tr></thead>
@@ -242,6 +244,7 @@ def render_dashboard(query: dict[str, list[str]], show_admin: bool = False) -> s
       <section class="panel manual-panel">
         <div><p class="eyebrow">Ручная заявка</p><h2>Быстро добавить запрос</h2><p>Для обращений, поступивших по телефону, почте или из других каналов</p></div>
         <form class="manual-form" method="post" action="/manual">
+          <input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">
           <label>Тип запроса<input name="title" value="" placeholder="Например, сброс пароля" required></label>
           <label>Номер / идентификатор<input name="reference" placeholder="Например, 784512"></label>
           <label class="wide">Комментарий<textarea name="comment" rows="2" placeholder="Дополнительная информация"></textarea></label>
@@ -268,7 +271,7 @@ def render_ticket(
     query: dict[str, list[str]],
     show_admin: bool = False,
 ) -> str:
-    ticket = STORE.get_ticket(ticket_id)
+    ticket = app.STORE.get_ticket(ticket_id)
     if not ticket:
         return layout(
             "Не найдено",
@@ -277,13 +280,13 @@ def render_ticket(
         )
     notice = query.get("notice", [""])[0]
     notice_html = f'<div class="notice">{e(notice)}</div>' if notice else ""
-    events = STORE.ticket_events(ticket_id)
+    events = app.STORE.ticket_events(ticket_id)
     event_rows = "".join(
         f'<li><span>{e(event["action"])}</span><small>{e(event["actor"])} · {e(human_time(event["created_at"]))}</small></li>'
         for event in events
     )
-    context_fields = queue_contextual_tickets.ticket_fields(STORE, ticket_id)
-    context_history = queue_contextual_tickets.ticket_history(STORE, ticket_id, 120)
+    context_fields = queue_contextual_tickets.ticket_fields(app.STORE, ticket_id)
+    context_history = queue_contextual_tickets.ticket_history(app.STORE, ticket_id, 120)
     context_field_rows = "".join(
         f'<div class="context-field-row"><span>{e(queue_contextual_tickets.FIELD_LABELS.get(str(item.get("field_name","")), str(item.get("field_name",""))))}</span>'
         f'<strong>{e(str(item.get("value", "")))}</strong>'
@@ -356,7 +359,7 @@ def render_ticket(
 
     attachment = ""
     external_id = str(ticket.get("external_id", "") or "")
-    media_items = STORE.list_ticket_whatsapp_media(ticket_id, chat_id, external_id, 24)
+    media_items = app.STORE.list_ticket_whatsapp_media(ticket_id, chat_id, external_id, 24)
     if media_items:
         media_cards: list[str] = []
         for media_item in media_items:
@@ -369,7 +372,7 @@ def render_ticket(
             sender_name = str(media_item.get("sender", "") or ("Рабочий WhatsApp" if media_item.get("from_me") else ticket.get("sender", "Пользователь")))
             when = ""
             try:
-                when = datetime.fromtimestamp(int(media_item.get("message_timestamp", 0) or 0), tz=timezone.utc).astimezone(LOCAL_TIMEZONE).strftime("%d.%m %H:%M")
+                when = datetime.fromtimestamp(int(media_item.get("message_timestamp", 0) or 0), tz=timezone.utc).astimezone(app.LOCAL_TIMEZONE).strftime("%d.%m %H:%M")
             except (ValueError, TypeError, OSError):
                 when = ""
             if mime.startswith("image/"):
@@ -412,7 +415,7 @@ def render_ticket(
     else:
         status_buttons = "".join(
             f'<button name="status" value="{e(key)}" class="status-action action-{e(key)}" type="submit">{e(label)}</button>'
-            for key, label in STATUSES.items()
+            for key, label in app.STATUSES.items()
         )
 
     chat_button = (
@@ -427,7 +430,7 @@ def render_ticket(
           <section class="panel sla-panel {'sla-panel-overdue' if sla_state.get('overdue') else ''}">
             <h2>SLA реакции</h2>
             <div>{sla_badge(ticket)}</div>
-            <p class="muted">Лимит для приоритета «{e(PRIORITIES.get(str(ticket.get('priority','normal')), str(ticket.get('priority','normal'))))}»: {int(sla_state.get('limit_minutes',0) or 0)} мин.</p>
+            <p class="muted">Лимит для приоритета «{e(app.PRIORITIES.get(str(ticket.get('priority','normal')), str(ticket.get('priority','normal'))))}»: {int(sla_state.get('limit_minutes',0) or 0)} мин.</p>
           </section>'''
     else:
         first_response = parse_iso_datetime(ticket.get("first_response_at"))
@@ -469,7 +472,7 @@ def render_ticket(
             <h2>Администратор</h2>
             <p class="muted">Удаление происходит только внутри системы. Пользователю ничего не отправляется.</p>
             <form method="post" action="/admin/ticket-delete" onsubmit="return confirm('Удалить заявку №{ticket['id']}? Пользователь не получит уведомление.')">
-              <input type="hidden" name="csrf_token" value="{e(ADMIN_FORM_TOKEN)}">
+              <input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">
               <input type="hidden" name="ticket_id" value="{ticket['id']}">
               <button class="button danger" type="submit">Удалить заявку</button>
             </form>
@@ -489,8 +492,8 @@ def render_ticket(
             <div><span>Источник</span><strong>{e(ticket['source'])}</strong></div>
             <div><span>Отправитель</span><strong>{e(ticket['sender'])}</strong></div>
             <div><span>Телефон</span><strong>{e(display_phone(ticket['phone']))}</strong></div>
-            <div><span>Категория</span><strong>{e(CATEGORIES.get(ticket['category'], ticket['category']))}</strong></div>
-            <div><span>Приоритет</span><strong>{e(PRIORITIES.get(ticket['priority'], ticket['priority']))}</strong></div>
+            <div><span>Категория</span><strong>{e(app.CATEGORIES.get(ticket['category'], ticket['category']))}</strong></div>
+            <div><span>Приоритет</span><strong>{e(app.PRIORITIES.get(ticket['priority'], ticket['priority']))}</strong></div>
             <div><span>Создана</span><strong>{e(human_time(ticket['created_at']))}</strong></div>
           </div>
           
@@ -524,11 +527,11 @@ def render_ticket(
         </aside>
       </div>
     """
-    revision_field = f'<input type="hidden" name="revision" value="{int(ticket.get("revision",0))}"><input type="hidden" name="csrf_token" value="{e(ADMIN_FORM_TOKEN)}">'
+    revision_field = f'<input type="hidden" name="revision" value="{int(ticket.get("revision",0))}"><input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">'
     content = content.replace(f'<input type="hidden" name="ticket_id" value="{ticket_id}">', f'<input type="hidden" name="ticket_id" value="{ticket_id}">'+revision_field)
     content = content.replace('<button class="button" name="action" value="transfer"', '<label>Что сделано и что осталось<textarea name="handoff_note" maxlength="2000" required></textarea></label><button class="button" name="action" value="transfer"')
-    content = content.replace('<h2>Передача смене</h2>', '<h2>Передача смене</h2>'+queue_operations.handoff_history(STORE,ticket_id))
-    content = content.replace('<aside>', '<aside>'+queue_operations.notification_panel(STORE,ticket_id),1)
+    content = content.replace('<h2>Передача смене</h2>', '<h2>Передача смене</h2>'+queue_operations.handoff_history(app.STORE,ticket_id))
+    content = content.replace('<aside>', '<aside>'+queue_operations.notification_panel(app.STORE,ticket_id),1)
     return layout(f"Заявка #{ticket_id}", content, show_admin=show_admin)
 
 
@@ -542,8 +545,9 @@ def render_my_page(query: dict[str, list[str]], show_admin: bool = False) -> str
     employee_name = employee_identity(user) if role == "employee" else display_name
     actor = work_actor()
     try:
-        mine = STORE.list_tickets("", "", "", "", 400, 0, "mine", actor)
+        mine = app.STORE.list_tickets("", "", "", "", 400, 0, "mine", actor)
     except Exception:
+        log_suppressed("queue_ticket_views.render_my_page")
         mine = []
     active = [item for item in mine if str(item.get("status", "")) not in {"done", "invalid"}]
     done = [item for item in mine if str(item.get("status", "")) == "done"]
@@ -569,7 +573,7 @@ def render_my_page(query: dict[str, list[str]], show_admin: bool = False) -> str
         "lockout": "Блокировка после попыток", "locked": "Попытка во время блокировки",
         "disabled": "Отключённая учётная запись", "unknown_user": "Неизвестный логин",
     }
-    for event in AUTH.list_user_login_events(user_id, 12):
+    for event in app.AUTH.list_user_login_events(user_id, 12):
         ok = bool(event.get("success"))
         state_class = "is-on" if ok else "is-off"
         state_label = "Успешно" if ok else "Ошибка"
@@ -582,7 +586,7 @@ def render_my_page(query: dict[str, list[str]], show_admin: bool = False) -> str
     login_table = "".join(login_rows) or '<tr><td colspan="4" class="empty">История входов пока пуста</td></tr>'
 
     activity_rows: list[str] = []
-    for event in AUTH.list_user_audit_events(user_id, 16):
+    for event in app.AUTH.list_user_audit_events(user_id, 16):
         object_label = " · ".join(
             part for part in [str(event.get("object_type") or ""), str(event.get("object_id") or "")] if part
         ) or "—"
@@ -592,7 +596,7 @@ def render_my_page(query: dict[str, list[str]], show_admin: bool = False) -> str
             f'<td>{e(object_label)}</td></tr>'
         )
     activity_table = "".join(activity_rows) or '<tr><td colspan="3" class="empty">Действий аккаунта пока нет</td></tr>'
-    session_count = AUTH.active_session_count_for_user(user_id)
+    session_count = app.AUTH.active_session_count_for_user(user_id)
     shift_text = "Не используется для администратора" if role == "admin" else f"Автоматически на смене: {employee_name or '—'}"
 
     content = f"""
@@ -634,7 +638,7 @@ def render_account_switcher(
             action = '<span class="status-badge done">Текущий аккаунт</span>'
         else:
             action = f'''<form method="post" action="/accounts/switch">
-          <input type="hidden" name="csrf_token" value="{e(ADMIN_FORM_TOKEN)}">
+          <input type="hidden" name="csrf_token" value="{e(app.csrf_token())}">
           <input type="hidden" name="slot" value="{slot}">
           <button class="button primary" type="submit">Переключиться</button>
         </form>'''
