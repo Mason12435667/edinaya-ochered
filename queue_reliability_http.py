@@ -17,7 +17,7 @@ def _value(query,key,default=''):
 
 def _human(n):
     try:return human_bytes(int(n or 0))
-    except Exception:
+    except (TypeError, ValueError):
         log_suppressed("queue_reliability_http._human")
         return str(n or 0)
 

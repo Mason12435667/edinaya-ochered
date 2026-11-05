@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
 import queue_productivity as qp
-from queue_core import e, human_bytes, log_suppressed
+from queue_core import e, human_bytes
 from ticketing import TicketStore
 
 
@@ -91,12 +91,7 @@ class ProductivityRoutes:
             chat_id=_value(query,"chat_id")[:120]
             handler.json_response({"contact":qp.get_contact_meta(self.store,chat_id),"mute":qp.mute_state(self.store,chat_id)})
         elif path=="/api/productivity-categories":
-            try:
-                categories=[[str(key),str(label)] for key,label in self.category_items()]
-            except Exception:
-                log_suppressed("queue_productivity_http.get")
-                categories=[["general","Другая проблема"],["support","Поддержка"]]
-            handler.json_response({"categories":categories})
+            handler.json_response({"categories":[[str(key),str(label)] for key,label in self.category_items()]})
         elif path=="/api/open-tickets": handler.json_response({"tickets":qp.open_tickets(self.store,150)})
         elif path=="/api/chat-gallery": handler.json_response({"items":qp.chat_gallery(self.store,_value(query,"chat_id"),300)})
         elif path=="/api/chat-find": handler.json_response({"results":qp.chat_find(self.store,_value(query,"chat_id"),_value(query,"q"),250)})

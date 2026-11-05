@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import sqlite3
 import json
 import shutil
 import time
@@ -133,7 +134,7 @@ def activate_employee_shift(user: dict[str, object] | None) -> dict[str, object]
     if previous and previous != employee:
         try:
             handed_off = int(_deps.store.switch_shift(previous, employee) or 0)
-        except Exception:
+        except sqlite3.Error:
             log_suppressed("queue_work_context.activate_employee_shift")
             handed_off = 0
         try:
@@ -143,7 +144,7 @@ def activate_employee_shift(user: dict[str, object] | None) -> dict[str, object]
     _deps.store.set_setting("active_employee", employee)
     try:
         _deps.auth.record_audit(user, "shift_auto_login", object_type="shift", object_id=employee, details=f"Автоматически на смене после входа; передано заявок: {handed_off}")
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("queue_work_context.activate_employee_shift")
     return {"updated": previous != employee, "employee": employee, "handed_off": handed_off}
 
@@ -187,7 +188,7 @@ def audit_admin_form_submission(path: str, form: dict[str, str], actor: dict[str
     details = "; ".join(safe_parts) or "Изменение без открытых параметров"
     try:
         _deps.auth.record_audit(actor or {}, "admin_settings_submit", object_type="admin_settings", object_id=path, details=details)
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("queue_work_context.audit_admin_form_submission")
 
 

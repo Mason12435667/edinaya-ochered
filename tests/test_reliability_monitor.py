@@ -1,7 +1,9 @@
 """ReliabilityMonitor without HTTP: alerts from its checks reach the notification feed."""
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import queue_reliability
 from queue_reliability import ReliabilityMonitor
@@ -37,6 +39,14 @@ class ReliabilityMonitorTests(unittest.TestCase):
         queue_reliability.dismiss_notification(self.store, "reliability:connector")
         self.monitor.run_health_checks()
         self.assertNotIn("reliability:connector", self.events())
+
+    def test_busy_database_leaves_the_feed_empty_but_a_bug_is_not_hidden(self):
+        with mock.patch.object(self.store, "connection", side_effect=sqlite3.OperationalError("database is locked")):
+            with self.assertLogs("queue", "WARNING"):
+                self.assertEqual(queue_reliability.dismissed_notification_ids(self.store, ["reliability:x"]), set())
+        with mock.patch.object(self.store, "connection", side_effect=AttributeError("a bug in the code")):
+            with self.assertRaises(AttributeError):
+                queue_reliability.dismissed_notification_ids(self.store, ["reliability:x"])
 
     def test_diagnostics_use_the_given_database_and_limits(self):
         snapshot = self.monitor.diagnostic_snapshot()

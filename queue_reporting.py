@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timezone
+import sqlite3
 
 from queue_core import LOCAL_TIMEZONE, log_suppressed, parse_iso_datetime
 
@@ -58,7 +58,7 @@ class ReportingService:
                 events = self.store.ticket_events(int(ticket.get("id", 0) or 0))
                 if events:
                     finished = parse_iso_datetime(events[-1].get("created_at"))
-            except Exception:
+            except sqlite3.Error:
                 log_suppressed("queue_reporting.ticket_resolution_minutes")
                 finished = None
         return max(0, int((finished - created).total_seconds() // 60)) if finished else None
@@ -119,7 +119,7 @@ class ReportingService:
                     "object": str(item.get("object") or item.get("target") or ""),
                     "source": "Система",
                 })
-        except Exception:
+        except sqlite3.Error:
             log_suppressed("queue_reporting.unified_audit_events")
         for item in self.auth.list_audit_events(600):
             actor = str(item.get("actor_display_name") or item.get("actor_username") or "Система")

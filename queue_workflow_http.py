@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Mapping
+import sqlite3
+from collections.abc import Callable, Iterable
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
@@ -26,7 +27,7 @@ def _send_bytes(handler, body: bytes, content_type: str, filename: str):
 def _human_bytes(value: int) -> str:
     try:
         return human_bytes(int(value or 0))
-    except Exception:
+    except (TypeError, ValueError):
         log_suppressed("queue_workflow_http._human_bytes")
         size = float(value or 0)
         for unit in ("Б", "КБ", "МБ", "ГБ"):
@@ -41,7 +42,7 @@ class WorkflowRoutes:
 
     def __init__(self, store: TicketStore, *, csrf_token: Callable[[], str], layout: Callable[..., str],
                  admin_layout: Callable[[str, str, str], str],
-                 category_items: Callable[[], Iterable[tuple[str, str]]], categories: Mapping[str, str],
+                 category_items: Callable[[], Iterable[tuple[str, str]]],
                  employees: list[str], work_actor: Callable[[], str],
                  update_ticket_status: Callable[..., tuple[bool, str]], events: Any):
         self.store = store
@@ -49,7 +50,6 @@ class WorkflowRoutes:
         self.layout = layout
         self.admin_layout = admin_layout
         self.category_items = category_items
-        self.categories = categories
         self.employees = employees  # app.py edits this list in place
         self.work_actor = work_actor
         self.update_ticket_status = update_ticket_status
@@ -83,15 +83,9 @@ class WorkflowRoutes:
         settings = qw.retention_settings(self.store)
         stats = qw.media_stats(self.store)
         required = set(qw.required_close_categories(self.store))
-        category_items = []
-        try:
-            category_items = list(self.category_items())
-        except Exception:
-            log_suppressed("queue_workflow_http._workflow_admin_page")
-            category_items = [(k, v) for k, v in self.categories.items()]
         checks = ''.join(
             f'<label class="workflow-check"><input type="checkbox" name="required_category__{e(key)}" value="1" {"checked" if key in required else ""}><span>{e(label)}</span></label>'
-            for key, label in category_items
+            for key, label in self.category_items()
         )
         media_cards = ''.join(
             f'<article class="stat-card"><span>{label}</span><strong>{_human_bytes(stats[kind]["bytes"])}</strong><small>{stats[kind]["count"]} файлов</small></article>'
@@ -262,7 +256,7 @@ class WorkflowRoutes:
             elif path == "/api/workflow-bulk":
                 try:
                     ids = sorted({int(x) for x in json.loads(form.get("ticket_ids", "[]")) if int(x) > 0})[:200]
-                except Exception:
+                except (TypeError, ValueError):
                     log_suppressed("queue_workflow_http._post_impl")
                     ids = []
                 actor = self.work_actor(); updated = failed = 0
@@ -286,7 +280,7 @@ class WorkflowRoutes:
                             if not ok: raise ValueError("status")
                             changed = True
                         updated += int(changed)
-                    except Exception:
+                    except (ValueError, sqlite3.Error):
                         log_suppressed("queue_workflow_http._post_impl")
                         failed += 1
                 handler.json_response({"selected":len(ids),"updated":updated,"failed":failed})

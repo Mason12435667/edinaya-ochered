@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import csv
 import io
 import json
@@ -950,7 +951,7 @@ class QueueHTTPHandlerMixin:
         if parsed.path.startswith("/admin/") and self.is_admin():
             try:
                 app.AUTH.record_audit(user or {}, "admin_post", object_type="admin_settings", object_id=parsed.path, details="Отправлено изменение в административном разделе")
-            except Exception:
+            except sqlite3.Error:
                 log_suppressed("queue_http_handler.do_POST")
         route = self.EARLY_POST_ROUTES.get(parsed.path)
         if route:

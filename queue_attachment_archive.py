@@ -46,7 +46,7 @@ class AttachmentArchive:
         allowed_roots = [self.outbound_media_dir.resolve()]
         try:
             allowed_roots.append(Path(self.upload_dir).resolve())
-        except Exception:
+        except (OSError, TypeError):
             log_suppressed("queue_attachment_archive.preserve")
         if not any(root == source.parent or root in source.parents for root in allowed_roots):
             return {}

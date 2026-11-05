@@ -286,7 +286,7 @@ def _group_preview_mention_map(chat_id: str, mentions=None) -> dict[str, str]:
                 add(participant.get("mention_id", ""), name, own)
                 add(participant.get("resolved_id", ""), name, own)
                 add(participant.get("phone", ""), name, own)
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             log_suppressed("queue_chat_state._group_preview_mention_map")
     return mapping
 
@@ -301,7 +301,7 @@ def _latest_group_preview_mentions(chat_id: str) -> list[dict[str, object]]:
             latest = max(rows, key=lambda item: int(item.get("timestamp", item.get("message_timestamp", 0)) or 0))
             value = latest.get("mentions", [])
             return value if isinstance(value, list) else []
-        except Exception:
+        except (sqlite3.Error, TypeError, ValueError):
             log_suppressed("queue_chat_state.load")
             return []
     return list(cached_snapshot_value(f"group_preview_mentions_10067:{chat_id}", 2.5, load))
@@ -598,14 +598,14 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
         try:
             cache_key = f"ui_active_tickets:{selected}:{raw_phone}"
             active_rows = cached_snapshot_value(cache_key, 2.5, lambda: app.STORE.list_active_user_tickets(selected, raw_phone, 8))
-        except Exception:
+        except sqlite3.Error:
             log_suppressed("queue_chat_state.chat_state_snapshot")
             active_rows = []
         active_items: list[dict[str, object]] = []
         for raw_row in active_rows:
             try:
                 row = dict(raw_row)
-            except Exception:
+            except (TypeError, ValueError):
                 log_suppressed("queue_chat_state.chat_state_snapshot")
                 row = raw_row if isinstance(raw_row, dict) else {}
             try:
@@ -799,7 +799,7 @@ def _decorate_notification_event(event: dict[str, object]) -> dict[str, object]:
                    ORDER BY id DESC LIMIT 1""",
                 (chat_id, str(item.get("message_key", ""))),
             ).fetchone()
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("queue_chat_state._decorate_notification_event")
         row = None
 
@@ -843,7 +843,7 @@ def notifications_snapshot() -> dict[str, object]:
     # background health loop. This prevents a stale red warning after reconnect.
     if bool(connector.get("connected")):
         try: queue_reliability.resolve_persisted_alert(app.STORE, "connector")
-        except Exception:
+        except sqlite3.Error:
             log_suppressed("queue_chat_state.notifications_snapshot")
     reliability_count, reliability_events = app.RELIABILITY.notification_events()
     queue_reliability.reconcile_notification_dismissals(

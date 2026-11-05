@@ -251,19 +251,16 @@ def request_profile_refresh(chat_lock, chat_state: dict, avatars, chat_id: str) 
     chat_id = str(chat_id or '').strip()[:120]
     if not chat_id:
         raise ValueError('Чат не выбран')
-    try:
-        with chat_lock:
-            chat_state['requested_chat_id'] = chat_id
-            profiles = chat_state.get('contact_profiles')
-            if isinstance(profiles,dict): profiles.pop(chat_id,None)
-            presence = chat_state.get('presence')
-            if isinstance(presence,dict): presence.pop(chat_id,None)
-    except Exception:
-        log_suppressed("queue_reliability.request_profile_refresh")
+    with chat_lock:
+        chat_state['requested_chat_id'] = chat_id
+        profiles = chat_state.get('contact_profiles')
+        if isinstance(profiles,dict): profiles.pop(chat_id,None)
+        presence = chat_state.get('presence')
+        if isinstance(presence,dict): presence.pop(chat_id,None)
     try:
         path = avatars.path(chat_id)
         if path.is_file(): path.unlink()
-    except Exception:
+    except OSError:
         log_suppressed("queue_reliability.request_profile_refresh")
 
 
@@ -322,7 +319,7 @@ def dismissed_notification_ids(store, event_ids: list[str] | tuple[str,...] | se
                 ids,
             ).fetchall()
         return {str(row['event_id'] if hasattr(row,'keys') else row[0]) for row in rows}
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("queue_reliability.dismissed_notification_ids")
         return set()
 
@@ -339,7 +336,7 @@ def reconcile_notification_dismissals(store, current_event_ids: list[object], pr
                     stale.append((event_id,))
             if stale:
                 db.executemany("DELETE FROM reliability_notification_dismissals WHERE event_id=?",stale)
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("queue_reliability.reconcile_notification_dismissals")
 
 
@@ -495,7 +492,7 @@ class ReliabilityMonitor:
                 events.append({'event_id':'reliability:'+str(r['alert_key']),'kind':'system','title':str(r['title']),
                                'detail':str(r['detail'] or ''),'timestamp':int((_parse_dt(r['updated_at']) or datetime.now(timezone.utc)).timestamp()),
                                'level':str(r['level'] or 'warning')})
-        except Exception:
+        except sqlite3.Error:
             log_suppressed("queue_reliability.reliability_notification_events")
         # SLA warning / overdue events are calculated live, without mutating ticket status.
         if str(self.store.get_setting('sla_alerts_enabled','1')).lower() in {'1','true','yes','on'}:
@@ -509,7 +506,7 @@ class ReliabilityMonitor:
                     detail=f"{t.get('title','Заявка')} · {'просрочка' if overdue else 'осталось'} {abs(remain)//60} мин."
                     events.append({'event_id':f'sla:{tid}:{"overdue" if overdue else "warn"}','kind':'sla','title':title,'detail':detail,
                                    'timestamp':int(datetime.now(timezone.utc).timestamp()),'level':'critical' if overdue else 'warning'})
-            except Exception:
+            except (sqlite3.Error, TypeError, ValueError):
                 log_suppressed("queue_reliability.reliability_notification_events")
         events.sort(key=lambda x:int(x.get('timestamp',0) or 0),reverse=True)
         reconcile_notification_dismissals(self.store,[e.get('event_id') for e in events],('reliability:','sla:'))

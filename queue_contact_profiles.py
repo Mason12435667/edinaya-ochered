@@ -1,5 +1,6 @@
 """Contact language/profile persistence with an explicit store dependency."""
 from __future__ import annotations
+import sqlite3
 import hashlib
 import json
 import re
@@ -31,7 +32,7 @@ class ContactProfiles:
         if clean_chat:
             try:
                 clean_chat = self.store.canonical_whatsapp_chat_id(clean_chat) or clean_chat
-            except Exception:
+            except sqlite3.Error:
                 log_suppressed("queue_contact_profiles.identities")
             identities.append(f"chat:{clean_chat}")
         result: list[str] = []
