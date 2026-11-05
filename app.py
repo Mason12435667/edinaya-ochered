@@ -167,25 +167,6 @@ def global_auto_reply_enabled() -> bool:
 
 MAX_MEDIA_BYTES = max(1, min(256, int(os.getenv("QUEUE_MAX_MEDIA_MB", "12")))) * 1024 * 1024
 UPLOADS = queue_uploads.Uploads(OUTBOUND_MEDIA_DIR / "uploads", STORE)
-class DisabledVoiceJobs:
-    """Compatibility object: voice transcription is intentionally disabled."""
-
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        self.states: dict[tuple[str, str], dict[str, str]] = {}
-
-    def submit(self, chat_id: str, message_id: str) -> dict[str, str]:
-        key = (str(chat_id), str(message_id))
-        state = {
-            "status": "error",
-            "reason": "Расшифровка голосовых отключена администратором",
-        }
-        with self.lock:
-            self.states[key] = dict(state)
-        return state
-
-
-VOICE_JOBS = DisabledVoiceJobs()
 RETENTION_DAYS = max(1, min(3650, int(os.getenv("QUEUE_RETENTION_DAYS", "20"))))
 # Фото, присланные непосредственно перед текстом заявки, можно автоматически
 # прикрепить к создаваемой заявке. Окно ограничено, чтобы старые скриншоты не
@@ -215,9 +196,6 @@ def connector_token() -> str:
 
 
 WEBHOOK_TOKEN = connector_token()
-INSTRUCTION_URL = "/instruction"
-INSTRUCTION_SOURCE_URL = os.getenv("QUEUE_INSTRUCTION_SOURCE_URL", "").strip()
-INSTRUCTION_DATA_PATH = ROOT / "instruction_data.json"
 DEFAULT_EMPLOYEES = [f"Сотрудник {number}" for number in range(1, 6)]
 ADMIN_USER = os.getenv("QUEUE_ADMIN_USER", "queueadmin").strip().casefold()
 ADMIN_SESSION_TOKEN = secrets.token_urlsafe(48)
@@ -1128,7 +1106,6 @@ notifications_snapshot = queue_chat_state.notifications_snapshot
 
 # Ticket views retain their existing interface.
 layout = queue_ticket_views.layout
-render_instruction = queue_ticket_views.render_instruction
 render_dashboard = queue_ticket_views.render_dashboard
 render_ticket = queue_ticket_views.render_ticket
 render_my_page = queue_ticket_views.render_my_page
@@ -1323,7 +1300,7 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
         if os.getenv("QUEUE_PROFILE", "generic").strip().lower() != "generic":
             return False
         path = urlparse(self.path).path.lower()
-        return path.rstrip("/") == "/instruction" or path.startswith(('/приложения', '/api/приложения', '/admin/приложения', '/api/внешнего сервиса', '/admin/внешнего сервиса', '/static/приложения-'))
+        return path.startswith(('/приложения', '/api/приложения', '/admin/приложения', '/api/внешнего сервиса', '/admin/внешнего сервиса', '/static/приложения-'))
 
     def do_GET(self):
         if self._generic_domain_path():

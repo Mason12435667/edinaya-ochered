@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-import secrets
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -12,13 +9,6 @@ from queue_core import log_suppressed
 
 def _value(query,key,default=''):
     return query.get(key,[default])[0]
-
-
-def _csrf(handler, app, form) -> bool:
-    if secrets.compare_digest(str(form.get('csrf_token','')),str(app.csrf_token())):
-        return True
-    handler.json_response({'error':'Обновите страницу и попробуйте снова'},403)
-    return False
 
 
 def _human(app,n):
@@ -89,7 +79,6 @@ def post(handler,app):
     known={'/api/reliability-schedule','/api/reliability-scheduled-cancel','/api/reliability-profile-refresh','/admin/reliability'}
     if path not in known:return False
     form=handler.read_form()
-    if not _csrf(handler,app,form):return True
     try:
         if path=='/api/reliability-schedule':
             sid=qr.schedule_message(app.STORE,form.get('chat_id',''),form.get('body',''),app.active_employee(),form.get('due_at',''))

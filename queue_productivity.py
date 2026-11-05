@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import os
 import re
 import shutil
@@ -94,33 +93,6 @@ def toggle_bookmark(store, chat_id: str, message_key: str, actor: str = "", note
             (chat_id, message_key, _clean(actor, 120), _clean(note, 1000), utc_now()),
         )
         return True
-
-
-def is_bookmarked(store, chat_id: str, message_key: str) -> bool:
-    with store.connection() as db:
-        return db.execute(
-            "SELECT 1 FROM message_bookmarks WHERE chat_id=? AND message_key=?",
-            (_clean(chat_id, 120), _clean(message_key, 180)),
-        ).fetchone() is not None
-
-
-def list_bookmarks(store, limit: int = 200) -> list[dict[str, Any]]:
-    with store.connection() as db:
-        rows = db.execute(
-            """
-            SELECT b.chat_id,b.message_key,b.actor,b.note,b.created_at,
-                   m.body,m.media_name,m.media_mime,m.message_timestamp,m.sender,m.from_me,m.deleted,
-                   COALESCE(NULLIF(c.name,''),NULLIF(g.name,''),NULLIF(p.name,''),m.chat_id) AS chat_name
-            FROM message_bookmarks b
-            LEFT JOIN whatsapp_chat_messages m ON m.chat_id=b.chat_id AND m.message_key=b.message_key
-            LEFT JOIN whatsapp_chats c ON c.chat_id=b.chat_id
-            LEFT JOIN whatsapp_groups g ON g.chat_id=b.chat_id
-            LEFT JOIN whatsapp_contacts p ON p.chat_id=b.chat_id
-            ORDER BY b.created_at DESC LIMIT ?
-            """,
-            (max(1, min(int(limit), 1000)),),
-        ).fetchall()
-    return [dict(row) for row in rows]
 
 
 def get_contact_meta(store, chat_id: str) -> dict[str, Any]:
@@ -441,56 +413,6 @@ def chat_find(store, chat_id: str, query: str, limit: int = 200) -> list[dict[st
             params,
         ).fetchall()
     return [dict(r) for r in rows]
-
-
-def advanced_search(store, query: str = "", *, date_from: str = "", date_to: str = "", chat_type: str = "",
-                    sender: str = "", employee: str = "", attachment: str = "", mentions_only: bool = False,
-                    voice_only: bool = False, page: int = 1, page_size: int = 50) -> dict[str, Any]:
-    q=_clean(query,200).casefold(); sender=_clean(sender,160).casefold(); employee=_clean(employee,160).casefold()
-    page=max(1,min(int(page or 1),10000)); page_size=max(10,min(int(page_size),100))
-    if not any([q,date_from,date_to,chat_type,sender,employee,attachment,mentions_only,voice_only]):
-        return {"results":[],"has_more":False,"page":page}
-    conditions=["m.deleted=0"]; params: list[Any]=[]
-    for token in q.split():
-        conditions.append("instr(FOLD(m.body || ' ' || m.transcript || ' ' || m.sender || ' ' || COALESCE(c.name,'') || ' ' || COALESCE(g.name,'') || ' ' || COALESCE(p.name,'') || ' ' || m.chat_id || ' ' || COALESCE(p.phone,'')),?)>0")
-        params.append(token)
-    if date_from:
-        try:
-            start=int(datetime.fromisoformat(date_from).replace(tzinfo=LOCAL_TZ).astimezone(timezone.utc).timestamp())
-            conditions.append("m.message_timestamp>=?"); params.append(start)
-        except ValueError: pass
-    if date_to:
-        try:
-            end_dt=datetime.fromisoformat(date_to).replace(tzinfo=LOCAL_TZ)+timedelta(days=1)
-            conditions.append("m.message_timestamp<?"); params.append(int(end_dt.astimezone(timezone.utc).timestamp()))
-        except ValueError: pass
-    if chat_type=="personal": conditions.append("m.chat_id NOT LIKE '%@g.us'")
-    elif chat_type=="group": conditions.append("m.chat_id LIKE '%@g.us'")
-    if sender:
-        conditions.append("instr(FOLD(m.sender || ' ' || m.sender_phone),?)>0"); params.append(sender)
-    if employee:
-        conditions.append("instr(FOLD(COALESCE(o.actor,'')),?)>0"); params.append(employee)
-    if attachment and attachment!="any":
-        if attachment=="image": conditions.append("m.media_mime LIKE 'image/%'")
-        elif attachment=="video": conditions.append("m.media_mime LIKE 'video/%'")
-        elif attachment=="audio": conditions.append("m.media_mime LIKE 'audio/%'")
-        elif attachment=="file": conditions.append("m.media_path<>'' AND m.media_mime NOT LIKE 'image/%' AND m.media_mime NOT LIKE 'video/%' AND m.media_mime NOT LIKE 'audio/%'")
-    if mentions_only: conditions.append("(m.notify=1 OR m.mentions_json<>'[]')")
-    if voice_only: conditions.append("m.media_mime LIKE 'audio/%'")
-    sql=f"""SELECT m.message_key,m.chat_id,m.body,m.transcript,m.sender,m.sender_phone,m.media_name,m.media_mime,m.message_timestamp,m.from_me,
-                    COALESCE(NULLIF(p.name,''),NULLIF(g.name,''),NULLIF(c.name,''),m.sender,m.chat_id) AS name,
-                    COALESCE(o.actor,'') AS employee
-             FROM whatsapp_chat_messages m
-             LEFT JOIN whatsapp_chats c ON c.chat_id=m.chat_id
-             LEFT JOIN whatsapp_groups g ON g.chat_id=m.chat_id
-             LEFT JOIN whatsapp_contacts p ON p.chat_id=m.chat_id
-             LEFT JOIN outbound_messages o ON o.provider_id=m.message_key
-             WHERE {' AND '.join(conditions)} ORDER BY m.message_timestamp DESC,m.id DESC LIMIT ? OFFSET ?"""
-    params.extend([page_size+1,(page-1)*page_size])
-    with store.connection() as db:
-        rows=db.execute(sql,params).fetchall()
-    result=[dict(r) for r in rows[:page_size]]
-    return {"results":result,"has_more":len(rows)>page_size,"page":page}
 
 
 def _seconds_between(start: str, end: str) -> float | None:

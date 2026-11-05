@@ -105,16 +105,6 @@ def snapshot(app) -> dict[str, Any]:
     with _LOCK:
         connector = dict(_CONNECTOR)
         sql = dict(_SQL)
-    voice = {"queued": 0, "running": 0, "cached": 0}
-    try:
-        states = getattr(app.VOICE_JOBS, "states", {})
-        if isinstance(states, dict):
-            values = list(states.values())
-            voice["queued"] = sum(1 for x in values if isinstance(x, dict) and x.get("status") == "queued")
-            voice["running"] = sum(1 for x in values if isinstance(x, dict) and x.get("status") == "running")
-            voice["cached"] = sum(1 for x in values if isinstance(x, dict) and x.get("status") == "done")
-    except Exception:
-        log_suppressed("queue_performance.snapshot")
     return {
         "server_rss_mb": _server_rss_mb(),
         "connector": connector,
@@ -122,7 +112,6 @@ def snapshot(app) -> dict[str, Any]:
         "media_workers": _MEDIA_SLOTS,
         "chunk_uploads": True,
         "chunk_size": 512 * 1024,
-        "voice_queue": voice,
         "lazy_media_client": True,
     }
 

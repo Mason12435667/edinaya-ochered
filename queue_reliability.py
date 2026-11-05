@@ -176,9 +176,9 @@ def dispatch_due(store, limit: int = 25) -> int:
                 if outbound_id <= 0:
                     raise RuntimeError('Не удалось поставить сообщение во внутреннюю очередь WhatsApp')
                 with store.connection() as db:
-                    db.execute("UPDATE reliability_scheduled_messages SET status='queued',outbound_id=?,last_error='' WHERE id=? AND status='scheduled'",
-                               (outbound_id,int(row['id'])))
-            moved += 1
+                    marked = db.execute("UPDATE reliability_scheduled_messages SET status='queued',outbound_id=?,last_error='' WHERE id=? AND status='scheduled'",
+                                        (outbound_id,int(row['id']))).rowcount
+            moved += int(bool(marked))  # a parallel pass that lost the race reused the message: not counted
         except Exception as exc:
             with store.connection() as db:
                 db.execute("UPDATE reliability_scheduled_messages SET last_error=? WHERE id=? AND status='scheduled'",

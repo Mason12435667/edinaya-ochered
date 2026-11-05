@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Protocol
 
+import queue_productivity
 from queue_attachment_archive import AttachmentArchive
 from queue_core import normalize_phone, valid_chat_id, valid_conversation_id
 from queue_service_result import ServiceResult
@@ -42,7 +43,10 @@ class OutboundService:
         reply = str(payload.get("reply", "")).strip()
         if not external_id or not chat_id or not reply or len(reply) > 32000:
             return ServiceResult({"error": "invalid_recovery_reply"}, 400)
-        if not self.auto_reply_enabled() or self.store.manual_chat_mode(chat_id):
+        # the same switches that mute a reply on the normal inbound path
+        if (not self.auto_reply_enabled() or self.store.manual_chat_mode(chat_id)
+                or self.store.manual_whatsapp_contact(chat_id, "")
+                or queue_productivity.auto_reply_blocked(self.store, chat_id)):
             return ServiceResult({"queued": False, "silent": True})
         request_id = "inbound-recovery:" + hashlib.sha256(external_id.encode()).hexdigest()
         message_id = self.store.queue_direct_message(chat_id, reply, "Бот", request_id=request_id)

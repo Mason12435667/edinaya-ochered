@@ -19,14 +19,12 @@ import queue_avatars
 import queue_contextual_tickets
 import queue_dialog_flow
 import queue_feature_http
-import queue_generic_profile
 import queue_inbound_media
 import queue_performance_http
 import queue_productivity_http
 import queue_realtime
 import queue_reliability
 import queue_reliability_http
-import queue_source_sync
 import queue_ticket_views
 import queue_uploads
 import queue_workflow
@@ -35,9 +33,9 @@ from queue_admin_pages import discovered_contact_rows, render_admin_analytics_fi
 from queue_chat_state import chat_state_snapshot, connector_state_snapshot, conversation_lock_snapshot, group_state_snapshot, notifications_snapshot
 from queue_chat_views import render_groups, render_whatsapp
 from queue_core import content_disposition_header, display_phone, log_suppressed, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
-from queue_ticket_views import render_dashboard, render_instruction, render_my_page, render_ticket
+from queue_ticket_views import render_dashboard, render_my_page, render_ticket
 from queue_work_context import active_employee, assignment_names, audit_admin_form_submission, query_page, render_pagination, render_ticket_rows, work_actor
-from ticketing import category_prompt, normalize_message
+from ticketing import normalize_message
 
 # Application module (app.py): shared services, settings and helpers it defines.
 app: Any = None
@@ -592,10 +590,8 @@ class QueueHTTPHandlerMixin:
             sessions = self.saved_account_sessions(touch=False)
             self.html_response(queue_ticket_views.render_account_switcher(query, show_admin, sessions, self.current_auth_slot()))
         elif parsed.path == "/register":
-            # 1.00.6.84: регистрация доступна с любого устройства и также
-            # из уже авторизованного браузера. Новый вход будет добавлен в
-            # мультиаккаунтный сеанс через start_app_session().
-            self.html_response(app.render_register())
+            status = HTTPStatus.OK if queue_auth.self_registration_enabled() else HTTPStatus.FORBIDDEN
+            self.html_response(app.render_register(), status)
         elif parsed.path == "/forgot-password":
             if self.effective_user():
                 self.redirect("/account")
@@ -618,30 +614,6 @@ class QueueHTTPHandlerMixin:
             self.html_response(render_my_page(query, show_admin))
         elif parsed.path == "/":
             self.html_response(render_dashboard(query, show_admin))
-        elif parsed.path == "/api/instruction-sync-status":
-            instruction = queue_source_sync.instruction_snapshot(app.INSTRUCTION_SOURCE_URL, app.INSTRUCTION_DATA_PATH)
-            instruction_sync = instruction.get("_sync", {}) if isinstance(instruction, dict) else {}
-            self.json_response({"instruction": instruction_sync})
-        elif parsed.path.startswith("/instruction-media/"):
-            name = parsed.path[len("/instruction-media/"):]
-            media_path = queue_source_sync.instruction_media_path(name)
-            if media_path is None:
-                self.send_error(HTTPStatus.NOT_FOUND, "Изображение не найдено")
-                return
-            content_types = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".webp": "image/webp",
-                ".gif": "image/gif",
-            }
-            content_type = content_types.get(media_path.suffix.casefold())
-            if not content_type:
-                self.send_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
-                return
-            self.cached_file_response(media_path, content_type)
-        elif parsed.path == "/instruction":
-            self.html_response(render_instruction(show_admin, query))
         elif parsed.path == "/admin/login":
             if self.authenticated_user().casefold() != app.ADMIN_USER:
                 self.send_error(HTTPStatus.FORBIDDEN, "Administrator login required")
@@ -1034,7 +1006,10 @@ class QueueHTTPHandlerMixin:
         self.start_app_session(str(result["token"]), next_path)
 
     def _post_register(self, parsed) -> None:
-        # POST /register
+        # POST /register (only with QUEUE_ALLOW_SELF_REGISTRATION=1; the account then waits for approval)
+        if not queue_auth.self_registration_enabled():
+            self.html_response(app.render_register(), HTTPStatus.FORBIDDEN)
+            return
         form = self.read_form()
         password = form.get("password", "")
         if password != form.get("password2", ""):
@@ -1121,10 +1096,6 @@ class QueueHTTPHandlerMixin:
     def _post_accounts_switch(self, parsed) -> None:
         # POST /accounts/switch
         form = self.read_form()
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.redirect("/accounts?notice=" + quote("Страница устарела. Обновите её и повторите переключение"))
-            return
         try:
             slot = int(form.get("slot", "0") or 0)
         except (TypeError, ValueError):
@@ -1137,8 +1108,6 @@ class QueueHTTPHandlerMixin:
         if not self.require_admin(): return
         form=self.read_form()
         if form is None: return
-        supplied_token=form.get("csrf_token","")
-        if not supplied_token or not secrets.compare_digest(supplied_token,app.csrf_token()): self.html_response(render_admin_api_keys({},notice="Сессия формы устарела"),HTTPStatus.FORBIDDEN); return
         action=str(form.get("action") or "").strip().lower(); actor=self.effective_user() or {}
         if action == "create":
             ok,message,token=app.AUTH.create_api_key(actor,form.get("name",""),"read"); self.html_response(render_admin_api_keys({},new_token=token if ok else "",notice=message),HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST); return
@@ -1303,19 +1272,6 @@ class QueueHTTPHandlerMixin:
         # POST /api/chat-control
         self.handle_chat_control()
 
-    def _post_instruction_sync(self, parsed, form) -> None:
-        # POST /instruction/sync
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.redirect("/instruction?notice=" + quote("Страница была открыта до перезапуска сервера. Обновите страницу и повторите синхронизацию."))
-            return
-        kind = str(form.get("kind", "general") or "general").strip().lower()
-        try:
-            started = queue_source_sync.schedule_instruction_sync(app.INSTRUCTION_SOURCE_URL, app.INSTRUCTION_DATA_PATH, force=True)
-            notice = "Обновление инструкции запущено в фоне" if started else "Обновление инструкции уже выполняется"
-        except Exception as error:
-            notice = f"Не удалось запустить обновление инструкции: {str(error)[:160]}"
-        self.redirect(f"/instruction?notice={quote(notice)}#instruction")
 
     def _post_api_account_preferences(self, parsed, form) -> None:
         # POST /api/account-preferences
@@ -1403,10 +1359,6 @@ class QueueHTTPHandlerMixin:
     def _post_admin_users(self, parsed, form) -> None:
         # POST /admin/users
         if not self.require_admin():
-            return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
             return
         action = form.get("action", "create")
         actor_user = self.effective_user() or {}
@@ -1499,10 +1451,6 @@ class QueueHTTPHandlerMixin:
         # POST /admin/employees
         if not self.require_admin():
             return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
-            return
         try:
             count = int(form.get("employee_count", "0"))
         except ValueError:
@@ -1538,10 +1486,6 @@ class QueueHTTPHandlerMixin:
         # POST /admin/ticket-delete
         if not self.require_admin():
             return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
-            return
         ticket_id = self.form_int(form, "ticket_id")
         deleted = app.STORE.delete_ticket(ticket_id, f"Администратор · {work_actor()}")
         notice = (
@@ -1553,10 +1497,6 @@ class QueueHTTPHandlerMixin:
     def _post_admin_contacts(self, parsed, form) -> None:
         # POST /admin/contacts
         if not self.require_admin():
-            return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
             return
         action = form.get("action", "save")
         if action == "delete":
@@ -1594,10 +1534,6 @@ class QueueHTTPHandlerMixin:
         # POST /admin/manual
         if not self.require_admin():
             return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
-            return
         employee = form.get("employee", "")
         if employee not in assignment_names():
             employee = work_actor()
@@ -1625,10 +1561,6 @@ class QueueHTTPHandlerMixin:
     def _post_admin_system(self, parsed, form) -> None:
         # POST /admin/system
         if not self.require_admin():
-            return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
             return
         action = form.get("action", "")
         if action == "cleanup":
@@ -1662,10 +1594,6 @@ class QueueHTTPHandlerMixin:
         # POST /admin/groups
         if not self.require_admin():
             return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
-            return
         action = form.get("action", "save")
         if action == "refresh":
             app.STORE.set_setting("group_refresh_request", secrets.token_urlsafe(18))
@@ -1694,10 +1622,6 @@ class QueueHTTPHandlerMixin:
     def _post_admin_errors(self, parsed, form) -> None:
         # POST /admin/errors
         if not self.require_admin():
-            return
-        supplied_token = form.get("csrf_token", "")
-        if not supplied_token or not secrets.compare_digest(supplied_token, app.csrf_token()):
-            self.send_error(HTTPStatus.FORBIDDEN, "Invalid admin form token")
             return
         report_id = self.form_int(form, "report_id")
         status = form.get("status", "new")
@@ -2124,7 +2048,6 @@ class QueueHTTPHandlerMixin:
 
     # form posts that are not written to the admin form audit
     FORM_POST_ROUTES = {
-        "/instruction/sync": _post_instruction_sync,
         "/api/account-preferences": _post_api_account_preferences,
     }
 

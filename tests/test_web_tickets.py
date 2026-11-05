@@ -1,6 +1,7 @@
 """Web interface: authentication, ticket list, manual tickets and status changes."""
 from __future__ import annotations
 
+import os
 import re
 import unittest
 from unittest import mock
@@ -55,8 +56,37 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status, 421)
 
 
+class RegistrationDisabledByDefaultTests(unittest.TestCase):
+    """Without QUEUE_ALLOW_SELF_REGISTRATION=1 only an administrator creates accounts."""
+
+    def test_register_page_and_form_are_refused(self):
+        admin_cookie()
+        before = len(support.app.AUTH.list_users())
+        response = post_form("/register", {"username": "uninvited", "display_name": "Uninvited",
+                                           "password": "TestPassword123!", "password2": "TestPassword123!"})
+        self.assertEqual(response.status, 403)
+        self.assertEqual(len(support.app.AUTH.list_users()), before)
+        self.assertFalse(support.app.AUTH.self_register_employee("uninvited", "Uninvited", "TestPassword123!")[0])
+        self.assertEqual(get("/register").status, 403)
+
+    def test_no_link_to_registration(self):
+        self.assertNotIn('href="/register"', get("/login").text)
+        self.assertNotIn('href="/register"', get("/forgot-password").text)
+
+    def test_administrator_can_still_create_employees(self):
+        ok, _, _ = support.app.AUTH.create_user("invited_employee", "Invited", "TestPassword123!", role="employee")
+        self.assertTrue(ok)
+        self.assertTrue(support.app.AUTH.authenticate("invited_employee", "TestPassword123!")["ok"])
+
+
 class RegistrationTests(unittest.TestCase):
+    """With open registration switched on, a new account still waits for an administrator."""
     PASSWORD = "Stranger-Pass-2026!"
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, {"QUEUE_ALLOW_SELF_REGISTRATION": "1"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def register(self, username: str):
         return post_form("/register", {"username": username, "display_name": "Незнакомец",
@@ -100,6 +130,15 @@ class BackupsPageTests(unittest.TestCase):
             with self.assertLogs("queue", "WARNING"):
                 response = get("/admin/backups", admin_cookie())
         self.assertEqual(response.status, 200)
+
+
+class ContactsPageTests(unittest.TestCase):
+    def test_page_with_a_saved_contact_renders(self):
+        cookie = admin_cookie()
+        post_form("/admin/contacts", {"action": "save", "name": "Контакт для теста", "phone": "+7 701 555 00 11"}, cookie)
+        response = get("/admin/contacts", cookie)
+        self.assertEqual(response.status, 200)
+        self.assertIn("Контакт для теста", response.text)
 
 
 class StaticFilesTests(unittest.TestCase):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -45,10 +44,7 @@ def layout(
         ("tickets", "/", "Заявки", ""),
         ("whatsapp", "/whatsapp", "WhatsApp", ""),
         ("groups", "/groups", "Группы", ""),
-        ("instruction", app.INSTRUCTION_URL, "Инструкция", ""),
     ]
-    if os.getenv('QUEUE_PROFILE', 'generic').strip().lower() == 'generic':
-        nav_items = [item for item in nav_items if item[0] != 'instruction']
     auth_user = queue_auth.current_user() or {}
     if show_admin:
         nav_items.append(("admin", "/admin/", "Админка", ""))
@@ -121,13 +117,6 @@ def layout(
 </html>"""
 
 
-def render_instruction(show_admin: bool = False, query: dict[str, list[str]] | None = None) -> str:
-    """Generic profile: per-organization knowledge base is not bundled."""
-    return layout(
-        "База знаний",
-        '<section class="card"><h1>База знаний</h1><p>Материалы пока не настроены.</p></section>',
-        show_admin=show_admin,
-    )
 
 
 
@@ -652,7 +641,7 @@ def render_account_switcher(
         cards.append('<div class="panel empty">Сохранённых аккаунтов нет</div>')
     content = f'''
       <section class="page-heading"><div><p class="eyebrow">Общий компьютер</p><h1>Аккаунты на этом устройстве</h1><p>Можно сохранить несколько входов в одном браузере и переключаться между ними без выхода из остальных аккаунтов.</p></div>
-        <div class="instruction-live-actions"><a class="button primary" href="/login?add=1&next=/accounts">Добавить существующий</a><a class="button ghost" href="/register">Создать новый аккаунт</a></div>
+        <div class="instruction-live-actions"><a class="button primary" href="/login?add=1&next=/accounts">Добавить существующий</a>{'<a class="button ghost" href="/register">Создать новый аккаунт</a>' if queue_auth.self_registration_enabled() else ''}</div>
       </section>
       {notice_html}
       <section class="my-account-grid">{''.join(cards)}</section>

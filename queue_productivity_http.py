@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
-import secrets
-from datetime import datetime, timezone
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import queue_productivity as qp
 from queue_core import log_suppressed
@@ -11,17 +8,6 @@ from queue_core import log_suppressed
 
 def _value(query, key, default=""):
     return query.get(key, [default])[0]
-
-
-def _bool(query, key):
-    return _value(query, key) in {"1", "true", "on", "yes"}
-
-
-def _csrf(handler, app, form) -> bool:
-    if secrets.compare_digest(str(form.get("csrf_token", "")), str(app.csrf_token())):
-        return True
-    handler.json_response({"error": "Обновите страницу и попробуйте снова"}, 403)
-    return False
 
 
 def _send_bytes(handler, body: bytes, content_type: str, filename: str = ""):
@@ -32,95 +18,6 @@ def _send_bytes(handler, body: bytes, content_type: str, filename: str = ""):
         handler.send_header("Content-Disposition", f'attachment; filename="{filename}"')
     handler.end_headers()
     handler.wfile.write(body)
-
-
-def _format_ts(value: object) -> str:
-    try:
-        ts = int(value or 0)
-        if not ts:
-            return ""
-        return datetime.fromtimestamp(ts, timezone.utc).astimezone(qp.LOCAL_TZ).strftime("%d.%m.%Y %H:%M")
-    except (TypeError, ValueError, OSError):
-        return ""
-
-
-def _search_page(handler, app, query):
-    q = _value(query, "q")[:200]
-    try: page = max(1, int(_value(query, "page", "1") or 1))
-    except ValueError: page = 1
-    filters = {
-        "date_from": _value(query, "date_from")[:20],
-        "date_to": _value(query, "date_to")[:20],
-        "chat_type": _value(query, "chat_type")[:20],
-        "sender": _value(query, "sender")[:160],
-        "employee": _value(query, "employee")[:160],
-        "attachment": _value(query, "attachment")[:20],
-        "mentions_only": _bool(query, "mentions_only"),
-        "voice_only": _bool(query, "voice_only"),
-    }
-    found = qp.advanced_search(app.STORE, q, page=page, **filters)
-    cards=[]
-    for row in found["results"]:
-        chat_id=str(row.get("chat_id") or "")
-        group=chat_id.endswith("@g.us")
-        route="/groups" if group else "/whatsapp"
-        href=route+"?"+urlencode({"chat_id":chat_id,"message_id":str(row.get("message_key") or "")})
-        body=str(row.get("body") or row.get("media_name") or "[Сообщение]")
-        transcript=str(row.get("transcript") or "")
-        media=str(row.get("media_mime") or "")
-        meta=["Группа" if group else "Личный чат",_format_ts(row.get("message_timestamp"))]
-        if row.get("sender"): meta.append("Отправитель: "+str(row.get("sender")))
-        if row.get("employee"): meta.append("Сотрудник: "+str(row.get("employee")))
-        if media: meta.append(media)
-        cards.append(
-            f'<a class="search-card productivity-search-card" href="{app.e(href)}">'
-            f'<div class="search-card-head"><strong>{app.e(row.get("name") or chat_id)}</strong><span class="search-card-meta">{app.e(" · ".join(x for x in meta if x))}</span></div>'
-            f'<p>{app.e(body[:500])}</p>'
-            f'{f"<p class=muted>Расшифровка: {app.e(transcript[:500])}</p>" if transcript else ""}'
-            f'<span class="search-open">Перейти к сообщению ↗</span></a>'
-        )
-    params={"q":q,**{k:v for k,v in filters.items() if v}}
-    params={k:("1" if v is True else str(v)) for k,v in params.items() if v not in {"",False,None}}
-    previous=""; more=""
-    if page>1:
-        previous=f'<a class="button" href="/search?{app.e(urlencode({**params,"page":page-1}))}">← Назад</a>'
-    if found.get("has_more"):
-        more=f'<a class="button" href="/search?{app.e(urlencode({**params,"page":page+1}))}">Далее →</a>'
-    content=f"""
-      <section class="search-heading"><p class="eyebrow">Сообщения и контакты</p><h1>Расширенный поиск WhatsApp</h1>
-      <p>Поиск по тексту, датам, типу чата, отправителю, сотруднику и вложениям</p></section>
-      <form class="panel productivity-search-form" method="get" action="/search">
-        <label class="wide">Поиск<input name="q" maxlength="200" value="{app.e(q)}" placeholder="Имя, телефон или текст"></label>
-        <label>С даты<input type="date" name="date_from" value="{app.e(filters['date_from'])}"></label>
-        <label>По дату<input type="date" name="date_to" value="{app.e(filters['date_to'])}"></label>
-        <label>Чат<select name="chat_type"><option value="">Все</option><option value="personal" {'selected' if filters['chat_type']=='personal' else ''}>Личный</option><option value="group" {'selected' if filters['chat_type']=='group' else ''}>Группа</option></select></label>
-        <label>Отправитель<input name="sender" value="{app.e(filters['sender'])}" placeholder="Имя или номер"></label>
-        <label>Сотрудник<input name="employee" value="{app.e(filters['employee'])}" placeholder="Кто отправлял"></label>
-        <label>Вложение<select name="attachment"><option value="">Любое</option><option value="image" {'selected' if filters['attachment']=='image' else ''}>Фото</option><option value="video" {'selected' if filters['attachment']=='video' else ''}>Видео</option><option value="audio" {'selected' if filters['attachment']=='audio' else ''}>Голосовое</option><option value="file" {'selected' if filters['attachment']=='file' else ''}>Файл</option></select></label>
-        <label class="check"><input type="checkbox" name="mentions_only" value="1" {'checked' if filters['mentions_only'] else ''}> Только упоминания</label>
-        <label class="check"><input type="checkbox" name="voice_only" value="1" {'checked' if filters['voice_only'] else ''}> Только голосовые</label>
-        <div class="productivity-search-actions"><button class="button primary">Найти</button><a class="button ghost" href="/search">Сбросить</a></div>
-      </form>
-      <section class="search-results">{''.join(cards) or '<p class="search-empty">Ничего не найдено. Можно использовать фильтры даже без текста поиска.</p>'}</section>
-      <nav class="search-pages">{previous}{more}</nav>
-    """
-    handler.html_response(app.layout("Поиск",content,"search",handler.is_admin()))
-
-
-def _bookmarks_page(handler, app):
-    rows=qp.list_bookmarks(app.STORE,300); cards=[]
-    for row in rows:
-        chat_id=str(row.get("chat_id") or ""); mid=str(row.get("message_key") or "")
-        href=("/groups" if chat_id.endswith("@g.us") else "/whatsapp")+"?"+urlencode({"chat_id":chat_id,"message_id":mid})
-        body=str(row.get("body") or row.get("media_name") or ("Сообщение удалено" if row.get("deleted") else "Сообщение"))
-        cards.append(
-            f'<article class="panel bookmark-card"><div><strong>{app.e(row.get("chat_name") or chat_id)}</strong><small>{app.e(_format_ts(row.get("message_timestamp")))}</small></div>'
-            f'<p>{app.e(body[:700])}</p><div class="bookmark-actions"><a class="button compact" href="{app.e(href)}">Открыть сообщение</a>'
-            f'<button class="button compact ghost" data-bookmark-link data-chat-id="{app.e(chat_id)}" data-message-id="{app.e(mid)}">Привязать к заявке</button>'
-            f'<button class="button compact ghost" data-bookmark-remove data-chat-id="{app.e(chat_id)}" data-message-id="{app.e(mid)}">Убрать</button></div></article>'
-        )
-    content=f'<section class="page-heading"><div><p class="eyebrow">WhatsApp</p><h1>Закладки сообщений</h1><p>Важные сообщения, которые можно быстро открыть позже</p></div></section><section class="bookmark-grid">{"".join(cards) or "<p class=muted>Закладок пока нет</p>"}</section>'
-    handler.html_response(app.layout("Закладки",content,"bookmarks",handler.is_admin()))
 
 
 def _analytics_page(handler, app):
@@ -166,9 +63,8 @@ def _reminders_page(handler, app):
 
 def get(handler, app):
     parsed=urlparse(handler.path); query=parse_qs(parsed.query); path=parsed.path
-    if path=="/search": _search_page(handler,app,query)
-    elif path=="/bookmarks": _bookmarks_page(handler,app)
-    elif path=="/reminders": _reminders_page(handler,app)
+    # /search and /bookmarks are redirected to /whatsapp by QueueHTTPHandlerMixin.do_GET.
+    if path=="/reminders": _reminders_page(handler,app)
     elif path=="/admin/analytics": _analytics_page(handler,app)
     elif path=="/admin/analytics.csv":
         if not handler.require_admin(): return True
@@ -202,7 +98,6 @@ def post(handler, app):
     if path not in known: return False
     if path=="/admin/backups" and not handler.require_admin(): return True
     form=handler.read_form()
-    if not _csrf(handler,app,form): return True
     try:
         if path=="/api/message-bookmark":
             state=qp.toggle_bookmark(app.STORE,form.get('chat_id',''),form.get('message_id',''),app.active_employee())

@@ -7,6 +7,7 @@ import os
 import sqlite3
 import tarfile
 import tempfile
+from contextlib import closing  # `with sqlite3.connect()` alone does not close the file
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,7 +21,7 @@ def create_bundle(database_path: Path, data_dir: Path, backup_dir: Path) -> Path
     with tempfile.TemporaryDirectory(prefix='.backup-', dir=backup_dir) as work:
         stage = Path(work)
         snapshot = stage / 'tickets.db'
-        with sqlite3.connect(database_path, timeout=15) as source:
+        with closing(sqlite3.connect(database_path, timeout=15)) as source:
             destination = sqlite3.connect(snapshot)
             try:
                 source.backup(destination)
@@ -37,11 +38,11 @@ def create_bundle(database_path: Path, data_dir: Path, backup_dir: Path) -> Path
                     if path.is_symlink():
                         raise RuntimeError('Symbolic link in media directory')
                     if path.is_file() and path.suffix != '.part':
-                        paths[str(path.relative_to(data_dir))] = path
+                        paths[path.relative_to(data_dir).as_posix()] = path
         flag = data_dir / 'auto-reply.enabled'
         if flag.is_file(): paths['auto-reply.enabled'] = flag
         # Every referenced file must be included, or this is not a full backup.
-        with sqlite3.connect(snapshot) as db:
+        with closing(sqlite3.connect(snapshot)) as db:
             for table in ('whatsapp_chat_messages', 'outbound_messages'):
                 if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     continue
@@ -59,7 +60,7 @@ def create_bundle(database_path: Path, data_dir: Path, backup_dir: Path) -> Path
                             if rows and all(status == 'sent' and (data_dir/'chat-media'/f'outbound-{mid}.bin').is_file() for mid,status in rows):
                                 continue
                         raise RuntimeError('Referenced attachment missing; backup not published')
-                    paths[str(resolved.relative_to(data_dir))] = path
+                    paths[resolved.relative_to(data_dir).as_posix()] = path
         paths['tickets.db'] = snapshot
         manifest = {'format': 1, 'created_at': datetime.now(timezone.utc).isoformat(),
                     'data_dir': str(data_dir), 'files': {}}
@@ -134,7 +135,7 @@ def verify_restore(archive: Path, parent: Path | None = None) -> dict:
                         if not block:break
                         dst.write(block);digest.update(block)
                 if digest.hexdigest()!=expected:raise RuntimeError('Restored checksum mismatch')
-        with sqlite3.connect(root/'tickets.db') as db:
+        with closing(sqlite3.connect(root/'tickets.db')) as db:
             if db.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RuntimeError('Restored database corrupt')
             count=db.execute('SELECT COUNT(*) FROM tickets').fetchone()[0]
             original=Path(manifest['data_dir'])
