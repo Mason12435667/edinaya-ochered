@@ -8,7 +8,7 @@ def get(handler, app):
     query = parse_qs(parsed.query)
     value = lambda key: query.get(key,[''])[0]
     if parsed.path == '/api/avatar':
-        app.queue_avatars.serve(handler,app,value('chat_id'))
+        app.AVATARS.serve(handler,value('chat_id'))
     elif parsed.path in {'/static/ui.js','/static/ui.css'}:
         handler.file_response(app.ROOT / parsed.path.lstrip('/'), 'text/javascript; charset=utf-8' if parsed.path.endswith('.js') else 'text/css; charset=utf-8')
     elif parsed.path == '/api/message-window':

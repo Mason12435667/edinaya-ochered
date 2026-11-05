@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote, urlencode
 
-import queue_avatars
 import queue_generic_profile
 import queue_user_locale
 import queue_workflow
@@ -542,7 +541,7 @@ def render_admin_categories(query: dict[str, list[str]]) -> str:
 
 
 def avatar_html(chat_id: str, name: str) -> str:
-    url = queue_avatars.url(app, chat_id)
+    url = app.AVATARS.url(chat_id)
     letters = ''.join(word[0] for word in name.split()[:2]) or '?'
     pic = f'<img src="{e(url)}" alt="" loading="lazy" onerror="this.remove()">' if url else ''
     return f'<span class="chat-avatar table-avatar">{e(letters)}{pic}</span>'

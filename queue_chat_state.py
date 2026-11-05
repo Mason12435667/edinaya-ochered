@@ -9,7 +9,6 @@ from typing import Any
 from urllib.parse import quote
 
 import queue_auth
-import queue_avatars
 import queue_dialog_flow
 import queue_message_identity
 import queue_names
@@ -345,7 +344,7 @@ def enrich_chat_list(chats):
         sid = str(row.get("last_sender_id", ""))
         if manual.get(sid):
             chat["last_sender"] = manual[sid]
-        chat["last_sender_avatar_url"] = queue_avatars.url(app, sid) if sid else ""
+        chat["last_sender_avatar_url"] = app.AVATARS.url(sid) if sid else ""
     return chats
 
 
@@ -575,7 +574,7 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
         return {"known": bool(raw.get("known")), "online": bool(raw.get("online")), "state": str(raw.get("state", "") or "")}
     for chat in chats:
         chat_id = str(chat["id"])
-        chat["avatar_url"] = queue_avatars.url(app,chat_id)
+        chat["avatar_url"] = app.AVATARS.url(chat_id)
         if not chat_id.endswith("@g.us"):
             chat["presence"] = fresh_presence(chat_id)
     manual_mode = app.STORE.manual_chat_mode(selected) if selected else None
@@ -583,7 +582,7 @@ def chat_state_snapshot(requested_chat_id: str = "", read_visible: bool = False)
     profile = dict(profiles_snapshot.get(selected, {})) if selected else {}
     selected_presence = fresh_presence(selected) if selected else {"known": False, "online": False}
     if selected:
-        profile["profile_pic_url"] = queue_avatars.url(app,selected)
+        profile["profile_pic_url"] = app.AVATARS.url(selected)
         profile["presence"] = selected_presence
     if profile:
         profile["name"] = display_names().name(selected, whatsapp_names.get(selected) or profile.get("name", ""), profile.get("phone", ""))
@@ -686,7 +685,7 @@ def group_state_snapshot(requested_group_id: str = "", read_visible: bool = Fals
         for avatar_id in (str(participant.get("resolved_id", "") or "").strip(), str(participant.get("mention_id", "") or "").strip()):
             if not avatar_id:
                 continue
-            avatar_url = queue_avatars.url(app, avatar_id)
+            avatar_url = app.AVATARS.url(avatar_id)
             if avatar_url:
                 participant["avatar_url"] = avatar_url
                 break
@@ -721,7 +720,7 @@ def group_state_snapshot(requested_group_id: str = "", read_visible: bool = Fals
         "chats": enrich_chat_list([
             {
                 "id": str(group["chat_id"]),
-                "avatar_url": queue_avatars.url(app,str(group["chat_id"])),
+                "avatar_url": app.AVATARS.url(str(group["chat_id"])),
                 "name": str(group["name"]),
                 "last_message": str(group.get("last_message", "")),
                 "timestamp": int(group.get("last_timestamp", 0) or 0),
@@ -815,7 +814,7 @@ def _decorate_notification_event(event: dict[str, object]) -> dict[str, object]:
     for avatar_id in avatar_candidates:
         if not avatar_id:
             continue
-        avatar_url = queue_avatars.url(app, avatar_id)
+        avatar_url = app.AVATARS.url(avatar_id)
         if avatar_url:
             item["avatar_url"] = avatar_url
             break
