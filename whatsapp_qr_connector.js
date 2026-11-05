@@ -758,6 +758,7 @@ function readOwnMessagesSince(since) {
       if (!value) return '';
       if (typeof value === 'string') return value;
       if (typeof value._serialized === 'string') return value._serialized;
+      if (typeof value.$1 === 'string') return value.$1;
       return value.user && value.server ? `${value.user}@${value.server}` : '';
     };
     return window.require('WAWebCollections').Msg.getModelsArray()

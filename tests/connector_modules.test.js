@@ -114,7 +114,7 @@ test('findSentMessage finds a message stored under the @lid of a @c.us chat', ()
   const lookup = (extra = {}) => ({
     text: 'hi', since: 100, aliases: new Set(['1@c.us']), isKnown: () => false, ...extra,
   });
-  const row = {fromMe: true, timestamp: 101, type: 'chat', text: 'hi', remote: '9@lid'};
+  const row = {id: 'true_9@lid_A', fromMe: true, timestamp: 101, type: 'chat', text: 'hi', remote: '9@lid'};
   const inChat = {...row, remote: '1@c.us'};
   assert.equal(delivery.findSentMessage([row], lookup()), row, 'unknown @lid of the chat');
   assert.equal(delivery.findSentMessage([row, inChat], lookup()), inChat, 'a known address wins');
@@ -123,13 +123,14 @@ test('findSentMessage finds a message stored under the @lid of a @c.us chat', ()
   assert.equal(delivery.findSentMessage([{...row, timestamp: 99}], lookup()), null, 'too old');
   assert.equal(delivery.findSentMessage([{...row, text: 'other'}], lookup()), null, 'other text');
   assert.equal(delivery.findSentMessage([{...row, fromMe: false}], lookup()), null, 'not ours');
+  assert.equal(delivery.findSentMessage([{...row, id: ''}], lookup()), null, 'no id to report');
   assert.equal(delivery.findSentMessage([row], lookup({isKnown: () => true})), null, 'already linked');
   assert.equal(delivery.findSentMessage(undefined, lookup()), null);
 });
 
 test('findSentMessage tells media from text', () => {
   const lookup = (extra = {}) => ({text: '', hasMedia: true, since: 100, aliases: new Set(['1@c.us']), isKnown: () => false, ...extra});
-  const photo = {fromMe: true, timestamp: 101, type: 'image', text: '', remote: '9@lid'};
+  const photo = {id: 'true_9@lid_B', fromMe: true, timestamp: 101, type: 'image', text: '', remote: '9@lid'};
   assert.equal(delivery.findSentMessage([photo], lookup()), photo, 'no caption');
   assert.equal(delivery.findSentMessage([{...photo, text: 'cap'}], lookup({text: 'cap'})).type, 'image', 'caption');
   assert.equal(delivery.findSentMessage([{...photo, type: 'chat'}], lookup()), null, 'text is not media');

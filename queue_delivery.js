@@ -29,7 +29,7 @@ async function waitForValue(read, timeoutMs, intervalMs = 50) {
 // from an unknown @lid still counts. Two equal candidates cannot be told apart:
 // the answer is null and the send stays uncertain.
 function findSentMessage(rows, {text, hasMedia = false, since, aliases, isKnown}) {
-  const found = (rows || []).filter((row) => row && row.fromMe
+  const found = (rows || []).filter((row) => row && row.id && row.fromMe
     && Number(row.timestamp || 0) >= since
     && (row.type !== 'chat') === hasMedia
     && (text ? row.text === text : hasMedia)
