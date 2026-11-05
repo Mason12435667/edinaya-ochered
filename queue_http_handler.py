@@ -24,7 +24,6 @@ import queue_realtime
 import queue_reliability
 import queue_ticket_views
 import queue_workflow
-from queue_admin_pages import discovered_contact_rows, render_admin_analytics_final, render_admin_api_keys, render_admin_audit, render_admin_categories, render_admin_contacts, render_admin_employees, render_admin_error, render_admin_errors, render_admin_home, render_admin_manager_dashboard, render_admin_manual, render_admin_menu, render_admin_system
 from queue_chat_views import render_groups, render_whatsapp
 from queue_core import content_disposition_header, display_phone, log_suppressed, normalize_message, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
 from queue_work_context import active_employee, assignment_names, audit_admin_form_submission, query_page, render_pagination, render_ticket_rows, work_actor
@@ -776,7 +775,7 @@ class QueueHTTPHandlerMixin:
         self.html_response(render_whatsapp(query, self.is_admin(), layout=self.ticket_views.layout))
 
     def _get_groups(self, query) -> None:
-        self.html_response(render_groups(query, self.is_admin(), store=app.STORE, csrf_token=app.csrf_token,
+        self.html_response(render_groups(query, self.is_admin(), store=app.STORE, avatars=app.AVATARS, csrf_token=app.csrf_token,
                                          layout=self.ticket_views.layout))
 
     def _get_api_integration_ping(self, query) -> None:
@@ -860,43 +859,43 @@ class QueueHTTPHandlerMixin:
         self.json_response({"status": "ok"})
 
     def _get_admin_home(self, query) -> None:
-        self.html_response(render_admin_home())
+        self.html_response(self.admin_pages.render_admin_home())
 
     def _get_admin_users(self, query) -> None:
         self.html_response(app.render_admin_users(query))
 
     def _get_admin_employees(self, query) -> None:
-        self.html_response(render_admin_employees(query))
+        self.html_response(self.admin_pages.render_admin_employees(query))
 
     def _get_admin_manual(self, query) -> None:
-        self.html_response(render_admin_manual(query))
+        self.html_response(self.admin_pages.render_admin_manual(query))
 
     def _get_admin_menu(self, query) -> None:
-        self.html_response(render_admin_menu(query))
+        self.html_response(self.admin_pages.render_admin_menu(query))
 
     def _get_admin_categories(self, query) -> None:
-        self.html_response(render_admin_categories(query))
+        self.html_response(self.admin_pages.render_admin_categories(query))
 
     def _get_admin_errors(self, query) -> None:
-        self.html_response(render_admin_errors(query))
+        self.html_response(self.admin_pages.render_admin_errors(query))
 
     def _get_admin_error(self, query) -> None:
-        self.html_response(render_admin_error(self.query_int(query, "id"), query))
+        self.html_response(self.admin_pages.render_admin_error(self.query_int(query, "id"), query))
 
     def _get_admin_contacts(self, query) -> None:
-        self.html_response(render_admin_contacts(query))
+        self.html_response(self.admin_pages.render_admin_contacts(query))
 
     def _get_admin_audit(self, query) -> None:
-        self.html_response(render_admin_audit(query))
+        self.html_response(self.admin_pages.render_admin_audit(query))
 
     def _get_admin_analytics(self, query) -> None:
-        self.html_response(render_admin_analytics_final(query))
+        self.html_response(self.admin_pages.render_admin_analytics_final(query))
 
     def _get_admin_manager(self, query) -> None:
-        self.html_response(render_admin_manager_dashboard(query))
+        self.html_response(self.admin_pages.render_admin_manager_dashboard(query))
 
     def _get_admin_api_keys(self, query) -> None:
-        self.html_response(render_admin_api_keys(query))
+        self.html_response(self.admin_pages.render_admin_api_keys(query))
 
     def _get_admin_tickets_export(self, query) -> None:
         rows = app._final_ticket_filter(query)
@@ -917,14 +916,14 @@ class QueueHTTPHandlerMixin:
         self.csv_bytes_response(("﻿" + stream.getvalue()).encode("utf-8"), "tickets.csv")
 
     def _get_admin_system(self, query) -> None:
-        self.html_response(render_admin_system(query))
+        self.html_response(self.admin_pages.render_admin_system(query))
 
     def _get_api_admin_contact_search(self, query) -> None:
         search_raw = query.get("q", [""])[0]
-        self.json_response({"rows_html": discovered_contact_rows(search_raw, 80)})
+        self.json_response({"rows_html": self.admin_pages.discovered_contact_rows(search_raw, 80)})
 
     def _get_admin_groups(self, query) -> None:
-        self.html_response(render_groups(query, True, store=app.STORE, csrf_token=app.csrf_token,
+        self.html_response(render_groups(query, True, store=app.STORE, avatars=app.AVATARS, csrf_token=app.csrf_token,
                                          layout=self.ticket_views.layout))
 
     def _get_to_admin_home(self, query) -> None:
@@ -1119,12 +1118,12 @@ class QueueHTTPHandlerMixin:
         if form is None: return
         action=str(form.get("action") or "").strip().lower(); actor=self.effective_user() or {}
         if action == "create":
-            ok,message,token=app.AUTH.create_api_key(actor,form.get("name",""),"read"); self.html_response(render_admin_api_keys({},new_token=token if ok else "",notice=message),HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST); return
+            ok,message,token=app.AUTH.create_api_key(actor,form.get("name",""),"read"); self.html_response(self.admin_pages.render_admin_api_keys({},new_token=token if ok else "",notice=message),HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST); return
         if action == "revoke":
             try: key_id=int(form.get("key_id",0) or 0)
             except ValueError: key_id=0
             ok,message=app.AUTH.revoke_api_key(actor,key_id); self.redirect("/admin/api-keys?notice="+quote(message)); return
-        self.html_response(render_admin_api_keys({},notice="Неизвестное действие"),HTTPStatus.BAD_REQUEST); return
+        self.html_response(self.admin_pages.render_admin_api_keys({},notice="Неизвестное действие"),HTTPStatus.BAD_REQUEST); return
 
     def _post_api_system_warning_action(self, parsed) -> None:
         # POST /api/system-warning-action

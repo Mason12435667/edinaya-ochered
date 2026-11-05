@@ -5,12 +5,13 @@ from collections.abc import Callable
 from urllib.parse import quote
 
 from queue_admin_pages import avatar_html
+from queue_avatars import AvatarCache
 from queue_core import e, human_time, valid_group_id
 from ticketing import TicketStore
 
 
 def render_groups(query: dict[str, list[str]], show_admin: bool = False, *, store: TicketStore,
-                  csrf_token: Callable[[], str], layout: Callable[..., str]) -> str:
+                  avatars: AvatarCache, csrf_token: Callable[[], str], layout: Callable[..., str]) -> str:
     initial_group_id = valid_group_id(query.get("chat_id", [""])[0])
     notice = query.get("notice", [""])[0]
     notice_html = f'<div class="notice">{e(notice)}</div>' if notice else ""
@@ -28,7 +29,7 @@ def render_groups(query: dict[str, list[str]], show_admin: bool = False, *, stor
             else ""
         )
         rows.append(
-            f"""<tr><td><a class="ticket-title-link avatar-name" href="/groups?chat_id={quote(chat_id)}">{avatar_html(chat_id,str(group['name']))}<strong>{e(group['name'])}</strong></a></td><td>{int(group['participant_count']) or 'Не определено'}</td><td>{e(human_time(str(group['updated_at'])))}</td><td>{admin_action}</td></tr>"""
+            f"""<tr><td><a class="ticket-title-link avatar-name" href="/groups?chat_id={quote(chat_id)}">{avatar_html(avatars,chat_id,str(group['name']))}<strong>{e(group['name'])}</strong></a></td><td>{int(group['participant_count']) or 'Не определено'}</td><td>{e(human_time(str(group['updated_at'])))}</td><td>{admin_action}</td></tr>"""
         )
     table = "".join(rows) or '<tr><td colspan="4" class="empty">Группы пока не добавлены</td></tr>'
     admin_form = ""

@@ -37,7 +37,6 @@ import queue_whatsapp_handlers
 import queue_http_handler
 import queue_ticket_service
 import queue_work_context
-import queue_admin_pages
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -56,6 +55,7 @@ from queue_attachment_archive import AttachmentArchive
 from queue_outbound_service import OutboundService
 from queue_chat_state import ChatViews, ConnectorState
 from queue_ticket_views import TicketViews
+from queue_admin_pages import AdminPageDependencies, AdminPages
 from queue_stale_menu import StaleMenuRecovery
 from queue_productivity_http import ProductivityRoutes
 from queue_reliability_http import ReliabilityRoutes
@@ -66,7 +66,7 @@ from queue_feature_http import FeatureRoutes
 APP_VERSION = "v143"
 
 # Modules split out of app.py read shared services and settings as app.NAME.
-for _module in (queue_admin_pages, queue_whatsapp_handlers, queue_http_handler):
+for _module in (queue_whatsapp_handlers, queue_http_handler):
     _module.bind(sys.modules[__name__])
 
 
@@ -1136,38 +1136,6 @@ def admin_layout(title: str, content: str, active: str) -> str:
     return queue_admin_views.admin_layout(title, content, active, layout_func=layout, escape=e)
 
 
-# 1.00.6.30: phase 4 large modularization (queue_admin_pages).
-render_admin_home = queue_admin_pages.render_admin_home
-error_report_status_badge = queue_admin_pages.error_report_status_badge
-render_admin_errors = queue_admin_pages.render_admin_errors
-render_admin_error = queue_admin_pages.render_admin_error
-render_admin_audit = queue_admin_pages.render_admin_audit
-_analytics_filters = queue_admin_pages._analytics_filters
-render_admin_analytics_final = queue_admin_pages.render_admin_analytics_final
-render_admin_manager_dashboard = queue_admin_pages.render_admin_manager_dashboard
-render_admin_api_keys = queue_admin_pages.render_admin_api_keys
-_unified_audit_rows = queue_admin_pages._unified_audit_rows
-render_admin_system = queue_admin_pages.render_admin_system
-admin_employee_count = queue_admin_pages.admin_employee_count
-render_admin_employees = queue_admin_pages.render_admin_employees
-render_admin_manual = queue_admin_pages.render_admin_manual
-render_admin_menu = queue_admin_pages.render_admin_menu
-render_admin_categories = queue_admin_pages.render_admin_categories
-avatar_html = queue_admin_pages.avatar_html
-discovered_contact_rows = queue_admin_pages.discovered_contact_rows
-render_admin_contacts = queue_admin_pages.render_admin_contacts
-
-
-ERROR_REPORT_STATUS_LABELS = {
-    "new": "Новая",
-    "in_progress": "В работе",
-    "resolved": "Исправлена",
-    "rejected": "Отклонена",
-}
-
-
-
-
 # ---------------------------------------------------------------------------
 # 1.00.6.12: language selection before the ordinary-user WhatsApp flow.
 # The selected language is persisted per WhatsApp user in app_settings.
@@ -1284,6 +1252,11 @@ RELIABILITY_ROUTES = ReliabilityRoutes(STORE, RELIABILITY, csrf_token=csrf_token
 FEATURE_ROUTES = FeatureRoutes(STORE, AVATARS, ROOT, decorate_chat_messages=decorate_chat_messages,
                                csrf_token=csrf_token, admin_layout=admin_layout)
 UPLOAD_ROUTES = queue_uploads.UploadRoutes(UPLOADS, work_actor)
+ADMIN_PAGES = AdminPages(AdminPageDependencies(
+    store=STORE, auth=AUTH, menu=MENU, menu_config=MENU_CONFIG, contacts=CONTACTS, tickets=TICKET_SERVICE,
+    reporting=REPORTING, runtime=RUNTIME, avatars=AVATARS, employees=EMPLOYEES, max_employees=MAX_EMPLOYEES,
+    local_mode=LOCAL_MODE, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, csrf_token=csrf_token, admin_layout=admin_layout,
+))
 
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
@@ -1297,6 +1270,7 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
     upload_routes = UPLOAD_ROUTES
     chat_views = CHAT_VIEWS
     ticket_views = TICKET_VIEWS
+    admin_pages = ADMIN_PAGES
     server_version = "UnifiedQueue/1.00.1"
 
     def _generic_domain_path(self):

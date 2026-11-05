@@ -40,6 +40,8 @@ flowchart LR
 | `queue_outbound_service.py` | Получение сообщения коннектором, начало отправки, результат доставки и восстановление ответа |
 | `queue_attachment_archive.py` | Сохранение вложения для истории чата до очистки временного файла |
 | `queue_chat_state.py` | `ChatViews`: списки чатов и групп, уведомления, сводка сохранённых данных с живым состоянием; `ConnectorState`: состояние коннектора |
+| `queue_ticket_views.py` | `TicketViews`: рамка страницы (`layout`), список заявок, заявка, страницы аккаунта |
+| `queue_admin_pages.py` | `AdminPages`: страницы администрирования с зависимостями в `AdminPageDependencies` |
 | `queue_stale_menu.py` | `StaleMenuRecovery`: фоновый повтор меню, если входящее сообщение осталось без автоответа |
 | `queue_reliability.py` | `ReliabilityMonitor`: проверки базы, диска и коннектора, тревоги, диагностика, отложенная отправка |
 | `queue_productivity_http.py` | `ProductivityRoutes`: напоминания, аналитика, резервные копии, метки и поиск в чате |
