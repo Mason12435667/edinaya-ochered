@@ -20,7 +20,6 @@ import queue_dialog_flow
 import queue_feature_http
 import queue_inbound_media
 import queue_performance_http
-import queue_productivity_http
 import queue_realtime
 import queue_reliability
 import queue_reliability_http
@@ -668,7 +667,7 @@ class QueueHTTPHandlerMixin:
             return
         if queue_workflow_http.get(self, app):
             return
-        if queue_productivity_http.get(self, app):
+        if self.productivity_routes.get(self):
             return
         if queue_feature_http.get(self, app):
             return
@@ -976,7 +975,7 @@ class QueueHTTPHandlerMixin:
             return
         if queue_workflow_http.post(self, app):
             return
-        if queue_productivity_http.post(self, app):
+        if self.productivity_routes.post(self):
             return
         if queue_feature_http.post(self, app):
             return
@@ -1154,7 +1153,7 @@ class QueueHTTPHandlerMixin:
                 self.json_response({"ok":True,"dismissed":count})
                 return
             if action in {"check","check_all"}:
-                queue_reliability.refresh_active_alerts(app)
+                app.RELIABILITY.refresh_active_alerts()
                 self.json_response({"ok":True,"checked":True})
                 return
         except Exception as error:

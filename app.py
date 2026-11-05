@@ -57,6 +57,7 @@ from queue_inbound_service import InboundDependencies, InboundService
 from queue_attachment_archive import AttachmentArchive
 from queue_outbound_service import OutboundService
 from queue_stale_menu import StaleMenuRecovery
+from queue_productivity_http import ProductivityRoutes
 
 # Public release from CHANGELOG.md; reported by /api/integration/ping.
 APP_VERSION = "v143"
@@ -1279,12 +1280,18 @@ INBOUND_SERVICE = InboundService(InboundDependencies(
 ATTACHMENTS = AttachmentArchive(STORE, MEDIA_DIR, OUTBOUND_MEDIA_DIR, UPLOADS.root)
 OUTBOUND_SERVICE = OutboundService(STORE, ATTACHMENTS, queue_realtime, global_auto_reply_enabled)
 STALE_MENU = StaleMenuRecovery(STORE, MENU, CONTACTS, queue_realtime, global_auto_reply_enabled)
+RELIABILITY = queue_reliability.ReliabilityMonitor(STORE, DATA_DIR, DATABASE_PATH, ROOT, connector_state_snapshot,
+                                                   ticket_sla_state, MAX_MEDIA_BYTES)
+PRODUCTIVITY_ROUTES = ProductivityRoutes(STORE, DATA_DIR, DATABASE_PATH, csrf_token=csrf_token, layout=layout,
+                                         admin_layout=admin_layout, category_items=active_ticket_category_items,
+                                         active_employee=active_employee)
 
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
 class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_handler.QueueHTTPHandlerMixin, BaseHTTPRequestHandler):
     inbound_service = INBOUND_SERVICE
     outbound_service = OUTBOUND_SERVICE
+    productivity_routes = PRODUCTIVITY_ROUTES
     server_version = "UnifiedQueue/1.00.1"
 
     def _generic_domain_path(self):
@@ -1315,7 +1322,7 @@ def main() -> None:
     cleanup_retention_once()
     threading.Thread(target=retention_worker, name="queue-retention", daemon=True).start()
     threading.Thread(target=scheduled_backup_worker, name="queue-scheduled-backup", daemon=True).start()
-    threading.Thread(target=queue_reliability.worker_loop, args=(sys.modules[__name__],), name="queue-reliability", daemon=True).start()
+    threading.Thread(target=RELIABILITY.worker_loop, name="queue-reliability", daemon=True).start()
     threading.Thread(target=queue_performance.worker_loop, args=(DATA_DIR, DATABASE_PATH), name="queue-performance", daemon=True).start()
     threading.Thread(target=STALE_MENU.worker_loop, name="queue-stale-menu", daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), TicketHandler)

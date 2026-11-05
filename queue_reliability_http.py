@@ -21,7 +21,7 @@ def _human(app,n):
 def _admin_page(handler,app,query):
     if not handler.require_admin(): return
     notice=_value(query,'notice')
-    snap=qr.diagnostic_snapshot(app)
+    snap=app.RELIABILITY.diagnostic_snapshot()
     db=snap['database']; disk=snap['disk']; conn=snap['connector']; probs=snap['queue_problems']; backups=snap['backups']
     problem_rows=''.join(
         f'''<tr><td>#{int(x['id'])}</td><td>{app.e(str(x['status']))}</td><td>{app.e(str(x.get('chat_id','')))}</td>
@@ -66,7 +66,7 @@ def get(handler,app):
         handler.json_response({'message':item} if item else {'error':'Сообщение не найдено'},200 if item else 404)
     elif path=='/api/reliability-diagnostics':
         if not handler.require_admin(): return True
-        handler.json_response(qr.diagnostic_snapshot(app))
+        handler.json_response(app.RELIABILITY.diagnostic_snapshot())
     elif path=='/api/reliability-upload-policy':
         handler.json_response({'max_bytes':int(app.MAX_MEDIA_BYTES),'blocked_extensions':sorted(qr.DANGEROUS_EXTENSIONS)})
     else:
@@ -87,7 +87,7 @@ def post(handler,app):
             ok=qr.cancel_scheduled(app.STORE,int(form.get('id','0') or 0))
             handler.json_response({'cancelled':ok},200 if ok else 404)
         elif path=='/api/reliability-profile-refresh':
-            qr.request_profile_refresh(app,form.get('chat_id',''))
+            qr.request_profile_refresh(app.CHAT_LOCK,app.CHAT_STATE,app.AVATARS,form.get('chat_id',''))
             handler.json_response({'requested':True})
         elif path=='/admin/reliability':
             if not handler.require_admin():return True
