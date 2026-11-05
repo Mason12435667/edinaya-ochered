@@ -12,7 +12,6 @@ def all_information_confirmed(text: str) -> bool:
         "всё что есть", "все что есть", "больше данных нет",
         "данных больше нет", "другой информации нет", "больше информации нет",
         "больше ничего нет", "это вся имеющаяся информация",
-        # EO_MULTIMESSAGE_DRAFT_20261001
         # Explicit draft finalization. A ticket is never created merely
         # because the parser already has enough fields.
         "готово", "готов", "создать заявку", "создай заявку",

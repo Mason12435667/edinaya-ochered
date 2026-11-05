@@ -207,7 +207,7 @@ class MessageStore:
                     should_increment = (not from_me and not exists)
                     mention_increment = bool(should_increment and notify)
                 elif not from_me and not exists:
-                    # 1.00.2: every real personal WhatsApp message is unread until
+                    # Every real personal WhatsApp message is unread until
                     # an employee opens the chat. Earlier builds counted only
                     # contacts manually added in Admin, so ordinary chats could
                     # arrive silently even though the message was saved.
@@ -517,7 +517,7 @@ class MessageStore:
 
         Earlier builds attached every recent unassigned image from the private chat.
         That could pull an unrelated screenshot from a previous conversation into a
-        newly created ticket. 1.00.6.5 requires the WhatsApp message to be present
+        newly created ticket. Now the WhatsApp message must be present
         in ticket_context_history for the ticket that has just been committed.
         Therefore an image is auto-attached only when it was received while the
         user was already filling the current request/category.
@@ -636,7 +636,7 @@ class MessageStore:
     def resolve_whatsapp_message(self, chat_id: str, message_key: str):
         return queue_quote_lookup.resolve(self, chat_id, message_key)
 
-    # QUEUE_1_00_4_POSTRELEASE_CLEANUP: reply-queue calculation removed; only real chat activity remains.
+    # Reply-queue calculation removed; only real chat activity remains.
     def chat_activity(self):
         """One indexed lookup per chat, including groups. No per-message SQL."""
         with self.connection() as connection:

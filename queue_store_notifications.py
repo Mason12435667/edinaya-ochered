@@ -77,7 +77,7 @@ class NotificationStore:
     def notification_events(self, limit: int = 12) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
 
-        # QUEUE_1_00_5_REPLY_LIGHT_INSTRUCTION: recognise a real WhatsApp Reply
+        # Recognise a real WhatsApp Reply
         # to one of our outgoing messages. Exact provider ID is preferred; the
         # stanza fallback covers the same message seen through @lid/@c.us aliases.
         def quoted_outgoing(connection: sqlite3.Connection, chat_id: str, quoted_key: str):

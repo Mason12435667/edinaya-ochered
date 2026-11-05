@@ -164,7 +164,6 @@ class ChatViews:
             "updated_at": str(lock.get("updated_at", "") or ""),
         }
 
-    # QUEUE_1_00_1_DELETE_PREVIEW_SYNC
     def latest_deleted_chat_previews(self) -> dict[str, dict[str, object]]:
         """Return chats whose newest persisted message is a deletion tombstone.
 
@@ -599,7 +598,7 @@ class ChatViews:
             profile["presence"] = selected_presence
         if profile:
             profile["name"] = self.display_names().name(selected, whatsapp_names.get(selected) or profile.get("name", ""), profile.get("phone", ""))
-        # 3.3.105: read-only context for the optional information drawer.
+        # Read-only context for the optional information drawer.
         # This must never affect ticket routing or WhatsApp state. If the helper is
         # unavailable for any reason, the normal chat API stays unchanged.
         ui_context: dict[str, object] = {"active_tickets": []}
@@ -821,9 +820,9 @@ class ChatViews:
         base_events = [self._decorate_notification_event(item) for item in self.store.notification_events(20)]
         base_events = queue_productivity.filter_notification_events(self.store, base_events)
         connector = self.connector.snapshot()
-        reminder_count, reminder_events = 0, []  # QUEUE_1_00_4: reminders removed
+        reminder_count, reminder_events = 0, []  # reminders removed
         system_events = queue_productivity.system_alerts(self.store, self.data_dir, connector)
-        # 3.3.104: if the live connector is already healthy, immediately retire the
+        # If the live connector is already healthy, immediately retire the
         # persisted reliability alert instead of waiting up to five minutes for the
         # background health loop. This prevents a stale red warning after reconnect.
         if bool(connector.get("connected")):
@@ -835,7 +834,7 @@ class ChatViews:
             self.store, [item.get("id") or item.get("event_id") for item in system_events], ("system:",)
         )
         system_events = queue_reliability.filter_dismissed_notifications(self.store, system_events)
-        # 3.3.103: normalise reliability/SLA events so they behave like every other
+        # Normalise reliability/SLA events so they behave like every other
         # notification in the UI. queue_reliability historically used event_id, while
         # the notification centre expects id/href/source. Keep the original payload too.
         normalized_reliability_events: list[dict[str, object]] = []

@@ -1,4 +1,4 @@
-/* Единая очередь 1.00.6.97 — user-facing usability polish.
+/* User-facing usability polish.
    Final override layer: keeps business logic intact and improves density,
    hierarchy, navigation, tables, forms and responsive behaviour. */
 
@@ -274,7 +274,7 @@ tbody tr { transition: background .14s ease; }
 }
 
 
-/* 1.00.6.100 — live WhatsApp text catalog in admin */
+/* Live WhatsApp text catalog in admin */
 .admin-flow-heading { align-items: center; gap: 14px; }
 .admin-flow-jumps { display: flex; gap: 8px; flex-wrap: wrap; }
 .admin-flow-live-note { margin-bottom: 14px; }

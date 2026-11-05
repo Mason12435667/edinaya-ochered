@@ -72,7 +72,6 @@ class WhatsAppHandlerMixin:
                 chat_id = valid_chat_id(str(item.get("id", "")))
                 if not chat_id:
                     continue
-                # QUEUE_3_3_95_CHAT_LIST_CANONICAL
                 chat_id = app.STORE.canonical_whatsapp_chat_id(chat_id)
                 try:
                     timestamp = int(item.get("timestamp", 0))
@@ -92,7 +91,6 @@ class WhatsAppHandlerMixin:
                         "last_from_me": bool(item.get("last_from_me")),
                     }
                 )
-        # QUEUE_3_3_95_CHAT_LIST_DEDUPE
         deduped_chats: dict[str, dict[str, object]] = {}
         for row in cleaned:
             cid = str(row.get("id", ""))
@@ -246,7 +244,6 @@ class WhatsAppHandlerMixin:
                 app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.json_response({"updated": True, "messages": updated})
 
-    # EO_LIVE_CHAT_ALIAS_COLLAPSE_V26_20261001
     @staticmethod
     def _collapse_live_whatsapp_aliases_v26(
         live_rows: object,
@@ -520,7 +517,6 @@ class WhatsAppHandlerMixin:
         phone = normalize_phone(str(payload.get("phone", "")))
         canonical_chat_id = app.STORE.canonical_whatsapp_chat_id(chat_id) or chat_id
         contact = app.STORE.manual_whatsapp_contact(canonical_chat_id, phone)
-        # EO_BOT_HARD_RESET_20260930:
         # The connector consumes this generation token on the next inbound
         # message and clears only this user's in-memory bot caches.
         reset_token = app.STORE.get_setting(f"bot_hard_reset_v1:{canonical_chat_id}", "")
@@ -558,11 +554,9 @@ class WhatsAppHandlerMixin:
             return
         chat_id = valid_conversation_id(str(payload.get("chat_id", "")))
         source_chat_id = valid_conversation_id(str(payload.get("source_chat_id", "")))
-        # QUEUE_3_3_95_ALIAS_HINT
         if source_chat_id.endswith("@lid") and chat_id.endswith("@c.us") and source_chat_id != chat_id:
             try:
                 app.STORE.remember_whatsapp_chat_alias(source_chat_id, chat_id)
-                # EO_LIVE_CHAT_ALIAS_COLLAPSE_V26_20261001
                 collapsed_count_v26 = 0
                 with app.CHAT_LOCK:
                     collapsed_v26, collapsed_count_v26 = self._collapse_live_whatsapp_aliases_v26(
@@ -703,7 +697,7 @@ class WhatsAppHandlerMixin:
                     "reactions": item.get("reactions", {}) if isinstance(item.get("reactions", {}), (dict, list)) else {},
                 }
             )
-        # 3.3.117: reconcile the revoke event with the row that is already
+        # Reconcile the revoke event with the row that is already
         # visible in our history before touching live state or persisting a tombstone.
         matched_deleted_keys: set[str] = set()
         for deleted_message_id, deleted_media_path, deleted_timestamp, deleted_from_me in deleted_payloads:
@@ -765,7 +759,7 @@ class WhatsAppHandlerMixin:
                     queue_workflow.auto_link_open_ticket(app.STORE, chat_id, workflow_items)
             except Exception as exc:
                 print(f"Автопривязка сообщения к заявке пропущена: {exc}", flush=True)
-            # 1.00.6.6: голосовые сохраняются и воспроизводятся как обычные медиа.
+            # Голосовые сохраняются и воспроизводятся как обычные медиа.
             # Задания на нейросетевую расшифровку больше не создаются.
             # Важно: исходящее сообщение, в том числе системный автоответ, не
             # должно автоматически выключать автоответчик. Состояние меняет

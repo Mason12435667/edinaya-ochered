@@ -234,7 +234,7 @@
   observer.observe(document.documentElement,{subtree:true,childList:true});
   enhanceDelivery(); installChatTools(); installTicketReminderButton();
 
-  // EO_PERFORMANCE_20260930: MutationObserver handles normal UI changes.
+  // MutationObserver handles normal UI changes.
   // Keep only a low-frequency safety scan, and pause it in background tabs.
   const productivitySafetyScan=()=>{installChatTools();enhanceDelivery();};
   setInterval(()=>{if(!document.hidden)productivitySafetyScan();},10000);

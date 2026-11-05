@@ -1,4 +1,3 @@
-// EO_GENERIC_MENU_FIX_V138
 'use strict';
 
 const fs = require('fs');
@@ -248,7 +247,6 @@ const client = new Client({
     dataPath: process.env.QUEUE_WHATSAPP_AUTH_DIR || '/var/lib/edinaya-ochered/whatsapp-auth',
   }),
   authTimeoutMs: 180000,
-  // EO_WWEBJS_NATIVE_UA_V28_20261002
   // whatsapp-web.js otherwise forces its old default Chrome UA. Let the real
   // bundled Chromium advertise its own current UA so WhatsApp Web does not
   // classify this Chrome 146 session as an obsolete Chrome build.
@@ -295,13 +293,10 @@ let groupIdentityRepairBusy = false;
 const groupIdentityRepairAt = new Map();
 let profileSyncBusy = false;
 
-// EO_FAST_REPLY_V5_20260930
-// EO_REALTIME_CONNECTOR_V7_20260930
 // Fresh inbound/category traffic always wins over cosmetic/background work.
 const HOT_INBOUND_GRACE_MS = 10000;
 const GROUP_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const ACTIVE_AVATAR_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
-// EO_MEDIA_FAST_RETRY_V20_20261001
 const BACKGROUND_MEDIA_INTERVAL_MS = 15000;
 const BACKGROUND_OUTGOING_INTERVAL_MS = 10000;
 const STARTUP_LIVE_ONLY_MS = 12000;
@@ -433,7 +428,6 @@ function rememberChatAlias(canonicalChatId, rawChatId) {
   chatIdAliases.set(raw, reverse);
 }
 
-// EO_NEW_USER_CHAT_DEDUPE_V21_20261001
 // WhatsApp may expose the first message of a brand-new contact as @lid and the
 // bot reply a moment later as @c.us. Merge those transport aliases immediately
 // so one person can never become two cards in the left chat list.
@@ -627,7 +621,6 @@ const autoReplyCooldowns = new Map();
 const autoReplyInflight = new Set();
 const autoReplyExactCooldowns = new Map();
 
-// EO_AUTOREPLY_CATEGORY_V6_20260930
 // One inbound WhatsApp message may reach us through both the live event and
 // reserve recovery. Track the source message id so it can never produce two
 // automatic replies. Separately track the body/recipient of an auto-reply
@@ -689,7 +682,6 @@ function cleanupAutoReplySourceIds138(now = Date.now()) {
   }
 }
 
-// EO_STRICT_AUTOREPLY_20260930
 // The bot must be strict about the current dialog state, but it must not
 // answer every separate user message with the same prompt.
 const AUTO_REPLY_EXACT_COOLDOWN_MS = 60000;
@@ -717,7 +709,6 @@ function isInternalOutgoing(chatId) {
 function markActiveInternalOutgoing(queued, aliases = [], milliseconds = 35000) {
   activeInternalOutgoingFingerprint = {
     queue_id: Number((queued && queued.id) || 0),
-    // QUEUE_3_3_95_AUTHORITATIVE_CHAT_ID
     // The web UI queued the message for this exact chat. WhatsApp may echo the
     // same private chat as @lid, but that transport alias must never create a
     // second card in our UI.
@@ -851,7 +842,6 @@ function incomingMenuChoice(message) {
   return /^[0-9]$/.test(typed) ? typed : '';
 }
 
-// EO_DRAFT_FINISH_PRIORITY_V13_20261001
 function isDraftFinishText138(value) {
   const normalized = String(value || '')
     .toLocaleLowerCase('ru-RU')
@@ -1695,7 +1685,7 @@ async function repairStoredGroupMessageIdentities(groupId, requestedIds = []) {
     const wantedSet = new Set(wanted);
     const messagesById = new Map();
 
-    // 3.3.37: сервер сообщает ID только тех сохранённых сообщений, где имя,
+    // Сервер сообщает ID только тех сохранённых сообщений, где имя,
     // номер или sender_id ещё не определены. Получаем именно эти сообщения у
     // WhatsApp и никогда не импортируем постороннюю историю.
     if (wanted.length && typeof client.getMessageById === 'function') {
@@ -3322,7 +3312,6 @@ function cancelDialogHint138(recipients) {
   }
 }
 
-// EO_BOT_HARD_RESET_20260930
 const botResetTokenByChat138 = new Map();
 
 function botResetAliases138(chatId, phoneId = '') {
@@ -3797,8 +3786,8 @@ async function directDeleteInWhatsApp(messageKey, chatId, hint) {
     const capabilityAllowed = canSender || canAdmin;
 
     // Old/stale multi-device messages may contain an @lid remote while the
-    // active chat model lives under the canonical @c.us id. 3.3.80 only used
-    // msg.id.remote, so both of its delete paths could still hit the same bad
+    // active chat model lives under the canonical @c.us id. Using only
+    // msg.id.remote, both delete paths could still hit the same bad
     // chat model. Build several live chat candidates before revoking.
     const chats = [];
     const seenChats = new Set();
@@ -4166,7 +4155,6 @@ async function pollOutbound() {
       quoted_sender: quotedSender,
     });
 
-    // QUEUE_3_3_70_AUTHORITATIVE_LOCAL_MEDIA_SYNC
     // The outbound-result endpoint preserves the original upload under the
     // queue id. Publish one exact provider-id observation that explicitly
     // references that queue id. This makes local history independent from the
@@ -4368,8 +4356,7 @@ async function reportPerformance() {
     });
     if (PERF_RAM_RESTART_MB > 0 && rssMb >= PERF_RAM_RESTART_MB) highMemorySamples += 1;
     else highMemorySamples = 0;
-    // QUEUE_3_3_109_NO_MESSAGE_RESTART
-    // 3.3.107 автоматически завершал процесс после трёх замеров выше RAM-порога.
+    // Раньше процесс автоматически завершался после трёх замеров выше RAM-порога.
     // На рабочих системах это выглядело как падение коннектора сразу после
     // входящего/исходящего сообщения, а systemd тут же поднимал его снова.
     // Оставляем телеметрию и предупреждение, но больше не завершаем процесс.
@@ -4932,8 +4919,6 @@ function stopIncomingCallPolling() {
   callPollKnownIds.clear();
 }
 
-// QUEUE_3_3_116_REMOTE_DELETE_SYNC
-// QUEUE_3_3_118_REMOTE_DELETE_ORIGINAL_KEY
 async function mirrorWhatsAppDeletion(message, revokedMessage) {
   try {
     const serializeMessageKey = (value) => {
@@ -5067,7 +5052,6 @@ async function mirrorWhatsAppDeletion(message, revokedMessage) {
         reactions: {},
       }],
     });
-    // QUEUE_1_00_1_DELETE_PREVIEW_SYNC
     // Keep the chat-list preview in lockstep with the message tombstone.
     // Only replace the preview when the revoked message is still the latest
     // known message, so deleting an older message cannot hide a newer one.
@@ -5203,7 +5187,6 @@ client.on('message_create', async (message) => {
         outgoingMediaProbe.delete(exactId);
       }
 
-      // QUEUE_3_3_94_CLIPBOARD_EARLY_LOCAL_ECHO
       // This is intentionally independent from message.hasMedia/downloadMedia().
       // Win+Shift+S -> Ctrl+V is uploaded by our own web UI, therefore the
       // outbound queue is the authoritative source of the image bytes.
@@ -5389,7 +5372,6 @@ client.on('message', async (message) => {
     }
     const isManualContact = Boolean(contactPolicy && contactPolicy.manual_contact);
 
-    // EO_FAST_REPLY_V5_20260930
     // The panel/UI copy and bot decision no longer wait for each other.
     // Media is already deferred by publishLiveMessage(), so /api/whatsapp can
     // start immediately with text + lightweight attachment metadata.
@@ -5551,7 +5533,6 @@ process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
 console.log('Запускаю WhatsApp Web. Восстанавливаю сохранённую сессию...');
 publishConnectorState('connecting').catch(() => {});
 
-// EO_CONNECTOR_STARTUP_RETRY_20260930
 // If WhatsApp Web destroys its execution context while initialize() is running,
 // do not leave a dead Node process alive because background timers keep the
 // event loop open. Exit cleanly with code 1 so systemd Restart=always starts a

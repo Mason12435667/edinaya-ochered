@@ -59,7 +59,7 @@
   }
   installScaleControl();
 
-  // 3.3.106: keep context menus next to the real pointer even when the
+  // Keep context menus next to the real pointer even when the
   // interface scale is not 100%. We adjust from the menu's actual rendered
   // rectangle, so this also works for legacy absolute-positioned menus.
   function visibleContextMenu() {
@@ -103,7 +103,7 @@
     });
   }
 
-  // 1.00.6.34: context menus are positioned by app.js only. A second global
+  // Context menus are positioned by app.js only. A second global
   // capture-phase mover caused the chat workspace to jump/break on right click.
 
   const conversationPage = document.querySelector("[data-conversation-page]");
@@ -181,7 +181,7 @@
   resizeHandle.addEventListener("pointerup", finishResize);
   resizeHandle.addEventListener("pointercancel", finishResize);
   window.addEventListener("resize", placeResizeHandle);
-  // The sidebar must always remain available. 3.3.105 could persist a hidden
+  // The sidebar must always remain available. Older builds could persist a hidden
   // state in localStorage; clear it once and remove the hide/show control.
   if (pageSettings.sidebarCollapsed) {
     pageSettings.sidebarCollapsed = false;
@@ -196,7 +196,7 @@
   // Chat tabs. Personal/group navigation stays explicit; the rest are safe DOM filters.
   const tabs = document.createElement("div");
   tabs.className = "uq-chat-tabs";
-  // 1.00.6.31 fix4: keep only the categories used by the current UI.
+  // Keep only the categories used by the current UI.
   const tabDefs = [
     ["private", "Личные"], ["groups", "Группы"], ["unread", "Непрочитанные"],
   ];

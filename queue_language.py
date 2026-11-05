@@ -1,4 +1,3 @@
-# EO_GENERIC_DEAD_UI_V141
 """Tolerant labels and explicit menu numbers, without guessing identifiers."""
 import re
 

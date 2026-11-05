@@ -71,7 +71,7 @@ queue_whatsapp_handlers.bind(sys.modules[__name__])
 
 ROOT =Path(__file__).resolve().parent
 
-# 1.00.6.27: first modularization phase. Keep the historic names in app.py as
+# First modularization phase. Keep the historic names in app.py as
 # aliases so existing feature modules can continue receiving app as their context.
 LOCAL_TIMEZONE = queue_core.LOCAL_TIMEZONE
 resolve_data_dir = queue_core.resolve_data_dir
@@ -124,8 +124,8 @@ def csrf_token_valid(value: object, user: dict[str, object] | None = None) -> bo
 queue_operations.initialize(STORE)
 queue_productivity.initialize(STORE)
 queue_contextual_tickets.initialize(STORE)
-queue_workflow.initialize(STORE)  # QUEUE_3_3_96_WORKFLOW
-queue_reliability.initialize(STORE)  # QUEUE_3_3_99_RELIABILITY
+queue_workflow.initialize(STORE)
+queue_reliability.initialize(STORE)
 MEDIA_DIR = DATA_DIR / "chat-media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 OUTBOUND_MEDIA_DIR = DATA_DIR / "outbound-media"
@@ -208,7 +208,7 @@ ACTIVE_TICKETS_CONTEXT = queue_bot_texts.ACTIVE_TICKETS_CONTEXT
 ACTIVE_TICKET_FOLLOWUP_CONTEXT = queue_bot_texts.ACTIVE_TICKET_FOLLOWUP_CONTEXT
 REACTION_EMOJIS = {"👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉", "✅", "👏", "🤔", "👀", "😡", "💯", "👌", "😁", "😍", "🥳"}
 
-# 1.00.6.11: ordinary WhatsApp users receive Kazakh texts. The employee/admin
+# Ordinary WhatsApp users receive Kazakh texts. The employee/admin
 # interface, stored ticket data, internal statuses and menu editor remain Russian.
 USER_STATUS_LABELS_KZ = {
     "new": "Жаңа",
@@ -354,8 +354,8 @@ def scrub_deleted_whatsapp_message(
     """Scrub the original row after WhatsApp 'delete for everyone'.
 
     WhatsApp may report the same direct chat as @lid while our DB already knows it
-    as @c.us. 3.3.116 updated only an exact (chat_id, message_key) pair, which could
-    leave the original row intact and insert a second tombstone. Here we reconcile
+    as @c.us. Matching only an exact (chat_id, message_key) pair could leave the
+    original row intact and insert a second tombstone. Here we reconcile
     by the stable WhatsApp stanza id and direction/time, scrub the original row(s),
     and return the original key so the caller does not create a duplicate bubble.
     """
@@ -611,7 +611,7 @@ def _outbound_media_matches_observation(
 ) -> bool:
     """Return True only when an outbound media row belongs to this WhatsApp echo.
 
-    1.00.6.36: an old uncertain attachment could be rebound to the next plain
+    An old uncertain attachment could be rebound to the next plain
     text/reply in the same chat because an empty queued caption was treated as
     a wildcard. Body and reply context are now strict identity signals.
     """
@@ -637,7 +637,6 @@ def _outbound_media_matches_observation(
     return True
 
 
-# QUEUE_3_3_64_SYSTEM_MEDIA_HISTORY
 # Recover the preserved local attachment for a message that was sent from the
 # Queue UI.  whatsapp-web.js can report the same outgoing message a moment later
 # as text/caption only, even though WhatsApp itself received the image/file.
@@ -707,7 +706,6 @@ def preserved_system_outgoing_media(
     return {}
 
 
-# QUEUE_1_00_6_13_UNCERTAIN_LOCAL_MEDIA_RECONCILE
 # whatsapp-web.js can occasionally return an empty send result even though the
 # media was actually accepted by WhatsApp.  In that case the outbound row is
 # intentionally left as "uncertain", while the fallback history sync observes
@@ -888,7 +886,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                     (chat_id, str(item.get("id", ""))),
                 ).fetchone()
 
-        # 1.00.6.36: repair old poisoned bindings created by the former fuzzy
+        # Repair old poisoned bindings created by the former fuzzy
         # uncertain-media matcher. A plain text/reply must never inherit a
         # previous screenshot merely because it was sent in the same time window.
         if (
@@ -936,7 +934,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                     str(item.get("quoted_message_key", "")),
                 )
             if not media:
-                # QUEUE_3_3_71_CLIPBOARD_LOCAL_RECONCILE: repair already saved
+                # Repair already saved
                 # [Фото] rows by matching the still-present clipboard upload to
                 # this exact chat and WhatsApp timestamp.
                 media = queue_uploads.recover_clipboard_attachment(
@@ -1019,7 +1017,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
     return result
 
 
-# 1.00.6.30: phase 4 large modularization (queue_work_context).
+# Phase 4 large modularization (queue_work_context).
 def load_employee_names():
     return queue_work_context.load_employee_names(STORE, DEFAULT_EMPLOYEES, MAX_EMPLOYEES)
 cached_snapshot_value = queue_work_context.cached_snapshot_value
@@ -1136,7 +1134,7 @@ def admin_layout(title: str, content: str, active: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 1.00.6.12: language selection before the ordinary-user WhatsApp flow.
+# Language selection before the ordinary-user WhatsApp flow.
 # The selected language is persisted per WhatsApp user in app_settings.
 # Admin/employee UI and stored ticket data stay Russian.
 # ---------------------------------------------------------------------------

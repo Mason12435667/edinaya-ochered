@@ -396,7 +396,6 @@ window.QueueVoice = (() => {
     let manualModeState = conversationPage.querySelector("[data-manual-mode-state]");
     let botResetButton = conversationPage.querySelector("[data-bot-reset]");
     const profileButton = conversationPage.querySelector("[data-profile-toggle]");
-    // EO_BOT_RESTART_UI_FIX_20260930:
     // This control belongs only to personal WhatsApp dialogs.
     // Never attach it to the Groups sidebar / "Обновить" button.
     const botRestartPersonalPage = location.pathname === "/whatsapp";
@@ -432,7 +431,6 @@ window.QueueVoice = (() => {
       }
     }
 
-    // EO_CHAT_OVERFLOW_BOT_CONTROLS_V19_20261001
     // CSP-safe version:
     // - never writes element.style (strict style-src blocks inline styles);
     // - keeps the real v15 controls hidden in their original DOM location;
@@ -1068,7 +1066,7 @@ window.QueueVoice = (() => {
       loadChatState(true);
     }
 
-    const supportsReplyQueue = false; // 1.00.6.31 fix4: obsolete reply queue removed
+    const supportsReplyQueue = false; // obsolete reply queue removed
     let needsReplyOnly = supportsReplyQueue && sessionStorage.getItem("queue-needs-reply:" + location.pathname) === "1";
     const needsReplyButton = document.createElement("button");
     needsReplyButton.type = "button"; needsReplyButton.className = "button compact ghost reply-queue-toggle";
@@ -2306,7 +2304,6 @@ window.QueueVoice = (() => {
       }
     }
 
-    // EO_AUTOREPLY_TOGGLE_V15_20261001
     if (manualModeButton) {
       manualModeButton.addEventListener("click", async () => {
         if (!selectedChatId || manualModeButton.dataset.busy === "1") return;
@@ -2684,7 +2681,7 @@ window.QueueVoice = (() => {
     });
 
     if (selectedChatId) chatIdInput.value = selectedChatId;
-    // EO_PERFORMANCE_20260930: realtime-first, slow polling only as a safety net.
+    // Realtime-first, slow polling only as a safety net.
     let chatPollTimer = null;
     const scheduleChatPoll = () => {
       if (chatPollTimer) window.clearTimeout(chatPollTimer);
@@ -2890,7 +2887,6 @@ window.QueueVoice = (() => {
   function startNotifications() {
     if (!notificationCenter || !notificationPopover || !notificationCount || !notificationItems) return;
 
-    // EO_NOTIFICATION_TRIGGER_V14_20261001
     const loudSoundKey = "queue-loud-notification-sound-v14";
     let loudSoundEnabled = true;
     try { loudSoundEnabled = localStorage.getItem(loudSoundKey) !== "0"; } catch (_) {}
@@ -3212,7 +3208,7 @@ window.QueueVoice = (() => {
           notificationItems.append(link);
         });
 
-        // 3.3.104: show active system/SLA problems with explicit actions.
+        // Show active system/SLA problems with explicit actions.
         // "Проверить" re-runs live diagnostics, "Открыть" takes the employee to
         // the relevant screen, and "Убрать" dismisses the current occurrence.
         const allNotificationEvents = Array.isArray(state.events) ? state.events : [];
@@ -3463,7 +3459,7 @@ window.QueueVoice = (() => {
 })();
 
 
-// 1.00.6.129: compact chat banners and follow the logged-in employee as current shift.
+// Compact chat banners and follow the logged-in employee as current shift.
 (() => {
   const style = document.createElement("style");
   style.textContent = `
