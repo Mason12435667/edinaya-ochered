@@ -74,6 +74,11 @@ class AccessTests(FlowTestCase):
                 response = post_form(path, {"ticket_id": 1})
                 self.assertIn(response.status, (302, 303, 401, 403))
 
+    def test_anonymous_request_always_gets_its_answer(self):
+        # closing with the body unread resets the connection before the client reads the reply
+        for _ in range(300):
+            self.assertIn(post_form("/admin/workflow", {"field": "x" * 2000}).status, (302, 303))
+
     def test_missing_csrf_token_is_refused(self):
         for path in self.MUTATIONS:
             with self.subTest(path=path):

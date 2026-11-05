@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlparse
 import queue_performance as qp
 
 
-def get(handler, app):
+def get(handler):
     parsed = urlparse(handler.path)
     if parsed.path == '/api/performance-state':
         if not handler.require_admin(): return True
@@ -18,7 +18,7 @@ def get(handler, app):
     return False
 
 
-def post(handler, app):
+def post(handler):
     parsed = urlparse(handler.path)
     if parsed.path != '/api/performance-telemetry':
         return False

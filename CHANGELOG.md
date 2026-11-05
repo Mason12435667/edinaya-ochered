@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Исправлено: неавторизованный POST мог оборваться ошибкой соединения вместо ответа —
+  сервер закрывал соединение, не дочитав тело запроса. Заодно исчез нестабильный тест
+  с `ConnectionAbortedError`
+- `queue_http_handler` без `bind()`: зависимости собраны в `HttpDependencies`
+- `docs/release-check.md` — что проверить на отдельном номере перед выкаткой
+
 - `queue_ticket_views` и `queue_admin_pages` без `bind()`: классы `TicketViews` и
   `AdminPages` с явными зависимостями. `layout`, хранилище и кеш аватаров передаются в
   `queue_chat_views` явно, из `app.py` убрано ещё 22 псевдонима. Страницы совпадают с
