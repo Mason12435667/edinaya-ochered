@@ -17,13 +17,11 @@ from urllib.parse import parse_qs, quote, urlparse
 import queue_auth
 import queue_contextual_tickets
 import queue_dialog_flow
-import queue_feature_http
 import queue_inbound_media
 import queue_performance_http
 import queue_realtime
 import queue_reliability
 import queue_ticket_views
-import queue_uploads
 import queue_workflow
 from queue_admin_pages import discovered_contact_rows, render_admin_analytics_final, render_admin_api_keys, render_admin_audit, render_admin_categories, render_admin_contacts, render_admin_employees, render_admin_error, render_admin_errors, render_admin_home, render_admin_manager_dashboard, render_admin_manual, render_admin_menu, render_admin_system
 from queue_chat_state import chat_state_snapshot, connector_state_snapshot, conversation_lock_snapshot, group_state_snapshot, notifications_snapshot
@@ -667,7 +665,7 @@ class QueueHTTPHandlerMixin:
             return
         if self.productivity_routes.get(self):
             return
-        if queue_feature_http.get(self, app):
+        if self.feature_routes.get(self):
             return
         route = self.ADMIN_GET_ROUTES.get(parsed.path)
         if route:
@@ -828,9 +826,6 @@ class QueueHTTPHandlerMixin:
     def _get_api_chat_history(self, query) -> None:
         self.handle_chat_history(query)
 
-    def _get_api_message_window(self, query) -> None:
-        self.handle_message_window(query)
-
     def _get_api_chat_action_status(self, query) -> None:
         action_id = self.query_int(query, "id")
         action = app.STORE.whatsapp_action_status(action_id)
@@ -975,9 +970,9 @@ class QueueHTTPHandlerMixin:
             return
         if self.productivity_routes.post(self):
             return
-        if queue_feature_http.post(self, app):
+        if self.feature_routes.post(self):
             return
-        if queue_uploads.post(self, app):
+        if self.upload_routes.post(self):
             return
         route = self.SERVICE_POST_ROUTES.get(parsed.path)
         if route:
@@ -2066,7 +2061,6 @@ class QueueHTTPHandlerMixin:
         "/api/chat-state": _get_api_chat_state,
         "/api/group-state": _get_api_group_state,
         "/api/chat-history": _get_api_chat_history,
-        "/api/message-window": _get_api_message_window,
         "/api/chat-action-status": _get_api_chat_action_status,
         "/api/notifications": _get_api_notifications,
         "/api/conversation-users": _get_api_conversation_users,
