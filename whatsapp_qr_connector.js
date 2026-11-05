@@ -751,6 +751,10 @@ function matchesActiveInternalOutgoing(message, rawChatId = '') {
 
 const SENT_LOOKUP_TIMEOUT_MS = 4000;
 const SENT_LOOKUP_INTERVAL_MS = 250;
+// Ids this lookup already gave to a send. Not isRememberedInternalOutgoing():
+// message_create marks our own message as internal before the lookup runs, and
+// the reserve sync skips internal messages, so nothing would ever save it.
+const confirmedSentIds = new Set();
 
 function readOwnMessagesSince(since) {
   return client.pupPage.evaluate((cutoff) => {
@@ -786,9 +790,15 @@ async function confirmSentMessage(recipients, body, hasMedia, since) {
   const text = normalizeAutoReplyBody138(body);
   const row = await delivery.waitForValue(async () => delivery.findSentMessage(
     (await readOwnMessagesSince(since)).map((item) => ({...item, text: normalizeAutoReplyBody138(item.text)})),
-    {text, hasMedia, since, aliases, isKnown: (item) => isRememberedInternalOutgoing(item.id)},
+    {text, hasMedia, since, aliases, isKnown: (item) => confirmedSentIds.has(item.id)},
   ), SENT_LOOKUP_TIMEOUT_MS, SENT_LOOKUP_INTERVAL_MS);
-  if (!row) return null;
+  if (!row) {
+    const own = await readOwnMessagesSince(since).catch(() => []);
+    console.warn(`Отправка не подтверждена: своих сообщений с начала отправки ${own.length}, адреса: ${[...aliases].length}`);
+    return null;
+  }
+  confirmedSentIds.add(row.id);
+  setTimeout(() => confirmedSentIds.delete(row.id), 2 * 60 * 1000); // rows older than `since` never match
   const message = await client.getMessageById(row.id).catch(() => null);
   return message || {id: {_serialized: row.id, remote: row.remote, fromMe: true}, fromMe: true, timestamp: row.timestamp};
 }
