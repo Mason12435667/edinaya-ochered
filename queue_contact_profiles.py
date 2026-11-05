@@ -4,8 +4,8 @@ import hashlib
 import json
 import re
 import queue_user_locale
-from queue_core import log_suppressed, normalize_phone, valid_chat_id
-from ticketing import TicketStore, normalize_message
+from queue_core import log_suppressed, normalize_message, normalize_phone, valid_chat_id
+from ticketing import TicketStore
 
 LANGUAGE_SETTING_PREFIX = "whatsapp_user_language:"
 USER_PROFILE_SETTING_PREFIX = "whatsapp_user_profile:"

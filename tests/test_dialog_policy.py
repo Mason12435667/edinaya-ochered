@@ -6,7 +6,7 @@ from queue_dialog_policy import (
     DialogAction, DialogInput, DialogSnapshot, RequestAction,
     choose_dialog_action, choose_request_action,
 )
-from ticketing import MENU_CONTEXT, MENU_GATE_CONTEXT
+from queue_store_conversations import MENU_CONTEXT, MENU_GATE_CONTEXT
 
 
 class DialogPolicyTests(unittest.TestCase):

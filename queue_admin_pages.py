@@ -8,10 +8,9 @@ import queue_generic_profile
 import queue_user_locale
 import queue_workflow
 from queue_chat_state import flexible_contact_match
-from queue_core import display_phone, e, human_bytes, human_time, normalize_phone, valid_chat_id
+from queue_core import display_phone, e, human_bytes, human_time, normalize_message, normalize_phone, valid_chat_id
 from queue_user_locale import tr
 from queue_work_context import category_options, employee_options, monitor_log_entries, priority_options, system_status_snapshot
-from ticketing import normalize_message
 
 # Application module (app.py): shared services, settings and helpers it defines.
 app: Any = None

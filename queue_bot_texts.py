@@ -1,7 +1,7 @@
 """Pure bot prompts and dialog identifiers."""
 import queue_user_locale
 from queue_user_locale import tr
-from ticketing import normalize_message
+from queue_core import normalize_message
 
 MENU_ACTION_TICKET = "ticket"
 

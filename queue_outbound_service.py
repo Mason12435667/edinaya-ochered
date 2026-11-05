@@ -10,9 +10,9 @@ from typing import Protocol
 
 import queue_productivity
 from queue_attachment_archive import AttachmentArchive
-from queue_core import normalize_phone, valid_chat_id, valid_conversation_id
+from queue_core import normalize_message, normalize_phone, valid_chat_id, valid_conversation_id
 from queue_service_result import ServiceResult
-from ticketing import TicketStore, normalize_message
+from ticketing import TicketStore
 
 
 class OutboundEvents(Protocol):

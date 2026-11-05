@@ -11,8 +11,8 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 import queue_auth
 import queue_features
-from queue_core import directory_size, display_phone, e, human_time, log_suppressed, parse_iso_datetime
-from ticketing import TicketStore, normalize_message
+from queue_core import directory_size, display_phone, e, human_time, log_suppressed, normalize_message, parse_iso_datetime
+from ticketing import TicketStore
 
 PAGE_SIZE = 25
 

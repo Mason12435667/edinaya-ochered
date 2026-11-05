@@ -18,7 +18,7 @@ import queue_productivity
 import queue_user_locale
 from queue_bot_menu import BotMenu
 from queue_contact_profiles import ContactProfiles, USER_PROFILE_CONTEXT
-from queue_core import normalize_phone, valid_chat_id
+from queue_core import normalize_message, normalize_phone, valid_chat_id
 from queue_dialog_flow import pending_context_category
 from queue_dialog_policy import (DialogAction, DialogInput, DialogSnapshot, RequestAction,
                                  choose_dialog_action, choose_request_action)
@@ -26,7 +26,9 @@ from queue_language import parse_menu_number
 from queue_service_result import ServiceResult
 from queue_ticket_service import TicketService
 from queue_user_locale import tr
-from ticketing import (MENU_CONTEXT, MENU_GATE_CONTEXT, TicketStore, normalize_message, process_incoming_message)
+from queue_message_rules import process_incoming_message
+from queue_store_conversations import MENU_CONTEXT, MENU_GATE_CONTEXT
+from ticketing import TicketStore
 
 logger = logging.getLogger(__name__)
 

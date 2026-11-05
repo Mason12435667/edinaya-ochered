@@ -17,9 +17,8 @@ import queue_reliability
 import queue_uploads
 import queue_workflow
 from queue_chat_state import dedupe_whatsapp_messages, whatsapp_display_name
-from queue_core import content_disposition_header, log_suppressed, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
+from queue_core import content_disposition_header, log_suppressed, normalize_message, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
 from queue_work_context import work_actor
-from ticketing import normalize_message
 
 # Application module (app.py): shared services, settings and helpers it defines.
 app: Any = None

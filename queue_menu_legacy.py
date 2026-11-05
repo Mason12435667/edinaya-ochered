@@ -1,7 +1,7 @@
 """One-time readers for menu settings written before company profiles."""
 import json
 import re
-from ticketing import normalize_message
+from queue_core import normalize_message
 
 MENU_ACTION_TICKET = "ticket"
 MENU_ACTIONS = {"ticket", "instruction"}

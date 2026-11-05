@@ -1,6 +1,6 @@
 """Pure parsing of explicit draft-completion commands."""
 import re
-from ticketing import normalize_message
+from queue_core import normalize_message
 
 
 def all_information_confirmed(text: str) -> bool:
