@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 import queue_bot_texts as texts
-from ticketing import MENU_CONTEXT, MENU_GATE_CONTEXT, is_acknowledgement, is_main_menu_command
+from queue_message_rules import is_acknowledgement, is_main_menu_command
+from queue_store_conversations import MENU_CONTEXT, MENU_GATE_CONTEXT
 
 
 class DialogAction(Enum):

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `ticketing.py` (4131 строка) разделён по темам: в нём остались соединение, транзакции
+  и заявки (714 строк), схема и обновление базы — в `queue_store_schema`, остальные
+  методы `TicketStore` — в семи модулях `queue_store_*`, разбор текста — в
+  `queue_message_rules` и `queue_request_draft`, `normalize_message` и `utc_now` — в
+  `queue_core`. Методы и схема базы не изменились (проверено сравнением ответов бота
+  на 300 случайных диалогах и обновлением базы старого формата старой и новой версией)
+- Удалены никем не вызываемые методы `TicketStore` (`allow_whatsapp_call`,
+  `allow_auto_reply`, `update_classification`, `cleanup_old_data` и ещё четыре) и
+  функции разбора заявки (`request_detail_error_reply`, `apply_expected_request_answer`,
+  `is_support_trigger_message` и связанные с ними)
+
 - Исправлено: страница «Контакты» и список групп отвечали 500, как только в них
   появлялась хотя бы одна строка (`avatar_html` передавал не тот модуль)
 

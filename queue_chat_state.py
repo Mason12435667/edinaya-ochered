@@ -15,9 +15,8 @@ import queue_message_identity
 import queue_names
 import queue_productivity
 import queue_reliability
-from queue_core import epoch_time, log_suppressed, normalized_phone_digits, valid_chat_id, valid_conversation_id, valid_group_id
+from queue_core import epoch_time, log_suppressed, normalize_message, normalized_phone_digits, valid_chat_id, valid_conversation_id, valid_group_id
 from queue_work_context import cached_snapshot_value, mark_whatsapp_read_throttled
-from ticketing import normalize_message
 
 # Application module (app.py): shared services, settings and helpers it defines.
 app: Any = None

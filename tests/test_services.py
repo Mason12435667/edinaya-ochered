@@ -24,7 +24,8 @@ from queue_inbound_service import InboundDependencies, InboundService
 from queue_menu_config import LEGACY_PROFILE_SETTING, SETTING, MenuConfig
 from queue_outbound_service import OutboundService
 from queue_ticket_service import TicketDependencies, TicketService
-from ticketing import MENU_CONTEXT, STATUSES, TicketStore
+from queue_store_conversations import MENU_CONTEXT
+from ticketing import STATUSES, TicketStore
 
 
 class Events:

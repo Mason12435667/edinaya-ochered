@@ -9,7 +9,7 @@ import json
 import sqlite3
 from typing import Any, ContextManager, Protocol
 
-from ticketing import normalize_message, utc_now
+from queue_core import normalize_message, utc_now
 
 
 class ConnectionProvider(Protocol):

@@ -8,8 +8,8 @@ from typing import Callable
 import queue_user_locale
 import queue_workflow
 from queue_user_locale import tr
-from queue_core import normalize_phone
-from ticketing import TicketStore, normalize_message
+from queue_core import normalize_message, normalize_phone
+from ticketing import TicketStore
 
 
 @dataclass(frozen=True)

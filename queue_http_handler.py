@@ -32,10 +32,9 @@ import queue_workflow_http
 from queue_admin_pages import discovered_contact_rows, render_admin_analytics_final, render_admin_api_keys, render_admin_audit, render_admin_categories, render_admin_contacts, render_admin_employees, render_admin_error, render_admin_errors, render_admin_home, render_admin_manager_dashboard, render_admin_manual, render_admin_menu, render_admin_system
 from queue_chat_state import chat_state_snapshot, connector_state_snapshot, conversation_lock_snapshot, group_state_snapshot, notifications_snapshot
 from queue_chat_views import render_groups, render_whatsapp
-from queue_core import content_disposition_header, display_phone, log_suppressed, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
+from queue_core import content_disposition_header, display_phone, log_suppressed, normalize_message, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
 from queue_ticket_views import render_dashboard, render_my_page, render_ticket
 from queue_work_context import active_employee, assignment_names, audit_admin_form_submission, query_page, render_pagination, render_ticket_rows, work_actor
-from ticketing import normalize_message
 
 # Application module (app.py): shared services, settings and helpers it defines.
 app: Any = None

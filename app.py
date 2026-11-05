@@ -48,16 +48,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from ticketing import (
-    CATEGORIES,
-    MENU_CONTEXT,
-    MENU_GATE_CONTEXT,
-    PRIORITIES,
-    STATUSES,
-    TicketStore,
-    normalize_message,
-)
-from queue_core import log_suppressed
+from ticketing import CATEGORIES, PRIORITIES, STATUSES, TicketStore
+from queue_store_conversations import MENU_CONTEXT, MENU_GATE_CONTEXT
+from queue_core import log_suppressed, normalize_message
 import queue_generic_profile
 from queue_menu_config import MenuConfig
 from queue_bot_menu import BotMenu

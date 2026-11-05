@@ -6,16 +6,15 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from ticketing import (
+from queue_core import normalize_message, utc_now
+from queue_request_draft import (
     REQUEST_FIELD_LABELS_RU,
     REQUEST_FIELD_LABELS_KZ,
     POST_LABEL_PATTERN,
     REFERENCE_LABEL_PATTERN,
     extract_request_draft,
     merge_request_draft,
-    normalize_message,
     request_draft_text,
-    utc_now,
 )
 from queue_context_repository import ContextRepository
 from queue_user_locale import tr, is_kz

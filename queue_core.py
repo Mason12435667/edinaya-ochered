@@ -8,6 +8,7 @@ import shutil
 import sys
 import threading
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -84,6 +85,21 @@ def prepare_database_path(data_dir: Path, project_root: Path | None = None) -> P
     if database_path.absolute() != legacy_path.absolute() and not database_path.exists() and legacy_path.is_file():
         shutil.copy2(legacy_path, database_path)
     return database_path
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def normalize_message(text: str) -> str:
+    """Remove invisible chat characters while preserving readable line breaks."""
+    number_sign_placeholder = ""
+    text = (text or "").replace("№", number_sign_placeholder)
+    text = unicodedata.normalize("NFKC", text).replace(number_sign_placeholder, "№")
+    for char in ("​", "‌", "‍", "⁠", "﻿"):
+        text = text.replace(char, "")
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
 
 
 def normalize_phone(phone: str) -> str:
