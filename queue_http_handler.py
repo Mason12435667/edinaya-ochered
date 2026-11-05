@@ -79,6 +79,133 @@ def _load_message_bookmarks(user_id: int) -> list[dict[str, object]]:
     return result
 
 
+def merge_chat_alias_rows(state: dict[str, object]) -> None:
+    """Collapse @lid/@c.us rows of one private chat in a chat-state snapshot, in place.
+
+    Last-mile protection for old live duplicates: even if CHAT_STATE still holds both
+    rows, the browser receives one canonical row, so visible duplicates disappear
+    without waiting for another alias event.
+    """
+    raw_chats = state.get("chats", [])
+    if isinstance(raw_chats, list):
+        merged_chats: dict[str, dict[str, object]] = {}
+
+        def _useful_chat_name_v27(value: object) -> bool:
+            text = str(value or "").strip()
+            if not text:
+                return False
+            if text.casefold() in {
+                "пользователь whatsapp",
+                "неизвестный отправитель",
+                "direct",
+                "рабочий whatsapp",
+            }:
+                return False
+            compact = re.sub(r"[\s+().-]+", "", text)
+            return not compact.isdigit()
+
+        for raw_row in raw_chats:
+            if not isinstance(raw_row, dict):
+                continue
+            raw_id = valid_chat_id(str(raw_row.get("id", "")))
+            if not raw_id:
+                continue
+            canonical_id = app.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
+            row = dict(raw_row)
+            row["id"] = canonical_id
+
+            previous = merged_chats.get(canonical_id)
+            if previous is None:
+                merged_chats[canonical_id] = row
+                continue
+
+            try:
+                previous_ts = int(previous.get("timestamp", 0) or 0)
+            except (TypeError, ValueError):
+                previous_ts = 0
+            try:
+                row_ts = int(row.get("timestamp", 0) or 0)
+            except (TypeError, ValueError):
+                row_ts = 0
+
+            newer, older = (
+                (row, previous)
+                if row_ts >= previous_ts
+                else (previous, row)
+            )
+            combined = dict(older)
+            combined.update(newer)
+            combined["id"] = canonical_id
+
+            newer_name = str(newer.get("name", "") or "").strip()
+            older_name = str(older.get("name", "") or "").strip()
+            if not _useful_chat_name_v27(newer_name) and _useful_chat_name_v27(older_name):
+                combined["name"] = older_name
+
+            for counter in ("unread_count", "mention_unread_count"):
+                try:
+                    combined[counter] = max(
+                        int(previous.get(counter, 0) or 0),
+                        int(row.get(counter, 0) or 0),
+                    )
+                except (TypeError, ValueError):
+                    pass
+
+            for flag in ("favorite", "muted", "needs_reply"):
+                if flag in previous or flag in row:
+                    combined[flag] = bool(previous.get(flag)) or bool(row.get(flag))
+
+            for field in (
+                "avatar_url",
+                "profile_pic_url",
+                "phone",
+                "last_sender",
+                "last_sender_avatar_url",
+            ):
+                if not combined.get(field):
+                    combined[field] = previous.get(field) or row.get(field) or ""
+
+            merged_chats[canonical_id] = combined
+
+        deduped = list(merged_chats.values())
+        deduped.sort(
+            key=lambda item: (
+                int(bool(item.get("favorite"))),
+                int(item.get("timestamp", 0) or 0),
+            ),
+            reverse=True,
+        )
+        state["chats"] = deduped
+
+        # Forward target menu must use the same identity list.
+        raw_targets = state.get("forward_targets")
+        if isinstance(raw_targets, list):
+            target_map: dict[str, dict[str, object]] = {}
+            for target in raw_targets:
+                if not isinstance(target, dict):
+                    continue
+                raw_id = valid_chat_id(str(target.get("id", "")))
+                if not raw_id:
+                    continue
+                canonical_id = app.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
+                row = dict(target)
+                row["id"] = canonical_id
+                previous = target_map.get(canonical_id)
+                if previous is None:
+                    target_map[canonical_id] = row
+                    continue
+                # Prefer the row with a useful name.
+                old_name = str(previous.get("name", "") or "").strip()
+                new_name = str(row.get("name", "") or "").strip()
+                if _useful_chat_name_v27(new_name) or not _useful_chat_name_v27(old_name):
+                    target_map[canonical_id] = {**previous, **row, "id": canonical_id}
+            state["forward_targets"] = list(target_map.values())
+
+    selected = valid_chat_id(str(state.get("selected_chat_id", "") or ""))
+    if selected:
+        state["selected_chat_id"] = app.STORE.canonical_whatsapp_chat_id(selected) or selected
+
+
 class QueueHTTPHandlerMixin:
     def end_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -532,39 +659,9 @@ class QueueHTTPHandlerMixin:
         user = self.effective_user()
         if user:
             queue_auth.set_current_user(user)
-        if parsed.path == "/search":
-            self.redirect("/whatsapp")
-            return
-        if parsed.path == "/bookmarks":
-            self.redirect("/whatsapp?bookmarks=1")
-            return
-        if parsed.path in {"/api/message-bookmarks", "/api/bookmarks"}:
-            user_id = int((self.effective_user() or {}).get("id", 0) or 0)
-            if user_id <= 0:
-                self.json_response({"error": "Требуется вход"}, HTTPStatus.UNAUTHORIZED)
-                return
-            rows = _load_message_bookmarks(user_id)
-            self.json_response({"bookmarks": rows, "items": rows})
-            return
-        if parsed.path == "/api/global-search":
-            self.json_response({"error": "Глобальный поиск пока недоступен"}, HTTPStatus.GONE)
-            return
-        if parsed.path == "/api/account-preferences":
-            current = self.effective_user() or {}
-            user_id = int(current.get("id", 0) or 0)
-            self.json_response({"preferences": app.AUTH.get_user_preferences(user_id) if user_id > 0 else {}})
-            return
-        if parsed.path == "/api/realtime-wait":
-            try:
-                since = max(0, int(query.get("since", ["0"])[0] or 0))
-            except (TypeError, ValueError):
-                since = 0
-            try:
-                timeout_ms = max(250, min(25000, int(query.get("timeout", ["25000"])[0] or 25000)))
-            except (TypeError, ValueError):
-                timeout_ms = 25000
-            state = queue_realtime.wait_for_change(since, timeout_ms / 1000.0)
-            self.json_response(state)
+        route = self.EARLY_GET_ROUTES.get(parsed.path)
+        if route:
+            route(self, query)
             return
         if queue_performance_http.get(self, app):
             return
@@ -576,349 +673,270 @@ class QueueHTTPHandlerMixin:
             return
         if queue_feature_http.get(self, app):
             return
-        show_admin = self.is_admin()
-        if parsed.path == "/login":
-            add_account = str(query.get("add", [""])[0] or "").strip().lower() in {"1", "true", "yes"}
-            if self.effective_user() and not add_account:
-                self.redirect("/")
-            else:
-                if add_account and not query.get("next"):
-                    query["next"] = ["/accounts"]
-                self.html_response(app.render_login(query))
-        elif parsed.path == "/accounts":
-            sessions = self.saved_account_sessions(touch=False)
-            self.html_response(queue_ticket_views.render_account_switcher(query, show_admin, sessions, self.current_auth_slot()))
-        elif parsed.path == "/register":
-            status = HTTPStatus.OK if queue_auth.self_registration_enabled() else HTTPStatus.FORBIDDEN
-            self.html_response(app.render_register(), status)
-        elif parsed.path == "/forgot-password":
-            if self.effective_user():
-                self.redirect("/account")
-            else:
-                self.html_response(app.render_forgot_password())
-        elif parsed.path == "/setup":
-            if not self.local_setup_allowed():
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-            self.html_response(app.render_local_setup())
-        elif parsed.path == "/logout":
-            self.end_app_session()
-        elif parsed.path == "/account":
-            current = self.effective_user() or {}
-            if current.get("must_change_password"):
-                self.html_response(app.render_account(query))
-            else:
-                self.redirect("/")
-        elif parsed.path == "/me":
-            self.html_response(render_my_page(query, show_admin))
-        elif parsed.path == "/":
-            self.html_response(render_dashboard(query, show_admin))
-        elif parsed.path == "/admin/login":
-            if self.authenticated_user().casefold() != app.ADMIN_USER:
-                self.send_error(HTTPStatus.FORBIDDEN, "Administrator login required")
-                return
-            self.start_admin_session()
-        elif parsed.path == "/admin/logout":
-            self.end_admin_session()
-        elif parsed.path == "/ticket":
-            self.html_response(render_ticket(self.query_int(query, "id"), query, show_admin))
-        elif parsed.path in {"/admin", "/admin/"}:
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_home())
-        elif parsed.path == "/admin/users":
-            if not self.require_admin():
-                return
-            self.html_response(app.render_admin_users(query))
-        elif parsed.path == "/admin/employees":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_employees(query))
-        elif parsed.path == "/admin/manual":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_manual(query))
-        elif parsed.path == "/admin/menu":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_menu(query))
-        elif parsed.path == "/admin/categories":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_categories(query))
-        elif parsed.path == "/admin/errors":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_errors(query))
-        elif parsed.path == "/admin/error":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_error(self.query_int(query, "id"), query))
-        elif parsed.path == "/admin/contacts":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_contacts(query))
-        elif parsed.path == "/admin/audit":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_audit(query))
-        elif parsed.path == "/admin/analytics":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_analytics_final(query))
-        elif parsed.path == "/admin/manager":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_manager_dashboard(query))
-        elif parsed.path == "/admin/api-keys":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_api_keys(query))
-        elif parsed.path == "/admin/tickets-export.csv":
-            if not self.require_admin():
-                return
-            rows = app._final_ticket_filter(query)
-            stream = io.StringIO(newline="")
-            writer = csv.writer(stream, delimiter=";")
-            writer.writerow(["ID","Статус","Категория","Приоритет","Сотрудник","Создано","Обновлено","Описание"])
-            for item in rows:
-                writer.writerow([
-                    int(item.get("id",0) or 0),
-                    str(item.get("status") or ""),
-                    str(item.get("category") or item.get("title") or ""),
-                    str(item.get("priority") or ""),
-                    str(item.get("assigned_to") or ""),
-                    str(item.get("created_at") or ""),
-                    str(item.get("updated_at") or ""),
-                    str(item.get("description") or item.get("problem") or ""),
-                ])
-            self.csv_bytes_response(("\ufeff" + stream.getvalue()).encode("utf-8"), "tickets.csv")
-        elif parsed.path == "/admin/system":
-            if not self.require_admin():
-                return
-            self.html_response(render_admin_system(query))
-        elif parsed.path == "/api/admin/contact-search":
-            if not self.require_admin():
-                return
-            search_raw = query.get("q", [""])[0]
-            self.json_response({"rows_html": discovered_contact_rows(search_raw, 80)})
-        elif parsed.path == "/admin/groups":
-            if not self.require_admin():
-                return
-            self.html_response(render_groups(query, True))
-        elif parsed.path == "/admin/whatsapp":
-            if not self.require_admin():
-                return
-            self.redirect("/admin/")
-        elif parsed.path == "/api/admin/connector-state":
-            if not self.require_admin():
-                return
-            self.json_response(connector_state_snapshot())
-        elif parsed.path == "/whatsapp":
-            self.html_response(render_whatsapp(query, show_admin))
-        elif parsed.path == "/groups":
-            self.html_response(render_groups(query, show_admin))
-        elif parsed.path == "/qr":
-            if not self.require_admin():
-                return
-            self.redirect("/admin/")
-        elif parsed.path == "/api/integration/ping":
-            key = self.integration_api_key()
-            if not key:
-                return
-            self.json_response({"ok":True,"service":"Единая очередь","version":app.APP_VERSION,"key":{"name":str(key.get("name") or ""),"scope":str(key.get("scope") or "read")}})
-        elif parsed.path == "/api/integration/tickets":
-            key = self.integration_api_key()
-            if not key:
-                return
-            try:
-                limit = max(1, min(500, int(query.get("limit", ["100"])[0] or 100)))
-            except (TypeError, ValueError):
-                limit = 100
-            rows = app._final_ticket_filter(query, limit=5000)[:limit]
-            public_rows = []
-            for item in rows:
-                public_rows.append({
-                    "id": int(item.get("id",0) or 0),
-                    "status": str(item.get("status") or ""),
-                    "category": str(item.get("category") or item.get("title") or ""),
-                    "priority": str(item.get("priority") or ""),
-                    "assigned_to": str(item.get("assigned_to") or ""),
-                    "created_at": str(item.get("created_at") or ""),
-                    "updated_at": str(item.get("updated_at") or ""),
-                    "description": str(item.get("description") or item.get("problem") or ""),
-                })
-            self.json_response({"ok":True,"count":len(public_rows),"tickets":public_rows})
-        elif parsed.path == "/api/dashboard-data":
-            self.handle_dashboard_data(query)
-        elif parsed.path == "/api/chat-state":
-            # EO_CHAT_STATE_LASTMILE_DEDUPE_V27_20261001
-            # Last-mile protection for old live duplicates. Even if CHAT_STATE
-            # still contains both @lid and @c.us rows, the browser receives one
-            # canonical row. This runs on every state snapshot, so already
-            # visible duplicates disappear without waiting for another alias event.
-            state = chat_state_snapshot(
-                query.get("chat_id", [""])[0],
-                query.get("read", ["0"])[0] == "1",
-            )
-            if isinstance(state, dict):
-                raw_chats = state.get("chats", [])
-                if isinstance(raw_chats, list):
-                    merged_chats: dict[str, dict[str, object]] = {}
-
-                    def _useful_chat_name_v27(value: object) -> bool:
-                        text = str(value or "").strip()
-                        if not text:
-                            return False
-                        if text.casefold() in {
-                            "пользователь whatsapp",
-                            "неизвестный отправитель",
-                            "direct",
-                            "рабочий whatsapp",
-                        }:
-                            return False
-                        compact = re.sub(r"[\s+().-]+", "", text)
-                        return not compact.isdigit()
-
-                    for raw_row in raw_chats:
-                        if not isinstance(raw_row, dict):
-                            continue
-                        raw_id = valid_chat_id(str(raw_row.get("id", "")))
-                        if not raw_id:
-                            continue
-                        canonical_id = app.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
-                        row = dict(raw_row)
-                        row["id"] = canonical_id
-
-                        previous = merged_chats.get(canonical_id)
-                        if previous is None:
-                            merged_chats[canonical_id] = row
-                            continue
-
-                        try:
-                            previous_ts = int(previous.get("timestamp", 0) or 0)
-                        except (TypeError, ValueError):
-                            previous_ts = 0
-                        try:
-                            row_ts = int(row.get("timestamp", 0) or 0)
-                        except (TypeError, ValueError):
-                            row_ts = 0
-
-                        newer, older = (
-                            (row, previous)
-                            if row_ts >= previous_ts
-                            else (previous, row)
-                        )
-                        combined = dict(older)
-                        combined.update(newer)
-                        combined["id"] = canonical_id
-
-                        newer_name = str(newer.get("name", "") or "").strip()
-                        older_name = str(older.get("name", "") or "").strip()
-                        if not _useful_chat_name_v27(newer_name) and _useful_chat_name_v27(older_name):
-                            combined["name"] = older_name
-
-                        for counter in ("unread_count", "mention_unread_count"):
-                            try:
-                                combined[counter] = max(
-                                    int(previous.get(counter, 0) or 0),
-                                    int(row.get(counter, 0) or 0),
-                                )
-                            except (TypeError, ValueError):
-                                pass
-
-                        for flag in ("favorite", "muted", "needs_reply"):
-                            if flag in previous or flag in row:
-                                combined[flag] = bool(previous.get(flag)) or bool(row.get(flag))
-
-                        for field in (
-                            "avatar_url",
-                            "profile_pic_url",
-                            "phone",
-                            "last_sender",
-                            "last_sender_avatar_url",
-                        ):
-                            if not combined.get(field):
-                                combined[field] = previous.get(field) or row.get(field) or ""
-
-                        merged_chats[canonical_id] = combined
-
-                    deduped = list(merged_chats.values())
-                    deduped.sort(
-                        key=lambda item: (
-                            int(bool(item.get("favorite"))),
-                            int(item.get("timestamp", 0) or 0),
-                        ),
-                        reverse=True,
-                    )
-                    state["chats"] = deduped
-
-                    # Forward target menu must use the same identity list.
-                    raw_targets = state.get("forward_targets")
-                    if isinstance(raw_targets, list):
-                        target_map: dict[str, dict[str, object]] = {}
-                        for target in raw_targets:
-                            if not isinstance(target, dict):
-                                continue
-                            raw_id = valid_chat_id(str(target.get("id", "")))
-                            if not raw_id:
-                                continue
-                            canonical_id = app.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
-                            row = dict(target)
-                            row["id"] = canonical_id
-                            previous = target_map.get(canonical_id)
-                            if previous is None:
-                                target_map[canonical_id] = row
-                                continue
-                            # Prefer the row with a useful name.
-                            old_name = str(previous.get("name", "") or "").strip()
-                            new_name = str(row.get("name", "") or "").strip()
-                            if _useful_chat_name_v27(new_name) or not _useful_chat_name_v27(old_name):
-                                target_map[canonical_id] = {**previous, **row, "id": canonical_id}
-                        state["forward_targets"] = list(target_map.values())
-
-                selected = valid_chat_id(str(state.get("selected_chat_id", "") or ""))
-                if selected:
-                    state["selected_chat_id"] = app.STORE.canonical_whatsapp_chat_id(selected) or selected
-
-            self.json_response(state)
-        elif parsed.path == "/api/group-state":
-            self.json_response(group_state_snapshot(query.get("chat_id", [""])[0], query.get("read", ["0"])[0] == "1"))
-        elif parsed.path == "/api/chat-history":
-            self.handle_chat_history(query)
-        elif parsed.path == "/api/message-window":
-            self.handle_message_window(query)
-        elif parsed.path == "/api/chat-action-status":
-            action_id = self.query_int(query, "id")
-            action = app.STORE.whatsapp_action_status(action_id)
-            self.json_response({"found": bool(action), "action": action or {}})
-        elif parsed.path == "/api/notifications":
-            self.json_response(notifications_snapshot())
-        elif parsed.path == "/api/conversation-users":
-            users=[]
-            for item in app.AUTH.list_users():
-                if not item.get("enabled"): continue
-                users.append({"id":int(item.get("id",0) or 0),"username":str(item.get("username","") or ""),"display_name":str(item.get("display_name","") or ""),"role":str(item.get("role","") or ""),"employee_name":str(item.get("employee_name","") or "")})
-            current=self.effective_user() or {}
-            self.json_response({
-                "users": users,
-                "current_user_id": int(current.get("id", 0) or 0),
-                "is_admin": self.is_admin(),
-                "active_shift_employee": str(app.STORE.get_setting("active_employee", active_employee()) or active_employee()),
-            })
-        elif parsed.path == "/api/chat-media":
-            self.handle_chat_media(query)
-        elif parsed.path.startswith("/static/") and parsed.path[len("/static/"):] in STATIC_FILES:
-            name = parsed.path[len("/static/"):]
+        route = self.ADMIN_GET_ROUTES.get(parsed.path)
+        if route:
+            if self.require_admin():
+                route(self, query)
+            return
+        route = self.GET_ROUTES.get(parsed.path)
+        if route:
+            route(self, query)
+            return
+        name = parsed.path[len("/static/"):]
+        if parsed.path.startswith("/static/") and name in STATIC_FILES:
             self.file_response(app.ROOT / "static" / name, STATIC_FILES[name])
-        elif parsed.path == "/favicon.ico":
-            self.file_response(app.ROOT / "static" / "favicon.png", "image/png")
-        elif parsed.path == "/health/connector":
-            self.json_response(connector_state_snapshot())
-        elif parsed.path == "/health":
-            self.json_response({"status": "ok"})
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
+
+    def _get_search(self, query) -> None:
+        self.redirect("/whatsapp")
+
+    def _get_bookmarks(self, query) -> None:
+        self.redirect("/whatsapp?bookmarks=1")
+
+    def _get_api_message_bookmarks(self, query) -> None:
+        user_id = int((self.effective_user() or {}).get("id", 0) or 0)
+        if user_id <= 0:
+            self.json_response({"error": "Требуется вход"}, HTTPStatus.UNAUTHORIZED)
+            return
+        rows = _load_message_bookmarks(user_id)
+        self.json_response({"bookmarks": rows, "items": rows})
+
+    def _get_api_global_search(self, query) -> None:
+        self.json_response({"error": "Глобальный поиск пока недоступен"}, HTTPStatus.GONE)
+
+    def _get_api_account_preferences(self, query) -> None:
+        current = self.effective_user() or {}
+        user_id = int(current.get("id", 0) or 0)
+        self.json_response({"preferences": app.AUTH.get_user_preferences(user_id) if user_id > 0 else {}})
+
+    def _get_api_realtime_wait(self, query) -> None:
+        try:
+            since = max(0, int(query.get("since", ["0"])[0] or 0))
+        except (TypeError, ValueError):
+            since = 0
+        try:
+            timeout_ms = max(250, min(25000, int(query.get("timeout", ["25000"])[0] or 25000)))
+        except (TypeError, ValueError):
+            timeout_ms = 25000
+        state = queue_realtime.wait_for_change(since, timeout_ms / 1000.0)
+        self.json_response(state)
+
+    def _get_login(self, query) -> None:
+        add_account = str(query.get("add", [""])[0] or "").strip().lower() in {"1", "true", "yes"}
+        if self.effective_user() and not add_account:
+            self.redirect("/")
+        else:
+            if add_account and not query.get("next"):
+                query["next"] = ["/accounts"]
+            self.html_response(app.render_login(query))
+
+    def _get_accounts(self, query) -> None:
+        sessions = self.saved_account_sessions(touch=False)
+        self.html_response(queue_ticket_views.render_account_switcher(query, self.is_admin(), sessions, self.current_auth_slot()))
+
+    def _get_register(self, query) -> None:
+        status = HTTPStatus.OK if queue_auth.self_registration_enabled() else HTTPStatus.FORBIDDEN
+        self.html_response(app.render_register(), status)
+
+    def _get_forgot_password(self, query) -> None:
+        if self.effective_user():
+            self.redirect("/account")
+        else:
+            self.html_response(app.render_forgot_password())
+
+    def _get_setup(self, query) -> None:
+        if not self.local_setup_allowed():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        self.html_response(app.render_local_setup())
+
+    def _get_logout(self, query) -> None:
+        self.end_app_session()
+
+    def _get_account(self, query) -> None:
+        current = self.effective_user() or {}
+        if current.get("must_change_password"):
+            self.html_response(app.render_account(query))
+        else:
+            self.redirect("/")
+
+    def _get_me(self, query) -> None:
+        self.html_response(render_my_page(query, self.is_admin()))
+
+    def _get_dashboard(self, query) -> None:
+        self.html_response(render_dashboard(query, self.is_admin()))
+
+    def _get_admin_login(self, query) -> None:
+        if self.authenticated_user().casefold() != app.ADMIN_USER:
+            self.send_error(HTTPStatus.FORBIDDEN, "Administrator login required")
+            return
+        self.start_admin_session()
+
+    def _get_admin_logout(self, query) -> None:
+        self.end_admin_session()
+
+    def _get_ticket(self, query) -> None:
+        self.html_response(render_ticket(self.query_int(query, "id"), query, self.is_admin()))
+
+    def _get_whatsapp(self, query) -> None:
+        self.html_response(render_whatsapp(query, self.is_admin()))
+
+    def _get_groups(self, query) -> None:
+        self.html_response(render_groups(query, self.is_admin()))
+
+    def _get_api_integration_ping(self, query) -> None:
+        key = self.integration_api_key()
+        if not key:
+            return
+        self.json_response({"ok":True,"service":"Единая очередь","version":app.APP_VERSION,"key":{"name":str(key.get("name") or ""),"scope":str(key.get("scope") or "read")}})
+
+    def _get_api_integration_tickets(self, query) -> None:
+        key = self.integration_api_key()
+        if not key:
+            return
+        try:
+            limit = max(1, min(500, int(query.get("limit", ["100"])[0] or 100)))
+        except (TypeError, ValueError):
+            limit = 100
+        rows = app._final_ticket_filter(query, limit=5000)[:limit]
+        public_rows = []
+        for item in rows:
+            public_rows.append({
+                "id": int(item.get("id",0) or 0),
+                "status": str(item.get("status") or ""),
+                "category": str(item.get("category") or item.get("title") or ""),
+                "priority": str(item.get("priority") or ""),
+                "assigned_to": str(item.get("assigned_to") or ""),
+                "created_at": str(item.get("created_at") or ""),
+                "updated_at": str(item.get("updated_at") or ""),
+                "description": str(item.get("description") or item.get("problem") or ""),
+            })
+        self.json_response({"ok":True,"count":len(public_rows),"tickets":public_rows})
+
+    def _get_api_dashboard_data(self, query) -> None:
+        self.handle_dashboard_data(query)
+
+    def _get_api_chat_state(self, query) -> None:
+        state = chat_state_snapshot(
+            query.get("chat_id", [""])[0],
+            query.get("read", ["0"])[0] == "1",
+        )
+        if isinstance(state, dict):
+            merge_chat_alias_rows(state)
+        self.json_response(state)
+
+    def _get_api_group_state(self, query) -> None:
+        self.json_response(group_state_snapshot(query.get("chat_id", [""])[0], query.get("read", ["0"])[0] == "1"))
+
+    def _get_api_chat_history(self, query) -> None:
+        self.handle_chat_history(query)
+
+    def _get_api_message_window(self, query) -> None:
+        self.handle_message_window(query)
+
+    def _get_api_chat_action_status(self, query) -> None:
+        action_id = self.query_int(query, "id")
+        action = app.STORE.whatsapp_action_status(action_id)
+        self.json_response({"found": bool(action), "action": action or {}})
+
+    def _get_api_notifications(self, query) -> None:
+        self.json_response(notifications_snapshot())
+
+    def _get_api_conversation_users(self, query) -> None:
+        users=[]
+        for item in app.AUTH.list_users():
+            if not item.get("enabled"): continue
+            users.append({"id":int(item.get("id",0) or 0),"username":str(item.get("username","") or ""),"display_name":str(item.get("display_name","") or ""),"role":str(item.get("role","") or ""),"employee_name":str(item.get("employee_name","") or "")})
+        current=self.effective_user() or {}
+        self.json_response({
+            "users": users,
+            "current_user_id": int(current.get("id", 0) or 0),
+            "is_admin": self.is_admin(),
+            "active_shift_employee": str(app.STORE.get_setting("active_employee", active_employee()) or active_employee()),
+        })
+
+    def _get_api_chat_media(self, query) -> None:
+        self.handle_chat_media(query)
+
+    def _get_favicon(self, query) -> None:
+        self.file_response(app.ROOT / "static" / "favicon.png", "image/png")
+
+    def _get_connector_state(self, query) -> None:
+        self.json_response(connector_state_snapshot())
+
+    def _get_health(self, query) -> None:
+        self.json_response({"status": "ok"})
+
+    def _get_admin_home(self, query) -> None:
+        self.html_response(render_admin_home())
+
+    def _get_admin_users(self, query) -> None:
+        self.html_response(app.render_admin_users(query))
+
+    def _get_admin_employees(self, query) -> None:
+        self.html_response(render_admin_employees(query))
+
+    def _get_admin_manual(self, query) -> None:
+        self.html_response(render_admin_manual(query))
+
+    def _get_admin_menu(self, query) -> None:
+        self.html_response(render_admin_menu(query))
+
+    def _get_admin_categories(self, query) -> None:
+        self.html_response(render_admin_categories(query))
+
+    def _get_admin_errors(self, query) -> None:
+        self.html_response(render_admin_errors(query))
+
+    def _get_admin_error(self, query) -> None:
+        self.html_response(render_admin_error(self.query_int(query, "id"), query))
+
+    def _get_admin_contacts(self, query) -> None:
+        self.html_response(render_admin_contacts(query))
+
+    def _get_admin_audit(self, query) -> None:
+        self.html_response(render_admin_audit(query))
+
+    def _get_admin_analytics(self, query) -> None:
+        self.html_response(render_admin_analytics_final(query))
+
+    def _get_admin_manager(self, query) -> None:
+        self.html_response(render_admin_manager_dashboard(query))
+
+    def _get_admin_api_keys(self, query) -> None:
+        self.html_response(render_admin_api_keys(query))
+
+    def _get_admin_tickets_export(self, query) -> None:
+        rows = app._final_ticket_filter(query)
+        stream = io.StringIO(newline="")
+        writer = csv.writer(stream, delimiter=";")
+        writer.writerow(["ID","Статус","Категория","Приоритет","Сотрудник","Создано","Обновлено","Описание"])
+        for item in rows:
+            writer.writerow([
+                int(item.get("id",0) or 0),
+                str(item.get("status") or ""),
+                str(item.get("category") or item.get("title") or ""),
+                str(item.get("priority") or ""),
+                str(item.get("assigned_to") or ""),
+                str(item.get("created_at") or ""),
+                str(item.get("updated_at") or ""),
+                str(item.get("description") or item.get("problem") or ""),
+            ])
+        self.csv_bytes_response(("﻿" + stream.getvalue()).encode("utf-8"), "tickets.csv")
+
+    def _get_admin_system(self, query) -> None:
+        self.html_response(render_admin_system(query))
+
+    def _get_api_admin_contact_search(self, query) -> None:
+        search_raw = query.get("q", [""])[0]
+        self.json_response({"rows_html": discovered_contact_rows(search_raw, 80)})
+
+    def _get_admin_groups(self, query) -> None:
+        self.html_response(render_groups(query, True))
+
+    def _get_to_admin_home(self, query) -> None:
+        self.redirect("/admin/")
 
     def do_POST(self) -> None:
         queue_auth.clear_current_user()
@@ -1993,6 +2011,74 @@ class QueueHTTPHandlerMixin:
             return
         ticket_id = app.STORE.create_ticket(manual_payload)
         self.redirect(f"/ticket?id={ticket_id}")
+
+    # signed-in, before feature modules
+    EARLY_GET_ROUTES = {
+        "/search": _get_search,
+        "/bookmarks": _get_bookmarks,
+        "/api/message-bookmarks": _get_api_message_bookmarks,
+        "/api/bookmarks": _get_api_message_bookmarks,
+        "/api/global-search": _get_api_global_search,
+        "/api/account-preferences": _get_api_account_preferences,
+        "/api/realtime-wait": _get_api_realtime_wait,
+    }
+
+    # after feature modules; administrators only (others are sent to /admin/login)
+    ADMIN_GET_ROUTES = {
+        "/admin": _get_admin_home,
+        "/admin/": _get_admin_home,
+        "/admin/users": _get_admin_users,
+        "/admin/employees": _get_admin_employees,
+        "/admin/manual": _get_admin_manual,
+        "/admin/menu": _get_admin_menu,
+        "/admin/categories": _get_admin_categories,
+        "/admin/errors": _get_admin_errors,
+        "/admin/error": _get_admin_error,
+        "/admin/contacts": _get_admin_contacts,
+        "/admin/audit": _get_admin_audit,
+        "/admin/analytics": _get_admin_analytics,
+        "/admin/manager": _get_admin_manager,
+        "/admin/api-keys": _get_admin_api_keys,
+        "/admin/tickets-export.csv": _get_admin_tickets_export,
+        "/admin/system": _get_admin_system,
+        "/api/admin/contact-search": _get_api_admin_contact_search,
+        "/admin/groups": _get_admin_groups,
+        "/admin/whatsapp": _get_to_admin_home,
+        "/api/admin/connector-state": _get_connector_state,
+        "/qr": _get_to_admin_home,
+    }
+
+    # after feature modules; public paths are listed in do_GET
+    GET_ROUTES = {
+        "/login": _get_login,
+        "/accounts": _get_accounts,
+        "/register": _get_register,
+        "/forgot-password": _get_forgot_password,
+        "/setup": _get_setup,
+        "/logout": _get_logout,
+        "/account": _get_account,
+        "/me": _get_me,
+        "/": _get_dashboard,
+        "/admin/login": _get_admin_login,
+        "/admin/logout": _get_admin_logout,
+        "/ticket": _get_ticket,
+        "/whatsapp": _get_whatsapp,
+        "/groups": _get_groups,
+        "/api/integration/ping": _get_api_integration_ping,
+        "/api/integration/tickets": _get_api_integration_tickets,
+        "/api/dashboard-data": _get_api_dashboard_data,
+        "/api/chat-state": _get_api_chat_state,
+        "/api/group-state": _get_api_group_state,
+        "/api/chat-history": _get_api_chat_history,
+        "/api/message-window": _get_api_message_window,
+        "/api/chat-action-status": _get_api_chat_action_status,
+        "/api/notifications": _get_api_notifications,
+        "/api/conversation-users": _get_api_conversation_users,
+        "/api/chat-media": _get_api_chat_media,
+        "/favicon.ico": _get_favicon,
+        "/health/connector": _get_connector_state,
+        "/health": _get_health,
+    }
 
     # before sign-in
     PUBLIC_POST_ROUTES = {
