@@ -66,8 +66,7 @@ from queue_feature_http import FeatureRoutes
 APP_VERSION = "v143"
 
 # Modules split out of app.py read shared services and settings as app.NAME.
-for _module in (queue_whatsapp_handlers, queue_http_handler):
-    _module.bind(sys.modules[__name__])
+queue_whatsapp_handlers.bind(sys.modules[__name__])
 
 
 ROOT =Path(__file__).resolve().parent
@@ -1257,6 +1256,19 @@ ADMIN_PAGES = AdminPages(AdminPageDependencies(
     reporting=REPORTING, runtime=RUNTIME, avatars=AVATARS, employees=EMPLOYEES, max_employees=MAX_EMPLOYEES,
     local_mode=LOCAL_MODE, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, csrf_token=csrf_token, admin_layout=admin_layout,
 ))
+HTTP_DEPENDENCIES = queue_http_handler.HttpDependencies(
+    store=STORE, auth=AUTH, root=ROOT, media_dir=MEDIA_DIR, monitor_log_path=MONITOR_LOG_PATH, avatars=AVATARS,
+    menu_config=MENU_CONFIG, reliability=RELIABILITY, categories=CATEGORIES, employees=EMPLOYEES,
+    max_employees=MAX_EMPLOYEES, page_size=PAGE_SIZE, local_mode=LOCAL_MODE, app_version=APP_VERSION,
+    webhook_token=WEBHOOK_TOKEN, reaction_emojis=REACTION_EMOJIS, admin_user=ADMIN_USER,
+    admin_session_token=ADMIN_SESSION_TOKEN, admin_session_cookie=ADMIN_SESSION_COOKIE,
+    admin_session_max_age=ADMIN_SESSION_MAX_AGE, auth_session_cookie=AUTH_SESSION_COOKIE,
+    auth_session_max_age=AUTH_SESSION_MAX_AGE, csrf_token=csrf_token, csrf_token_valid=csrf_token_valid,
+    render_login=render_login, render_register=render_register, render_forgot_password=render_forgot_password,
+    render_local_setup=render_local_setup, render_account=render_account, render_admin_users=render_admin_users,
+    final_ticket_filter=_final_ticket_filter, update_ticket_status=update_ticket_status,
+    set_chat_favorite=set_chat_favorite, create_scheduled_backup=create_scheduled_backup,
+)
 
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
@@ -1271,6 +1283,7 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
     chat_views = CHAT_VIEWS
     ticket_views = TICKET_VIEWS
     admin_pages = ADMIN_PAGES
+    deps = HTTP_DEPENDENCIES
     server_version = "UnifiedQueue/1.00.1"
 
     def _generic_domain_path(self):
