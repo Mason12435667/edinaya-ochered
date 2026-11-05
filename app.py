@@ -33,7 +33,6 @@ import queue_reporting
 import queue_realtime
 import queue_auth_views
 import queue_admin_views
-import queue_chat_state
 import queue_whatsapp_handlers
 import queue_http_handler
 import queue_ticket_service
@@ -56,6 +55,7 @@ from queue_contact_profiles import ContactProfiles
 from queue_inbound_service import InboundDependencies, InboundService
 from queue_attachment_archive import AttachmentArchive
 from queue_outbound_service import OutboundService
+from queue_chat_state import ChatViews, ConnectorState
 from queue_stale_menu import StaleMenuRecovery
 from queue_productivity_http import ProductivityRoutes
 from queue_reliability_http import ReliabilityRoutes
@@ -66,8 +66,7 @@ from queue_feature_http import FeatureRoutes
 APP_VERSION = "v143"
 
 # Modules split out of app.py read shared services and settings as app.NAME.
-for _module in (queue_chat_state, queue_ticket_views, queue_admin_pages,
-                queue_whatsapp_handlers, queue_http_handler):
+for _module in (queue_ticket_views, queue_admin_pages, queue_whatsapp_handlers, queue_http_handler):
     _module.bind(sys.modules[__name__])
 
 
@@ -1080,26 +1079,16 @@ READ_MARK_LOCK = threading.Lock()
 READ_MARKED_AT: dict[str, float] = {}
 
 
-# 1.00.6.29: chat state/snapshot logic moved out of app.py.
-lock_owned_by_current_user = queue_chat_state.lock_owned_by_current_user
-conversation_lock_snapshot = queue_chat_state.conversation_lock_snapshot
-flexible_contact_match = queue_chat_state.flexible_contact_match
-whatsapp_display_name = queue_chat_state.whatsapp_display_name
-pending_context_category = queue_chat_state.pending_context_category
-dedupe_whatsapp_messages = queue_chat_state.dedupe_whatsapp_messages
-latest_deleted_chat_previews = queue_chat_state.latest_deleted_chat_previews
-apply_deleted_preview_override = queue_chat_state.apply_deleted_preview_override
-forward_targets_snapshot = queue_chat_state.forward_targets_snapshot
-display_names = queue_chat_state.display_names
-_group_preview_mention_map = queue_chat_state._group_preview_mention_map
-_latest_group_preview_mentions = queue_chat_state._latest_group_preview_mentions
-humanize_group_preview_mentions = queue_chat_state.humanize_group_preview_mentions
-enrich_chat_list = queue_chat_state.enrich_chat_list
-chat_state_snapshot = queue_chat_state.chat_state_snapshot
-group_state_snapshot = queue_chat_state.group_state_snapshot
-connector_state_snapshot = queue_chat_state.connector_state_snapshot
-_decorate_notification_event = queue_chat_state._decorate_notification_event
-notifications_snapshot = queue_chat_state.notifications_snapshot
+# ReliabilityMonitor reads the connector state and ChatViews reads its alerts: this order has no cycle.
+CONNECTOR_STATE = ConnectorState(CHAT_LOCK, CHAT_STATE)
+connector_state_snapshot = CONNECTOR_STATE.snapshot
+RELIABILITY = queue_reliability.ReliabilityMonitor(STORE, DATA_DIR, DATABASE_PATH, ROOT, connector_state_snapshot,
+                                                   ticket_sla_state, MAX_MEDIA_BYTES)
+CHAT_VIEWS = ChatViews(STORE, AUTH, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, connector=CONNECTOR_STATE,
+                       reliability=RELIABILITY, avatars=AVATARS, categories=CATEGORIES,
+                       database_path=DATABASE_PATH, data_dir=DATA_DIR, favorite_chat_ids=favorite_chat_ids,
+                       decorate_chat_messages=decorate_chat_messages)
+display_names = CHAT_VIEWS.display_names
 
 
 # Ticket views retain their existing interface.
@@ -1284,8 +1273,6 @@ INBOUND_SERVICE = InboundService(InboundDependencies(
 ATTACHMENTS = AttachmentArchive(STORE, MEDIA_DIR, OUTBOUND_MEDIA_DIR, UPLOADS.root)
 OUTBOUND_SERVICE = OutboundService(STORE, ATTACHMENTS, queue_realtime, global_auto_reply_enabled)
 STALE_MENU = StaleMenuRecovery(STORE, MENU, CONTACTS, queue_realtime, global_auto_reply_enabled)
-RELIABILITY = queue_reliability.ReliabilityMonitor(STORE, DATA_DIR, DATABASE_PATH, ROOT, connector_state_snapshot,
-                                                   ticket_sla_state, MAX_MEDIA_BYTES)
 PRODUCTIVITY_ROUTES = ProductivityRoutes(STORE, DATA_DIR, DATABASE_PATH, csrf_token=csrf_token, layout=layout,
                                          admin_layout=admin_layout, category_items=active_ticket_category_items,
                                          active_employee=active_employee)
@@ -1310,6 +1297,7 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
     reliability_routes = RELIABILITY_ROUTES
     feature_routes = FEATURE_ROUTES
     upload_routes = UPLOAD_ROUTES
+    chat_views = CHAT_VIEWS
     server_version = "UnifiedQueue/1.00.1"
 
     def _generic_domain_path(self):

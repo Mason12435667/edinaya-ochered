@@ -25,7 +25,6 @@ import queue_reliability
 import queue_ticket_views
 import queue_workflow
 from queue_admin_pages import discovered_contact_rows, render_admin_analytics_final, render_admin_api_keys, render_admin_audit, render_admin_categories, render_admin_contacts, render_admin_employees, render_admin_error, render_admin_errors, render_admin_home, render_admin_manager_dashboard, render_admin_manual, render_admin_menu, render_admin_system
-from queue_chat_state import chat_state_snapshot, connector_state_snapshot, conversation_lock_snapshot, group_state_snapshot, notifications_snapshot
 from queue_chat_views import render_groups, render_whatsapp
 from queue_core import content_disposition_header, display_phone, log_suppressed, normalize_message, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
 from queue_ticket_views import render_dashboard, render_my_page, render_ticket
@@ -179,7 +178,7 @@ def merge_chat_alias_rows(state: dict[str, object]) -> None:
             for target in raw_targets:
                 if not isinstance(target, dict):
                     continue
-                raw_id = valid_chat_id(str(target.get("id", "")))
+                raw_id = valid_conversation_id(str(target.get("id", "")))
                 if not raw_id:
                     continue
                 canonical_id = app.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
@@ -580,7 +579,7 @@ class QueueHTTPHandlerMixin:
                 "queued": False,
                 "error": "conversation_locked",
                 "message": f"Диалог уже ведёт {owner_name}. Доступен только просмотр.",
-                "conversation_lock": conversation_lock_snapshot(chat_id),
+                "conversation_lock": self.chat_views.conversation_lock_snapshot(chat_id),
             },
             HTTPStatus.LOCKED,
         )
@@ -813,7 +812,7 @@ class QueueHTTPHandlerMixin:
         self.handle_dashboard_data(query)
 
     def _get_api_chat_state(self, query) -> None:
-        state = chat_state_snapshot(
+        state = self.chat_views.chat_state_snapshot(
             query.get("chat_id", [""])[0],
             query.get("read", ["0"])[0] == "1",
         )
@@ -822,7 +821,7 @@ class QueueHTTPHandlerMixin:
         self.json_response(state)
 
     def _get_api_group_state(self, query) -> None:
-        self.json_response(group_state_snapshot(query.get("chat_id", [""])[0], query.get("read", ["0"])[0] == "1"))
+        self.json_response(self.chat_views.group_state_snapshot(query.get("chat_id", [""])[0], query.get("read", ["0"])[0] == "1"))
 
     def _get_api_chat_history(self, query) -> None:
         self.handle_chat_history(query)
@@ -833,7 +832,7 @@ class QueueHTTPHandlerMixin:
         self.json_response({"found": bool(action), "action": action or {}})
 
     def _get_api_notifications(self, query) -> None:
-        self.json_response(notifications_snapshot())
+        self.json_response(self.chat_views.notifications_snapshot())
 
     def _get_api_conversation_users(self, query) -> None:
         users=[]
@@ -855,7 +854,7 @@ class QueueHTTPHandlerMixin:
         self.file_response(app.ROOT / "static" / "favicon.png", "image/png")
 
     def _get_connector_state(self, query) -> None:
-        self.json_response(connector_state_snapshot())
+        self.json_response(self.chat_views.connector.snapshot())
 
     def _get_health(self, query) -> None:
         self.json_response({"status": "ok"})
@@ -1141,7 +1140,7 @@ class QueueHTTPHandlerMixin:
                 self.json_response({"ok":True,"dismissed":1})
                 return
             if action == "dismiss_all":
-                snapshot = notifications_snapshot()
+                snapshot = self.chat_views.notifications_snapshot()
                 ids = [str(item.get("id") or item.get("event_id") or "") for item in snapshot.get("events",[]) if isinstance(item,dict)]
                 count = queue_reliability.dismiss_notifications(app.STORE, ids)
                 self.json_response({"ok":True,"dismissed":count})
@@ -1309,7 +1308,7 @@ class QueueHTTPHandlerMixin:
             ok, _lock = app.AUTH.claim_conversation(
                 chat_id, "group" if chat_id.endswith("@g.us") else "chat", user, display_name=work_actor()
             )
-            state = conversation_lock_snapshot(chat_id)
+            state = self.chat_views.conversation_lock_snapshot(chat_id)
             if ok:
                 app.AUTH.record_audit(user, "conversation_claim", object_type="group" if chat_id.endswith("@g.us") else "chat", object_id=chat_id, details=work_actor())
                 queue_realtime.notify_outbound()
@@ -1322,7 +1321,7 @@ class QueueHTTPHandlerMixin:
             if ok:
                 app.AUTH.record_audit(user, "conversation_release", object_type="group" if chat_id.endswith("@g.us") else "chat", object_id=chat_id, details=message)
                 queue_realtime.notify_outbound()
-            self.json_response({"updated": ok, "message": message, "conversation_lock": conversation_lock_snapshot(chat_id)}, HTTPStatus.OK if ok else HTTPStatus.LOCKED)
+            self.json_response({"updated": ok, "message": message, "conversation_lock": self.chat_views.conversation_lock_snapshot(chat_id)}, HTTPStatus.OK if ok else HTTPStatus.LOCKED)
             return
         if action == "transfer":
             try:
@@ -1342,7 +1341,7 @@ class QueueHTTPHandlerMixin:
             if ok:
                 app.AUTH.record_audit(user, "conversation_transfer", object_type="group" if chat_id.endswith("@g.us") else "chat", object_id=chat_id, details=f"Передано user_id={target_user_id}")
                 queue_realtime.notify_outbound()
-            self.json_response({"updated": ok, "message": message, "conversation_lock": conversation_lock_snapshot(chat_id)}, HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST)
+            self.json_response({"updated": ok, "message": message, "conversation_lock": self.chat_views.conversation_lock_snapshot(chat_id)}, HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST)
             return
         self.json_response({"updated": False, "error": "Неизвестное действие блокировки"}, HTTPStatus.BAD_REQUEST)
 

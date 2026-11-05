@@ -97,7 +97,8 @@ class ServiceTests(unittest.TestCase):
     def test_services_import_without_initializing_application(self):
         result = subprocess.run([sys.executable, "-c",
             "import sys, queue_inbound_service, queue_outbound_service, queue_stale_menu, queue_reliability, "
-            "queue_productivity_http, queue_reliability_http, queue_workflow_http, queue_feature_http, queue_uploads; "
+            "queue_productivity_http, queue_reliability_http, queue_workflow_http, queue_feature_http, queue_uploads, "
+            "queue_chat_state; "
             "assert 'app' not in sys.modules"],
             cwd=Path(__file__).resolve().parents[1], env={k:v for k,v in os.environ.items() if k != 'WEBHOOK_TOKEN'},
             capture_output=True, text=True)
