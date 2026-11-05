@@ -147,7 +147,7 @@ test('only a missing forward module allows a resend', () => {
 test('a text is resent once and marked as forwarded', async () => {
   const sent = [];
   const client = fakeClient((target, content, options) => { sent.push({content, options}); return {id: 'ok'}; });
-  const outcome = await delivery.resendAsForward({client, message: {}, target: 'a@c.us', text: 'hi'});
+  const outcome = await delivery.resendAsForward({client, target: 'a@c.us', text: 'hi'});
   assert.equal(outcome.status, 'sent');
   assert.deepEqual(client.calls, ['a@c.us']);
   assert.equal(sent[0].content, 'hi');
@@ -158,8 +158,9 @@ test('media is downloaded and resent with its caption', async () => {
   const media = {mimetype: 'image/png'};
   const sent = [];
   const client = fakeClient((target, content, options) => { sent.push({content, options}); return {id: 'ok'}; });
-  const message = {hasMedia: true, type: 'document', downloadMedia: async () => media};
-  await delivery.resendAsForward({client, message, target: 'a@c.us', text: 'cap'});
+  await delivery.resendAsForward({
+    client, hasMedia: true, type: 'document', download: async () => media, target: 'a@c.us', text: 'cap',
+  });
   assert.equal(sent[0].content, media);
   assert.equal(sent[0].options.caption, 'cap');
   assert.equal(sent[0].options.sendMediaAsDocument, true);
@@ -167,9 +168,9 @@ test('media is downloaded and resent with its caption', async () => {
 
 test('nothing is sent when there is no content to forward', async () => {
   const client = fakeClient(() => ({id: 'ok'}));
-  await assert.rejects(delivery.resendAsForward({client, message: {}, target: 'a@c.us', text: ''}), /нет текста/);
+  await assert.rejects(delivery.resendAsForward({client, target: 'a@c.us', text: ''}), /нет текста/);
   await assert.rejects(delivery.resendAsForward({
-    client, message: {hasMedia: true, downloadMedia: async () => undefined}, target: 'a@c.us', text: '',
+    client, hasMedia: true, download: async () => null, target: 'a@c.us', text: '',
   }), /вложение/);
   assert.deepEqual(client.calls, []);
 });

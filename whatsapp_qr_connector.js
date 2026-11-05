@@ -3957,18 +3957,30 @@ async function directForwardInWhatsApp(messageKey, sourceChatId, targetChatId, h
       }
     }
     if (!msg) return { ok: false, reason: 'not_found' };
+    if (!window.require('WAWebChatForwardMessage')?.forwardMessages) return { ok: false, reason: 'forward_unavailable' };
     await window.WWebJS.forwardMessage(target, widText(msg.id));
     return { ok: true, id: widText(msg.id) };
   }, String(messageKey || ''), aliases, String(targetChatId || ''), payload);
 }
 
+// Message.downloadMedia() fails with a short error on current WhatsApp Web, so the
+// direct download goes first, as attachMediaToItem() ends up doing.
+async function downloadForResend(message) {
+  const id = normalizeMessageIdObject(message);
+  const media = await downloadMediaDirectById(id)
+    || await Promise.resolve().then(() => message.downloadMedia()).catch(() => null);
+  if (!media || !media.data) return null;
+  return new MessageMedia(media.mimetype, media.data, media.filename || null, media.filesize || undefined);
+}
+
 async function forwardByResend(message, target, actor) {
   const text = String(incomingText(message) || '').trim();
-  const hasMedia = Boolean(message.hasMedia);
-  normalizeMessageIdObject(message); // downloadMedia() needs id._serialized
+  const type = String(message.type || '');
+  const hasMedia = Boolean(message.hasMedia) || ['image', 'video', 'audio', 'ptt', 'document', 'sticker'].includes(type);
   const since = sendStartSeconds();
   const outcome = await delivery.resendAsForward({
-    client, message, target, text,
+    client, type, hasMedia, target, text,
+    download: () => downloadForResend(message),
     confirm: () => confirmSentMessage([target], text, hasMedia, since),
   });
   if (outcome.status !== 'sent') throw new Error(outcome.error);
@@ -4094,7 +4106,7 @@ async function pollWhatsappAction() {
           throw new Error('Исходное сообщение не найдено в активной сессии WhatsApp Web');
         }
         if (typeof message.forward !== 'function') throw new Error('Текущая версия WhatsApp не поддерживает пересылку');
-        if (delivery.isForwardUnavailable(directError)) {
+        if ((directResult && directResult.reason === 'forward_unavailable') || delivery.isForwardUnavailable(directError)) {
           await forwardByResend(message, target, String(queued.actor || 'Вы'));
         } else {
           try {
@@ -4122,7 +4134,9 @@ async function pollWhatsappAction() {
     console.log(`Действие ${queued.action_type} для сообщения выполнено.`);
   } catch (error) {
     const rawReason = String((error && error.message) || error || 'Ошибка');
-    const reason = rawReason.length < 4 ? delivery.editError({reason:'unavailable'}) : rawReason;
+    const shortReason = queued && queued.action_type === 'forward'
+      ? 'Не удалось переслать сообщение в WhatsApp' : delivery.editError({reason:'unavailable'});
+    const reason = rawReason.length < 4 ? shortReason : rawReason;
     if (queued && queued.id) {
       try {
         await postJson('/api/whatsapp-action/result', {
@@ -4132,7 +4146,7 @@ async function pollWhatsappAction() {
         });
       } catch (_) {}
     }
-    if (queued) console.warn('Не удалось изменить сообщение WhatsApp:', reason);
+    if (queued) console.warn(`Не удалось выполнить действие ${queued.action_type} в WhatsApp:`, reason, rawReason === reason ? '' : `(${rawReason})`);
   }
 }
 

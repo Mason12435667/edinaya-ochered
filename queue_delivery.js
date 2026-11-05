@@ -83,14 +83,14 @@ function isForwardUnavailable(error) {
 
 // Sends a copy of the message marked as forwarded. Use it only when
 // isForwardUnavailable(): after any other error the original may have gone out.
-async function resendAsForward({client, message, target, text, confirm}) {
+async function resendAsForward({client, type, hasMedia, download, target, text, confirm}) {
   const options = {extra: {isForwarded: true, forwardingScore: 1}};
   let content = text;
-  if (message.hasMedia) {
-    content = await message.downloadMedia();
+  if (hasMedia) {
+    content = await download();
     if (!content) throw new Error('Не удалось загрузить вложение для пересылки');
     if (text) options.caption = text;
-    if (message.type === 'document') options.sendMediaAsDocument = true;
+    if (type === 'document') options.sendMediaAsDocument = true;
   }
   if (!content) throw new Error('В сообщении нет текста для пересылки');
   return sendOnce({client, recipient: target, content, options, begin: async () => true, confirm});
