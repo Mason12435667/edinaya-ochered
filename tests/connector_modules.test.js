@@ -138,6 +138,42 @@ test('findSentMessage tells media from text', () => {
   assert.equal(delivery.findSentMessage([photo], lookup({text: 'hi', hasMedia: false})), null, 'media is not text');
 });
 
+test('only a missing forward module allows a resend', () => {
+  assert.ok(delivery.isForwardUnavailable(new Error("Cannot read properties of undefined (reading 'forwardMessages')")));
+  assert.equal(delivery.isForwardUnavailable(new Error('Protocol error: Target closed')), false);
+  assert.equal(delivery.isForwardUnavailable(null), false);
+});
+
+test('a text is resent once and marked as forwarded', async () => {
+  const sent = [];
+  const client = fakeClient((target, content, options) => { sent.push({content, options}); return {id: 'ok'}; });
+  const outcome = await delivery.resendAsForward({client, message: {}, target: 'a@c.us', text: 'hi'});
+  assert.equal(outcome.status, 'sent');
+  assert.deepEqual(client.calls, ['a@c.us']);
+  assert.equal(sent[0].content, 'hi');
+  assert.deepEqual(sent[0].options.extra, {isForwarded: true, forwardingScore: 1});
+});
+
+test('media is downloaded and resent with its caption', async () => {
+  const media = {mimetype: 'image/png'};
+  const sent = [];
+  const client = fakeClient((target, content, options) => { sent.push({content, options}); return {id: 'ok'}; });
+  const message = {hasMedia: true, type: 'document', downloadMedia: async () => media};
+  await delivery.resendAsForward({client, message, target: 'a@c.us', text: 'cap'});
+  assert.equal(sent[0].content, media);
+  assert.equal(sent[0].options.caption, 'cap');
+  assert.equal(sent[0].options.sendMediaAsDocument, true);
+});
+
+test('nothing is sent when there is no content to forward', async () => {
+  const client = fakeClient(() => ({id: 'ok'}));
+  await assert.rejects(delivery.resendAsForward({client, message: {}, target: 'a@c.us', text: ''}), /нет текста/);
+  await assert.rejects(delivery.resendAsForward({
+    client, message: {hasMedia: true, downloadMedia: async () => undefined}, target: 'a@c.us', text: '',
+  }), /вложение/);
+  assert.deepEqual(client.calls, []);
+});
+
 test('editError gives a readable reason', () => {
   assert.match(delivery.editError({reason: 'not_found'}), /не найдено/);
   assert.match(delivery.editError({}), /Не удалось/);

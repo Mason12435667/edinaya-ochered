@@ -3952,6 +3952,29 @@ async function directForwardInWhatsApp(messageKey, sourceChatId, targetChatId, h
   }, String(messageKey || ''), aliases, String(targetChatId || ''), payload);
 }
 
+async function forwardByResend(message, target, actor) {
+  const text = String(incomingText(message) || '').trim();
+  const hasMedia = Boolean(message.hasMedia);
+  normalizeMessageIdObject(message); // downloadMedia() needs id._serialized
+  const since = sendStartSeconds();
+  const outcome = await delivery.resendAsForward({
+    client, message, target, text,
+    confirm: () => confirmSentMessage([target], text, hasMedia, since),
+  });
+  if (outcome.status !== 'sent') throw new Error(outcome.error);
+  rememberForwardedMessage(outcome.message);
+  if (hasMedia) return; // reserve sync saves it together with the attachment
+  const id = rememberInternalOutgoingMessage(outcome.message);
+  await postJson('/api/chat-messages-sync', {
+    chat_id: target,
+    append: true,
+    messages: [{
+      id, from_me: true, sender: actor, body: text, type: 'chat', ack: 1, notify: false, forwarded: true,
+      timestamp: Number(outcome.message.timestamp || Math.floor(Date.now() / 1000)),
+    }],
+  });
+}
+
 async function deleteMessageReliably(messageKey, chatId, hint, initialMessage) {
   let directError = null;
   try {
@@ -4061,11 +4084,19 @@ async function pollWhatsappAction() {
           throw new Error('Исходное сообщение не найдено в активной сессии WhatsApp Web');
         }
         if (typeof message.forward !== 'function') throw new Error('Текущая версия WhatsApp не поддерживает пересылку');
-        try {
-          await message.forward(target);
-        } catch (firstError) {
-          if (!targetRaw || targetRaw === target) throw firstError;
-          await message.forward(targetRaw);
+        if (delivery.isForwardUnavailable(directError)) {
+          await forwardByResend(message, target, String(queued.actor || 'Вы'));
+        } else {
+          try {
+            await message.forward(target);
+          } catch (firstError) {
+            if (delivery.isForwardUnavailable(firstError)) {
+              await forwardByResend(message, target, String(queued.actor || 'Вы'));
+            } else {
+              if (!targetRaw || targetRaw === target) throw firstError;
+              await message.forward(targetRaw);
+            }
+          }
         }
       }
       // forward() in whatsapp-web.js returns void in current releases. The

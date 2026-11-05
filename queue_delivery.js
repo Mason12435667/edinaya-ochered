@@ -73,6 +73,29 @@ async function sendOnce({client, recipient, aliases = [], content, options = {},
   return {status: 'failed', error: 'WhatsApp не принял ни один адрес получателя', detail: errorText(lastError)};
 }
 
+// whatsapp-web.js forwards through a WhatsApp Web module that now loads only when
+// a person opens the forward dialog. This error means nothing was sent.
+const FORWARD_UNAVAILABLE = /reading 'forwardMessages'|WAWebChatForwardMessage/;
+
+function isForwardUnavailable(error) {
+  return FORWARD_UNAVAILABLE.test(errorText(error));
+}
+
+// Sends a copy of the message marked as forwarded. Use it only when
+// isForwardUnavailable(): after any other error the original may have gone out.
+async function resendAsForward({client, message, target, text, confirm}) {
+  const options = {extra: {isForwarded: true, forwardingScore: 1}};
+  let content = text;
+  if (message.hasMedia) {
+    content = await message.downloadMedia();
+    if (!content) throw new Error('Не удалось загрузить вложение для пересылки');
+    if (text) options.caption = text;
+    if (message.type === 'document') options.sendMediaAsDocument = true;
+  }
+  if (!content) throw new Error('В сообщении нет текста для пересылки');
+  return sendOnce({client, recipient: target, content, options, begin: async () => true, confirm});
+}
+
 // Runs inside the WhatsApp Web page (client.pupPage.evaluate), so it may only use
 // browser globals. Mirrors whatsapp-web.js Message.edit() with feature checks.
 async function editInPage(messageKey, body, aliases) {
@@ -106,4 +129,4 @@ function editError(result) {
   return reasons[result && result.reason] || 'Не удалось изменить сообщение в WhatsApp';
 }
 
-module.exports = {waitForValue, findSentMessage, sendOnce, editInPage, editError, PRE_SEND_ERROR};
+module.exports = {isForwardUnavailable, resendAsForward, waitForValue, findSentMessage, sendOnce, editInPage, editError, PRE_SEND_ERROR};
