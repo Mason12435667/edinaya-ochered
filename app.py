@@ -37,7 +37,6 @@ import queue_whatsapp_handlers
 import queue_http_handler
 import queue_ticket_service
 import queue_work_context
-import queue_ticket_views
 import queue_admin_pages
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
@@ -56,6 +55,7 @@ from queue_inbound_service import InboundDependencies, InboundService
 from queue_attachment_archive import AttachmentArchive
 from queue_outbound_service import OutboundService
 from queue_chat_state import ChatViews, ConnectorState
+from queue_ticket_views import TicketViews
 from queue_stale_menu import StaleMenuRecovery
 from queue_productivity_http import ProductivityRoutes
 from queue_reliability_http import ReliabilityRoutes
@@ -66,7 +66,7 @@ from queue_feature_http import FeatureRoutes
 APP_VERSION = "v143"
 
 # Modules split out of app.py read shared services and settings as app.NAME.
-for _module in (queue_ticket_views, queue_admin_pages, queue_whatsapp_handlers, queue_http_handler):
+for _module in (queue_admin_pages, queue_whatsapp_handlers, queue_http_handler):
     _module.bind(sys.modules[__name__])
 
 
@@ -1091,11 +1091,9 @@ CHAT_VIEWS = ChatViews(STORE, AUTH, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, 
 display_names = CHAT_VIEWS.display_names
 
 
-# Ticket views retain their existing interface.
-layout = queue_ticket_views.layout
-render_dashboard = queue_ticket_views.render_dashboard
-render_ticket = queue_ticket_views.render_ticket
-render_my_page = queue_ticket_views.render_my_page
+TICKET_VIEWS = TicketViews(STORE, AUTH, csrf_token=csrf_token, categories=CATEGORIES,
+                           local_mode=LOCAL_MODE, page_size=PAGE_SIZE)
+layout = TICKET_VIEWS.layout
 
 
 
@@ -1298,6 +1296,7 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
     feature_routes = FEATURE_ROUTES
     upload_routes = UPLOAD_ROUTES
     chat_views = CHAT_VIEWS
+    ticket_views = TICKET_VIEWS
     server_version = "UnifiedQueue/1.00.1"
 
     def _generic_domain_path(self):

@@ -27,7 +27,6 @@ import queue_workflow
 from queue_admin_pages import discovered_contact_rows, render_admin_analytics_final, render_admin_api_keys, render_admin_audit, render_admin_categories, render_admin_contacts, render_admin_employees, render_admin_error, render_admin_errors, render_admin_home, render_admin_manager_dashboard, render_admin_manual, render_admin_menu, render_admin_system
 from queue_chat_views import render_groups, render_whatsapp
 from queue_core import content_disposition_header, display_phone, log_suppressed, normalize_message, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
-from queue_ticket_views import render_dashboard, render_my_page, render_ticket
 from queue_work_context import active_employee, assignment_names, audit_admin_form_submission, query_page, render_pagination, render_ticket_rows, work_actor
 
 # Application module (app.py): shared services, settings and helpers it defines.
@@ -727,7 +726,7 @@ class QueueHTTPHandlerMixin:
 
     def _get_accounts(self, query) -> None:
         sessions = self.saved_account_sessions(touch=False)
-        self.html_response(queue_ticket_views.render_account_switcher(query, self.is_admin(), sessions, self.current_auth_slot()))
+        self.html_response(self.ticket_views.render_account_switcher(query, self.is_admin(), sessions, self.current_auth_slot()))
 
     def _get_register(self, query) -> None:
         status = HTTPStatus.OK if queue_auth.self_registration_enabled() else HTTPStatus.FORBIDDEN
@@ -756,10 +755,10 @@ class QueueHTTPHandlerMixin:
             self.redirect("/")
 
     def _get_me(self, query) -> None:
-        self.html_response(render_my_page(query, self.is_admin()))
+        self.html_response(self.ticket_views.render_my_page(query, self.is_admin()))
 
     def _get_dashboard(self, query) -> None:
-        self.html_response(render_dashboard(query, self.is_admin()))
+        self.html_response(self.ticket_views.render_dashboard(query, self.is_admin()))
 
     def _get_admin_login(self, query) -> None:
         if self.authenticated_user().casefold() != app.ADMIN_USER:
@@ -771,13 +770,14 @@ class QueueHTTPHandlerMixin:
         self.end_admin_session()
 
     def _get_ticket(self, query) -> None:
-        self.html_response(render_ticket(self.query_int(query, "id"), query, self.is_admin()))
+        self.html_response(self.ticket_views.render_ticket(self.query_int(query, "id"), query, self.is_admin()))
 
     def _get_whatsapp(self, query) -> None:
-        self.html_response(render_whatsapp(query, self.is_admin()))
+        self.html_response(render_whatsapp(query, self.is_admin(), layout=self.ticket_views.layout))
 
     def _get_groups(self, query) -> None:
-        self.html_response(render_groups(query, self.is_admin(), store=app.STORE, csrf_token=app.csrf_token))
+        self.html_response(render_groups(query, self.is_admin(), store=app.STORE, csrf_token=app.csrf_token,
+                                         layout=self.ticket_views.layout))
 
     def _get_api_integration_ping(self, query) -> None:
         key = self.integration_api_key()
@@ -924,7 +924,8 @@ class QueueHTTPHandlerMixin:
         self.json_response({"rows_html": discovered_contact_rows(search_raw, 80)})
 
     def _get_admin_groups(self, query) -> None:
-        self.html_response(render_groups(query, True, store=app.STORE, csrf_token=app.csrf_token))
+        self.html_response(render_groups(query, True, store=app.STORE, csrf_token=app.csrf_token,
+                                         layout=self.ticket_views.layout))
 
     def _get_to_admin_home(self, query) -> None:
         self.redirect("/admin/")
