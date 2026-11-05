@@ -179,7 +179,7 @@ def merge_chat_alias_rows(state: dict[str, object]) -> None:
             for target in raw_targets:
                 if not isinstance(target, dict):
                     continue
-                raw_id = valid_chat_id(str(target.get("id", "")))
+                raw_id = valid_conversation_id(str(target.get("id", "")))
                 if not raw_id:
                     continue
                 canonical_id = app.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
