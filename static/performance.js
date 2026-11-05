@@ -39,7 +39,7 @@
   window.UQPerformance107 = {version: VERSION, errorMessage};
 })();
 
-// 3.3.107 reliability/performance diagnostics on the existing admin page.
+// Reliability/performance diagnostics on the existing admin page.
 (() => {
   if (location.pathname !== '/admin/reliability') return;
   const mount = document.querySelector('.reliability-grid');

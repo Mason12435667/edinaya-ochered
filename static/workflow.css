@@ -1,4 +1,4 @@
-/* Единая очередь 3.3.96 - workflow additions only. No legacy rules are replaced. */
+/* workflow additions only. No legacy rules are replaced. */
 .workflow-connection-pill{display:inline-flex;align-items:center;gap:.4rem;padding:.45rem .7rem;border:1px solid var(--border,#25483f);border-radius:999px;font-size:.78rem;font-weight:800;white-space:nowrap;background:rgba(10,28,24,.55)}
 .workflow-connection-pill.ok{color:#45e0b0}.workflow-connection-pill.delay{color:#e9ba66}.workflow-connection-pill.down{color:#ef7c7c}
 .workflow-nav-count{display:inline-grid;place-items:center;min-width:1.2rem;height:1.2rem;margin-left:.35rem;padding:0 .3rem;border-radius:999px;background:#23c994;color:#062019;font-size:.68rem}
@@ -21,7 +21,7 @@
 @media(prefers-reduced-motion:reduce){.workflow-modal,.workflow-recent-card,.workflow-ticket-link{animation:none;transition:none!important}}
 
 
-/* QUEUE_3_3_97_STABLE_TOPBAR: stable one-line desktop header */
+/* Stable one-line desktop header */
 @media (min-width: 1001px) {
   .topbar{
     display:flex!important;

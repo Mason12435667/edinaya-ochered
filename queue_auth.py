@@ -261,7 +261,7 @@ class AuthStore:
                     ON auth_api_keys(enabled, created_at DESC);
                 """
             )
-            # Safe in-place migration for databases created by 1.00.6.15-1.00.6.17.
+            # Safe in-place migration for older databases.
             user_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(app_users)").fetchall()}
             if "employee_name" not in user_columns:
                 connection.execute("ALTER TABLE app_users ADD COLUMN employee_name TEXT NOT NULL DEFAULT ''")

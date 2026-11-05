@@ -1,4 +1,4 @@
-/* Единая очередь 1.00.6.13: application authentication */
+/* application authentication */
 .auth-page {
   margin: 0;
   min-height: 100vh;
@@ -83,7 +83,7 @@
 .auth-links span { color:#527268; }
 .auth-success { margin-top:14px; padding:10px 12px; border:1px solid #2f715b; border-radius:10px; background:#12352b; color:#b9f3db; }
 
-/* 1.00.6.18: auth UI + multi-user read-only state */
+/* Auth UI + multi-user read-only state */
 .auth-brand { position: relative; }
 .auth-theme-toggle {
   margin-left: auto; border: 1px solid rgba(105,215,170,.35); border-radius: 9px;
@@ -124,7 +124,7 @@ html[data-theme="light"] .auth-links a, html[data-theme="light"] .auth-hint a { 
 .chat-composer.is-read-only-lock textarea { cursor:not-allowed; }
 @media (max-width:760px) { .conversation-lock-banner { align-items:flex-start; flex-direction:column; } .conversation-lock-actions { justify-content:flex-start; } }
 
-/* 1.00.6.19: account-driven shift + compact profile menu */
+/* Account-driven shift + compact profile menu */
 .auth-profile-menu { position: relative; }
 .auth-profile-menu > summary { list-style: none; cursor: pointer; }
 .auth-profile-menu > summary::-webkit-details-marker { display: none; }
@@ -147,7 +147,7 @@ html[data-theme="light"] .auth-links a, html[data-theme="light"] .auth-hint a { 
 html[data-theme="light"] .auth-profile-popover { background:#fff; box-shadow:0 18px 46px rgba(28,67,55,.16); }
 html[data-theme="light"] .auth-profile-password input { background:#f7fbf9; color:#17362c; border-color:#c7dcd4; }
 
-/* Global search and bookmarks were intentionally removed in 1.00.6.19. */
+/* Global search and bookmarks were intentionally removed. */
 [data-chat-favorite], [data-favorite-chat], [data-bookmark], [data-bookmark-message],
 .chat-favorite, .chat-favorite-button, .bookmark-button, .message-bookmark { display:none !important; }
 
@@ -157,7 +157,7 @@ html[data-theme="light"] .auth-profile-password input { background:#f7fbf9; colo
 [data-global-search], [data-open-global-search], .global-search-button, .global-search-trigger { display:none !important; }
 
 
-/* 1.00.6.26: compact WhatsApp workspace */
+/* Compact WhatsApp workspace */
 body:has([data-conversation-page]) main.page {
   width: calc(100% - 24px) !important;
   max-width: none;
@@ -213,7 +213,7 @@ body:has([data-conversation-page]) .chat-memory-note { display: none !important;
 }
 
 
-/* 1.00.6.26: arrange chat/group functions like the approved mockup */
+/* Arrange chat/group functions like the approved mockup */
 body:has([data-conversation-page]) .chat-header {
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -285,7 +285,7 @@ body:has([data-conversation-page]) .participants-details[open] .participants-lis
 }
 
 
-/* 1.00.6.26: real DOM toolbar fix + overflow menu */
+/* Real DOM toolbar fix + overflow menu */
 body:has([data-conversation-page]) .chat-header {
   display: grid !important;
   grid-template-columns: minmax(240px, 1fr) auto;
@@ -372,7 +372,7 @@ body:has([data-conversation-page]) .chat-header-actions > .workflow-chat-tools {
 }
 
 
-/* 1.00.6.26 fix2: preserve native JS tool containers to prevent duplicate buttons. */
+/* Preserve native JS tool containers to prevent duplicate buttons. */
 body:has([data-conversation-page]) .chat-header-actions > .productivity-chat-tools {
   display: contents !important;
 }
@@ -393,7 +393,7 @@ body:has([data-conversation-page]) .chat-toolbar-overflow-proxy {
 }
 
 
-/* 1.00.6.26 fix2: push the toolbar fully to the right edge */
+/* Push the toolbar fully to the right edge */
 body:has([data-conversation-page]) .chat-header {
   display: flex !important;
   align-items: flex-start;
@@ -419,7 +419,7 @@ body:has([data-conversation-page]) .chat-header-actions {
 }
 
 
-/* 1.00.6.26 fix1: active sidebar category */
+/* Active sidebar category */
 body:has([data-conversation-page]) .chat-sidebar .queue-filter-active {
   color: #58e4b4;
   border-color: #36d3a0;
@@ -433,7 +433,7 @@ body:has([data-conversation-page]) .chat-sidebar .queue-filter-active:hover {
 }
 
 
-/* 1.00.6.26: auth finalization + personal account page */
+/* Auth finalization + personal account page */
 .auth-page .auth-card { overflow: hidden; }
 .auth-form .auth-field-error, .auth-profile-password .auth-field-error, .auth-create-user .auth-field-error {
   display:block; margin-top:2px; color:#ff9da5; font-size:11px; font-weight:700; line-height:1.35;
@@ -475,11 +475,11 @@ html[data-theme="light"] .auth-create-user .auth-field-error { color:#b33945; }
 }
 
 
-/* 1.00.6.26 final analytics/dashboard/api keys */
+/* Final analytics/dashboard/api keys */
 .analytics-final-filters{margin-bottom:14px}.analytics-final-metrics{grid-template-columns:repeat(5,minmax(140px,1fr))}.manager-kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:12px;margin-bottom:16px}.manager-kpi{padding:18px;display:flex;flex-direction:column;gap:5px}.manager-kpi span,.manager-kpi small{color:var(--muted,#91a09d)}.manager-kpi strong{font-size:1.65rem}.manager-dashboard-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.manager-list{display:flex;flex-direction:column;gap:8px}.manager-load-row,.manager-problem-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border:1px solid rgba(80,210,170,.16);border-radius:12px;background:rgba(10,25,25,.25)}.manager-load-row span{display:flex;flex-direction:column;gap:2px}.api-key-secret code{display:block;padding:14px;border-radius:12px;overflow-wrap:anywhere;user-select:all;background:rgba(0,0,0,.25);border:1px solid rgba(80,210,170,.2)}@media(max-width:1100px){.analytics-final-metrics,.manager-kpi-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}.manager-dashboard-grid{grid-template-columns:1fr}}@media(max-width:650px){.analytics-final-metrics,.manager-kpi-grid{grid-template-columns:1fr}}
 
 
-/* 1.00.6.31 fix4: chat sidebar regression fix. */
+/* Chat sidebar regression fix. */
 body:has([data-conversation-page]) .chat-sidebar {
   grid-template-rows: auto auto auto minmax(0, 1fr);
 }

@@ -53,5 +53,4 @@ Thumbs.db
 *.tar.gz
 *.zip
 /config/company.json
-.eo-generic-backup/
 .private-markers

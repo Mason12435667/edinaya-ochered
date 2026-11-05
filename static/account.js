@@ -39,7 +39,7 @@
     window.setTimeout(() => savePreference('theme', setTheme(document.documentElement.dataset.theme || 'dark')), 80);
   });
 
-  // 1.00.6.26: unified validation for authentication forms.
+  // Unified validation for authentication forms.
   function ensureFieldError(input, message) {
     if (!input) return;
     let node = input.parentElement?.querySelector?.('.auth-field-error');
@@ -279,7 +279,7 @@
 })();
 
 
-// 1.00.6.26 fix2: keep native tool containers intact and expose secondary actions through safe proxy buttons.
+// Keep native tool containers intact and expose secondary actions through safe proxy buttons.
 (() => {
   'use strict';
   const overflowLabels = ['Теги / заметка', 'Выключить автоответчик', 'Включить автоответчик', 'Экспорт', 'Обращения', 'Заявка'];

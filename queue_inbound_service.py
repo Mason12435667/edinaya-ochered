@@ -158,7 +158,6 @@ class _InboundRun:
         state = queue_dialog_flow.load(self.store, key)
         command = text.casefold().strip()
 
-        # EO_GLOBAL_MENU_DIGITS_20260930
         # Exact menu digits are commands, not free-form text.
         # 0 always means "main menu".
         # 1..9 always select the corresponding ENABLED configured category,
@@ -171,7 +170,6 @@ class _InboundRun:
             or (global_menu_digit and global_menu_category)
         )
         if global_menu_command:
-            # EO_STRICT_CATEGORY_SELECTION_20260930
             # A ticket category is armed only by a separate, explicit numeric
             # menu choice. Text written before that choice is never recycled as
             # ticket details.
@@ -369,7 +367,6 @@ class _InboundRun:
         # An operator took over the chat, or auto-replies are blocked for it.
         manual_mode = self.store.manual_chat_mode(msg.chat_id) if msg.chat_id else None
         if manual_mode:
-            # EO_GLOBAL_MENU_DIGITS_20260930:
             # A bot-generated review pause must never trap the user. An exact
             # menu digit immediately returns control to the bot. A pause set by
             # a real employee remains authoritative and is NOT bypassed.
@@ -1020,7 +1017,7 @@ class _InboundRun:
             if msg.chat_id and msg.external_id:
                 self.store.link_whatsapp_message_to_ticket(msg.chat_id, msg.external_id, ticket_id)
             # Пользователи иногда отправляют скриншот до финального текста заявки.
-            # С 1.00.6.5 автоматически привязываются только изображения, которые
+            # Автоматически привязываются только изображения, которые
             # уже попали в контекст ТЕКУЩЕЙ заявки после выбора её категории.
             # Просто недавние изображения из этого чата больше не подтягиваются.
             try:

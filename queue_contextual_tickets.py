@@ -1,4 +1,3 @@
-# EO_GENERIC_REGEX_FIX_V1381
 from __future__ import annotations
 
 import re

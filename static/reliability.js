@@ -54,7 +54,7 @@
   }
 
   function tick(){installChatTools();installMessageInfo();maintenanceGuard();}
-  // EO_PERFORMANCE_20260930: refresh after accepted chat state, with a slow fallback.
+  // Refresh after accepted chat state, with a slow fallback.
   let reliabilityRefreshTimer=0;
   const scheduleTick=()=>{if(document.hidden)return;clearTimeout(reliabilityRefreshTimer);reliabilityRefreshTimer=setTimeout(tick,250);};
   document.addEventListener('DOMContentLoaded',tick);
