@@ -15,7 +15,6 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
 import queue_auth
-import queue_avatars
 import queue_contextual_tickets
 import queue_dialog_flow
 import queue_feature_http
@@ -783,7 +782,7 @@ class QueueHTTPHandlerMixin:
         self.html_response(render_whatsapp(query, self.is_admin()))
 
     def _get_groups(self, query) -> None:
-        self.html_response(render_groups(query, self.is_admin()))
+        self.html_response(render_groups(query, self.is_admin(), store=app.STORE, csrf_token=app.csrf_token))
 
     def _get_api_integration_ping(self, query) -> None:
         key = self.integration_api_key()
@@ -933,7 +932,7 @@ class QueueHTTPHandlerMixin:
         self.json_response({"rows_html": discovered_contact_rows(search_raw, 80)})
 
     def _get_admin_groups(self, query) -> None:
-        self.html_response(render_groups(query, True))
+        self.html_response(render_groups(query, True, store=app.STORE, csrf_token=app.csrf_token))
 
     def _get_to_admin_home(self, query) -> None:
         self.redirect("/admin/")
@@ -1228,7 +1227,7 @@ class QueueHTTPHandlerMixin:
         payload = self.read_authorized_json()
         if payload is not None:
             try:
-                queue_avatars.save(app,payload)
+                app.AVATARS.save(payload)
                 self.json_response({"updated":True})
             except (ValueError,TypeError,OSError):
                 self.json_response({"error":"Некорректный аватар"},400)

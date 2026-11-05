@@ -262,7 +262,7 @@ def request_profile_refresh(app, chat_id: str) -> None:
     except Exception:
         log_suppressed("queue_reliability.request_profile_refresh")
     try:
-        path = app.queue_avatars.cache_path(app,chat_id)
+        path = app.AVATARS.path(chat_id)
         if path.is_file(): path.unlink()
     except Exception:
         log_suppressed("queue_reliability.request_profile_refresh")

@@ -8,7 +8,7 @@ def get(handler, app):
     parsed = urlparse(handler.path)
     if parsed.path == '/api/performance-state':
         if not handler.require_admin(): return True
-        handler.json_response(qp.snapshot(app))
+        handler.json_response(qp.snapshot())
         return True
     if parsed.path == '/api/error-explain':
         query = parse_qs(parsed.query)

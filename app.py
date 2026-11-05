@@ -23,7 +23,7 @@ import queue_workflow
 import queue_reliability
 import queue_performance
 import queue_uploads
-import queue_avatars
+from queue_avatars import AvatarCache
 import queue_user_locale
 import queue_auth
 import queue_core
@@ -34,9 +34,7 @@ import queue_realtime
 import queue_auth_views
 import queue_admin_views
 import queue_chat_state
-import queue_chat_views
 import queue_whatsapp_handlers
-import queue_stale_menu
 import queue_http_handler
 import queue_ticket_service
 import queue_work_context
@@ -49,21 +47,22 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from ticketing import CATEGORIES, PRIORITIES, STATUSES, TicketStore
-from queue_store_conversations import MENU_CONTEXT, MENU_GATE_CONTEXT
+from queue_store_conversations import MENU_CONTEXT
 from queue_core import log_suppressed, normalize_message
 import queue_generic_profile
 from queue_menu_config import MenuConfig
 from queue_bot_menu import BotMenu
-from queue_contact_profiles import ContactProfiles, USER_PROFILE_CONTEXT
+from queue_contact_profiles import ContactProfiles
 from queue_inbound_service import InboundDependencies, InboundService
 from queue_attachment_archive import AttachmentArchive
 from queue_outbound_service import OutboundService
+from queue_stale_menu import StaleMenuRecovery
 
 # Public release from CHANGELOG.md; reported by /api/integration/ping.
 APP_VERSION = "v143"
 
 # Modules split out of app.py read shared services and settings as app.NAME.
-for _module in (queue_chat_state, queue_ticket_views, queue_admin_pages, queue_chat_views,
+for _module in (queue_chat_state, queue_ticket_views, queue_admin_pages,
                 queue_whatsapp_handlers, queue_http_handler):
     _module.bind(sys.modules[__name__])
 
@@ -93,6 +92,7 @@ parse_iso_datetime = queue_core.parse_iso_datetime
 
 DATA_DIR = resolve_data_dir()
 DATABASE_PATH = prepare_database_path(DATA_DIR)
+AVATARS = AvatarCache(DATA_DIR / "avatars")
 STORE = TicketStore(DATABASE_PATH)
 AUTH = queue_auth.AuthStore(DATABASE_PATH)
 
@@ -977,7 +977,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
             for avatar_id in avatar_candidates:
                 if not avatar_id:
                     continue
-                avatar_url = queue_avatars.url(sys.modules[__name__], avatar_id)
+                avatar_url = AVATARS.url(avatar_id)
                 if avatar_url:
                     item["sender_avatar_url"] = avatar_url
                     break
@@ -1174,9 +1174,6 @@ ERROR_REPORT_STATUS_LABELS = {
 }
 
 
-# 1.00.6.29: chat page HTML moved out of app.py.
-render_groups = queue_chat_views.render_groups
-render_whatsapp = queue_chat_views.render_whatsapp
 
 
 # ---------------------------------------------------------------------------
@@ -1281,6 +1278,7 @@ INBOUND_SERVICE = InboundService(InboundDependencies(
 
 ATTACHMENTS = AttachmentArchive(STORE, MEDIA_DIR, OUTBOUND_MEDIA_DIR, UPLOADS.root)
 OUTBOUND_SERVICE = OutboundService(STORE, ATTACHMENTS, queue_realtime, global_auto_reply_enabled)
+STALE_MENU = StaleMenuRecovery(STORE, MENU, CONTACTS, queue_realtime, global_auto_reply_enabled)
 
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
@@ -1318,8 +1316,8 @@ def main() -> None:
     threading.Thread(target=retention_worker, name="queue-retention", daemon=True).start()
     threading.Thread(target=scheduled_backup_worker, name="queue-scheduled-backup", daemon=True).start()
     threading.Thread(target=queue_reliability.worker_loop, args=(sys.modules[__name__],), name="queue-reliability", daemon=True).start()
-    threading.Thread(target=queue_performance.worker_loop, args=(sys.modules[__name__],), name="queue-performance", daemon=True).start()
-    threading.Thread(target=queue_stale_menu.worker_loop, args=(sys.modules[__name__],), name="queue-stale-menu", daemon=True).start()
+    threading.Thread(target=queue_performance.worker_loop, args=(DATA_DIR, DATABASE_PATH), name="queue-performance", daemon=True).start()
+    threading.Thread(target=STALE_MENU.worker_loop, name="queue-stale-menu", daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), TicketHandler)
     address = f"http://127.0.0.1:{PORT}"
     print(f"Единая очередь запущена: {address}")
