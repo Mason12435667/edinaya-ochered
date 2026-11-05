@@ -122,6 +122,7 @@ class TicketStore(ChatAliasStore, ContactStore, MessageStore, NotificationStore,
         with self.connection() as connection:
             queue_store_schema.create(connection)
             queue_store_schema.migrate(connection)
+            queue_store_schema.create_indexes(connection)
             self._merge_whatsapp_lid_aliases(connection)
             # Let SQLite refresh planner statistics for the newly created indexes.
             connection.execute("PRAGMA optimize")

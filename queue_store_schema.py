@@ -1,6 +1,6 @@
-"""Database schema: tables and indexes of a new database, then upgrades of an existing one.
+"""Database schema: tables of a new database, upgrades of an existing one, then the indexes.
 
-Both steps are idempotent and run on every start, inside TicketStore.initialize().
+All three steps are idempotent and run on every start, inside TicketStore.initialize().
 """
 from __future__ import annotations
 
@@ -145,9 +145,6 @@ CREATE TABLE IF NOT EXISTS whatsapp_chat_aliases (
     updated_at TEXT NOT NULL DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_whatsapp_chat_aliases_canonical
-    ON whatsapp_chat_aliases(canonical_id);
-
 CREATE TABLE IF NOT EXISTS whatsapp_chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_key TEXT NOT NULL,
@@ -223,38 +220,42 @@ CREATE TABLE IF NOT EXISTS whatsapp_actions (
     claimed_at TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT ''
 );
-
-CREATE INDEX IF NOT EXISTS idx_whatsapp_chat_messages_chat_time
-ON whatsapp_chat_messages(chat_id, message_timestamp, id);
-CREATE INDEX IF NOT EXISTS idx_tickets_status_updated
-ON tickets(status, updated_at);
-CREATE INDEX IF NOT EXISTS idx_error_reports_status_created
-ON error_reports(status, created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_error_reports_chat_created
-ON error_reports(chat_id, created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_tickets_category_priority
-ON tickets(category, priority, updated_at);
-CREATE INDEX IF NOT EXISTS idx_outbound_status_created
-ON outbound_messages(status, created_at, id);
-CREATE INDEX IF NOT EXISTS idx_whatsapp_actions_status_created
-ON whatsapp_actions(status, created_at, id);
-CREATE INDEX IF NOT EXISTS idx_whatsapp_chats_last_timestamp
-ON whatsapp_chats(last_timestamp DESC, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_whatsapp_groups_enabled_name
-ON whatsapp_groups(added_by_admin, name);
-CREATE INDEX IF NOT EXISTS idx_audit_log_created
-ON audit_log(created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_log_level
-ON audit_log(level, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_tickets_assignee_status
-ON tickets(assigned_to, status, shift_handoff, priority, id DESC);
 """
+
+# Created after migrate(): an index may cover a column that an older database gets only there.
+INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_whatsapp_chat_aliases_canonical ON whatsapp_chat_aliases(canonical_id)",
+    "CREATE INDEX IF NOT EXISTS idx_whatsapp_chat_messages_chat_time"
+    " ON whatsapp_chat_messages(chat_id, message_timestamp, id)",
+    "CREATE INDEX IF NOT EXISTS idx_tickets_status_updated ON tickets(status, updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_error_reports_status_created ON error_reports(status, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_error_reports_chat_created ON error_reports(chat_id, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_tickets_category_priority ON tickets(category, priority, updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_outbound_status_created ON outbound_messages(status, created_at, id)",
+    "CREATE INDEX IF NOT EXISTS idx_whatsapp_actions_status_created ON whatsapp_actions(status, created_at, id)",
+    "CREATE INDEX IF NOT EXISTS idx_whatsapp_chats_last_timestamp"
+    " ON whatsapp_chats(last_timestamp DESC, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_whatsapp_groups_enabled_name ON whatsapp_groups(added_by_admin, name)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_log_level ON audit_log(level, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_tickets_assignee_status"
+    " ON tickets(assigned_to, status, shift_handoff, priority, id DESC)",
+    # Alias reconciliation updates these columns once per alias.
+    # Without indexes every alias scans all tickets and outbound rows.
+    "CREATE INDEX IF NOT EXISTS idx_db141_tickets_chat ON tickets(chat_id)",
+    "CREATE INDEX IF NOT EXISTS idx_db141_outbound_chat ON outbound_messages(chat_id)",
+)
 
 
 def create(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA journal_mode = WAL")
     connection.execute("PRAGMA synchronous = NORMAL")
     connection.executescript(SCHEMA)
+
+
+def create_indexes(connection: sqlite3.Connection) -> None:
+    for statement in INDEXES:
+        connection.execute(statement)
 
 
 def _add_columns(connection: sqlite3.Connection, table: str, columns: dict[str, str]) -> set[str]:
@@ -350,7 +351,3 @@ def migrate(connection: sqlite3.Connection) -> None:
         "UPDATE whatsapp_chat_messages SET ack = 1 "
         "WHERE from_me = 1 AND ack < 1"
     )
-    # Alias reconciliation updates these columns once per alias.
-    # Without indexes every alias scans all tickets and outbound rows.
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_db141_tickets_chat ON tickets(chat_id)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_db141_outbound_chat ON outbound_messages(chat_id)")
