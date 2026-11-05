@@ -105,23 +105,36 @@ for (const [name, confirm] of [
 
 test('waitForValue returns a late value and gives up after the timeout', async () => {
   let value = null;
-  setTimeout(() => { value = 'echo'; }, 10);
-  assert.equal(await delivery.waitForValue(() => value, 500, 5), 'echo');
+  setTimeout(() => { value = 'row'; }, 10);
+  assert.equal(await delivery.waitForValue(async () => value, 500, 5), 'row');
   assert.equal(await delivery.waitForValue(() => null, 20, 5), null);
 });
 
-test('findSentMessage accepts only one unknown recent message of ours', () => {
+test('findSentMessage finds a message stored under the @lid of a @c.us chat', () => {
   const lookup = (extra = {}) => ({
-    text: 'hi', since: 100, readText: (message) => message.body, isKnown: () => false, ...extra,
+    text: 'hi', since: 100, aliases: new Set(['1@c.us']), isKnown: () => false, ...extra,
   });
-  const ours = {fromMe: true, timestamp: 101, body: 'hi'};
-  assert.equal(delivery.findSentMessage([ours], lookup()), ours);
-  assert.equal(delivery.findSentMessage([ours, {...ours}], lookup()), null, 'ambiguous');
-  assert.equal(delivery.findSentMessage([{...ours, timestamp: 99}], lookup()), null, 'too old');
-  assert.equal(delivery.findSentMessage([{...ours, body: 'other'}], lookup()), null, 'other text');
-  assert.equal(delivery.findSentMessage([{...ours, fromMe: false}], lookup()), null, 'not ours');
-  assert.equal(delivery.findSentMessage([ours], lookup({isKnown: () => true})), null, 'already linked');
+  const row = {fromMe: true, timestamp: 101, type: 'chat', text: 'hi', remote: '9@lid'};
+  const inChat = {...row, remote: '1@c.us'};
+  assert.equal(delivery.findSentMessage([row], lookup()), row, 'unknown @lid of the chat');
+  assert.equal(delivery.findSentMessage([row, inChat], lookup()), inChat, 'a known address wins');
+  assert.equal(delivery.findSentMessage([row, {...row, remote: '8@lid'}], lookup()), null, 'ambiguous');
+  assert.equal(delivery.findSentMessage([{...row, remote: '2@c.us'}], lookup()), null, 'another chat');
+  assert.equal(delivery.findSentMessage([{...row, timestamp: 99}], lookup()), null, 'too old');
+  assert.equal(delivery.findSentMessage([{...row, text: 'other'}], lookup()), null, 'other text');
+  assert.equal(delivery.findSentMessage([{...row, fromMe: false}], lookup()), null, 'not ours');
+  assert.equal(delivery.findSentMessage([row], lookup({isKnown: () => true})), null, 'already linked');
   assert.equal(delivery.findSentMessage(undefined, lookup()), null);
+});
+
+test('findSentMessage tells media from text', () => {
+  const lookup = (extra = {}) => ({text: '', hasMedia: true, since: 100, aliases: new Set(['1@c.us']), isKnown: () => false, ...extra});
+  const photo = {fromMe: true, timestamp: 101, type: 'image', text: '', remote: '9@lid'};
+  assert.equal(delivery.findSentMessage([photo], lookup()), photo, 'no caption');
+  assert.equal(delivery.findSentMessage([{...photo, text: 'cap'}], lookup({text: 'cap'})).type, 'image', 'caption');
+  assert.equal(delivery.findSentMessage([{...photo, type: 'chat'}], lookup()), null, 'text is not media');
+  assert.equal(delivery.findSentMessage([photo], lookup({text: 'cap'})), null, 'other caption');
+  assert.equal(delivery.findSentMessage([photo], lookup({text: 'hi', hasMedia: false})), null, 'media is not text');
 });
 
 test('editError gives a readable reason', () => {

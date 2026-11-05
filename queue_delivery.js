@@ -13,25 +13,30 @@ function errorText(error) {
   return String((error && error.message) || error || 'Неизвестная ошибка WhatsApp').slice(0, 300);
 }
 
-// Resolves with the first truthy read() or with null after timeoutMs.
+// Resolves with the first truthy result of read() or with null after timeoutMs.
 async function waitForValue(read, timeoutMs, intervalMs = 50) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const value = read();
+    const value = await read();
     if (value) return value;
     if (Date.now() >= deadline) return null;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }
 
-// Finds our message among recent ones. Two equal candidates cannot be told
-// apart, so the answer is null and the send stays uncertain.
-function findSentMessage(messages, {text, readText, since, isKnown}) {
-  const found = (messages || []).filter((message) => message && message.fromMe
-    && Number(message.timestamp || 0) >= since
-    && readText(message) === text
-    && !isKnown(message));
-  return found.length === 1 ? found[0] : null;
+// Finds our message among recent rows of the WhatsApp message store. A sent
+// message may be stored under the @lid of a chat we addressed as @c.us, so a row
+// from an unknown @lid still counts. Two equal candidates cannot be told apart:
+// the answer is null and the send stays uncertain.
+function findSentMessage(rows, {text, hasMedia = false, since, aliases, isKnown}) {
+  const found = (rows || []).filter((row) => row && row.fromMe
+    && Number(row.timestamp || 0) >= since
+    && (row.type !== 'chat') === hasMedia
+    && (text ? row.text === text : hasMedia)
+    && !isKnown(row));
+  const exact = found.filter((row) => aliases.has(row.remote));
+  const pool = exact.length ? exact : found.filter((row) => String(row.remote || '').endsWith('@lid'));
+  return pool.length === 1 ? pool[0] : null;
 }
 
 // confirm(target) is asked when whatsapp-web.js returned nothing: the message may

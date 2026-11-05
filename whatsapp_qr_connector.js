@@ -628,7 +628,6 @@ const autoReplyExactCooldowns = new Map();
 const autoReplySourceInflight138 = new Set();
 const autoReplySourceSent138 = new Map();
 const pendingAutoReplyEchoes138 = new Map();
-const confirmedAutoReplyEchoes138 = new Map();
 const AUTO_REPLY_SOURCE_TTL_MS = 10 * 60 * 1000;
 const AUTO_REPLY_ECHO_TTL_MS = 20000;
 
@@ -656,9 +655,7 @@ function rememberPendingAutoReplyEcho138(recipients, content) {
 }
 
 function forgetPendingAutoReplyEcho138(token) {
-  if (!token) return;
-  pendingAutoReplyEchoes138.delete(token);
-  confirmedAutoReplyEchoes138.delete(token);
+  if (token) pendingAutoReplyEchoes138.delete(token);
 }
 
 function matchesPendingAutoReplyEcho138(message, rawChatId = '') {
@@ -674,7 +671,6 @@ function matchesPendingAutoReplyEcho138(message, rawChatId = '') {
     if (entry.body && body && entry.body !== body) continue;
     if (entry.body && !body) continue;
     pendingAutoReplyEchoes138.delete(token);
-    confirmedAutoReplyEchoes138.set(token, message);
     return true;
   }
   return false;
@@ -753,37 +749,47 @@ function matchesActiveInternalOutgoing(message, rawChatId = '') {
   return false;
 }
 
-// message_create is the only event that still carries the real message when
-// client.sendMessage() returns nothing, so keep it for the send in progress.
-function captureActiveOutgoingEcho(message, rawChatId) {
-  if (!matchesActiveInternalOutgoing(message, rawChatId)) return;
-  const marker = activeInternalOutgoingFingerprint;
-  const sameBody = String(incomingText(message) || '').trim() === String(marker.body || '').trim();
-  if (marker.has_media || sameBody) marker.echo = message;
+const SENT_LOOKUP_TIMEOUT_MS = 4000;
+const SENT_LOOKUP_INTERVAL_MS = 250;
+
+function readOwnMessagesSince(since) {
+  return client.pupPage.evaluate((cutoff) => {
+    const widText = (value) => {
+      if (!value) return '';
+      if (typeof value === 'string') return value;
+      if (typeof value._serialized === 'string') return value._serialized;
+      return value.user && value.server ? `${value.user}@${value.server}` : '';
+    };
+    return window.require('WAWebCollections').Msg.getModelsArray()
+      .filter((m) => m && m.id && m.id.fromMe && Number(m.t || 0) >= cutoff)
+      .map((m) => ({
+        id: widText(m.id),
+        remote: widText(m.id.remote),
+        fromMe: true,
+        timestamp: Number(m.t || 0),
+        type: String(m.type || 'chat'),
+        text: String((m.type === 'chat' ? m.body : m.caption) || ''),
+      }));
+  }, since);
 }
 
-const SENT_ECHO_WAIT_MS = 1500;
-const SENT_LOOKUP_TIMEOUT_MS = 10000;
-
-// Current WhatsApp Web can accept a message while client.sendMessage() returns
-// nothing. Without the message the provider id is unknown and the site never
-// shows it, so look for it: first the message_create echo, then the chat itself.
-async function confirmSentMessage(target, body, readEcho, since) {
-  const echo = await delivery.waitForValue(readEcho, SENT_ECHO_WAIT_MS);
-  if (echo) return echo;
-  const text = typeof body === 'string' ? normalizeAutoReplyBody138(body) : '';
-  if (!text) return null;
-  const lookup = client.getChatById(target).then((chat) => chat.fetchMessages({limit: 15, fromMe: true}));
-  const recent = await Promise.race([
-    lookup,
-    new Promise((resolve) => setTimeout(() => resolve([]), SENT_LOOKUP_TIMEOUT_MS)),
-  ]);
-  return delivery.findSentMessage(recent, {
-    text,
-    since,
-    readText: (message) => normalizeAutoReplyBody138(incomingText(message)),
-    isKnown: (message) => isRememberedInternalOutgoing(normalizeMessageIdObject(message) || serializedId(message.id)),
-  });
+// Current WhatsApp Web stores a sent message under the @lid of a chat we addressed
+// as @c.us, so client.sendMessage() cannot find it and returns nothing. Without
+// the message its id is unknown and the site never shows it. Look it up in the
+// message store, the same way reconcileRecentOutgoing() does. This only reads.
+async function confirmSentMessage(recipients, body, hasMedia, since) {
+  const aliases = new Set(recipients);
+  for (const recipient of recipients) {
+    for (const alias of (chatIdAliases.get(recipient) || [])) aliases.add(alias);
+  }
+  const text = normalizeAutoReplyBody138(body);
+  const row = await delivery.waitForValue(async () => delivery.findSentMessage(
+    (await readOwnMessagesSince(since)).map((item) => ({...item, text: normalizeAutoReplyBody138(item.text)})),
+    {text, hasMedia, since, aliases, isKnown: (item) => isRememberedInternalOutgoing(item.id)},
+  ), SENT_LOOKUP_TIMEOUT_MS, SENT_LOOKUP_INTERVAL_MS);
+  if (!row) return null;
+  const message = await client.getMessageById(row.id).catch(() => null);
+  return message || {id: {_serialized: row.id, remote: row.remote, fromMe: true}, fromMe: true, timestamp: row.timestamp};
 }
 
 function sendStartSeconds() {
@@ -3327,7 +3333,7 @@ async function sendToUser(recipients, content) {
     const since = sendStartSeconds();
     outcome = await delivery.sendOnce({
       client, recipient:targets[0], aliases:targets, content, options:{}, begin:async()=>true,
-      confirm: (target) => confirmSentMessage(target, content, () => confirmedAutoReplyEchoes138.get(echoToken), since),
+      confirm: () => confirmSentMessage(targets, content, false, since),
     });
     if (outcome.status !== 'sent') throw new Error(outcome.error);
     rememberInternalOutgoingMessage(outcome.message);
@@ -4157,8 +4163,7 @@ async function pollOutbound() {
     const outcome = await delivery.sendOnce({
       client, recipient, content, options, aliases: sendAliases,
       begin: async () => Boolean((await postJson('/api/outbound/begin', {message_id:queued.id})).updated),
-      confirm: (target) => confirmSentMessage(target, String(queued.body || ''),
-        () => activeInternalOutgoingFingerprint && activeInternalOutgoingFingerprint.echo, since),
+      confirm: () => confirmSentMessage([recipient, ...sendAliases], String(queued.body || ''), Boolean(queued.media_path), since),
     });
     if (outcome.status !== 'sent') {
       await postJson('/api/outbound/result', {message_id:queued.id, status:outcome.status, error:outcome.error});
@@ -5212,7 +5217,6 @@ client.on('message_create', async (message) => {
     // WhatsApp id/stanza to the internal send. Otherwise the same screenshot is
     // imported as a "manual" message and its media is endlessly re-downloaded.
     const outgoingEventId = normalizeMessageIdObject(message) || serializedId(message && message.id);
-    captureActiveOutgoingEcho(message, rawChatId);
     const automaticReplyEcho = matchesPendingAutoReplyEcho138(message, rawChatId);
     let internalChatEvent = automaticReplyEcho || isRememberedInternalOutgoing(outgoingEventId) || isInternalOutgoing(rawChatId) || matchesActiveInternalOutgoing(message, rawChatId);
     let canonicalForInternal = rawChatId;
