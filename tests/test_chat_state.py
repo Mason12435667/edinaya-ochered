@@ -154,6 +154,13 @@ class ChatListMergeTests(ChatStateTestCase):
         self.stored_chat(chat, "Контакт", "После удаления", self.now)
         self.assertEqual(self.row(chat)["last_message"], "После удаления")
 
+    def test_live_message_newer_than_the_deletion_keeps_its_preview(self):
+        chat = new_chat()
+        self.stored_chat(chat, "Контакт", "Секрет", self.now - 50)
+        self.message(chat, "true_chat_old_delete", "Секрет", self.now - 50, deleted=True)
+        self.live(chats=[{"id": chat, "name": "Контакт", "last_message": "Только что", "timestamp": self.now}])
+        self.assertEqual(self.row(chat)["last_message"], "Только что")
+
     def test_favorite_chat_is_flagged(self):
         chat = new_chat()
         self.stored_chat(chat, "Контакт", "Привет")
@@ -302,6 +309,19 @@ class GroupStateTests(ChatStateTestCase):
         self.live(group_participants={chat: [{"mention_id": "77010009999@c.us", "name": "Анна"}]})
         row = next(item for item in self.group_state(chat)["chats"] if item["id"] == chat)
         self.assertEqual(row["last_message"], "@Анна посмотрите заявку")
+
+    def test_short_mention_id_uses_the_participant_name_too(self):
+        # shorter than the ids that also trigger the lookup in the last saved message
+        chat = self.group(last_message="@7701 посмотрите заявку")
+        self.live(group_participants={chat: [{"mention_id": "7701@lid", "name": "Анна"}]})
+        row = next(item for item in self.group_state(chat)["chats"] if item["id"] == chat)
+        self.assertEqual(row["last_message"], "@Анна посмотрите заявку")
+
+    def test_deleted_group_message_keeps_its_place_without_the_text(self):
+        chat = self.group()
+        self.message(chat, "false_group_deleted2", "Секрет", deleted=True, media_path="/tmp/secret.jpg")
+        messages = self.group_state(chat)["messages"]
+        self.assertEqual([(m["body"], m["deleted"], m.get("media_path", "")) for m in messages], [("", True, "")])
 
     def test_group_preview_of_a_deleted_message(self):
         chat = self.group(last_message="Секрет")
