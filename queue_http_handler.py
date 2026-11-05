@@ -22,11 +22,9 @@ import queue_inbound_media
 import queue_performance_http
 import queue_realtime
 import queue_reliability
-import queue_reliability_http
 import queue_ticket_views
 import queue_uploads
 import queue_workflow
-import queue_workflow_http
 from queue_admin_pages import discovered_contact_rows, render_admin_analytics_final, render_admin_api_keys, render_admin_audit, render_admin_categories, render_admin_contacts, render_admin_employees, render_admin_error, render_admin_errors, render_admin_home, render_admin_manager_dashboard, render_admin_manual, render_admin_menu, render_admin_system
 from queue_chat_state import chat_state_snapshot, connector_state_snapshot, conversation_lock_snapshot, group_state_snapshot, notifications_snapshot
 from queue_chat_views import render_groups, render_whatsapp
@@ -663,9 +661,9 @@ class QueueHTTPHandlerMixin:
             return
         if queue_performance_http.get(self, app):
             return
-        if queue_reliability_http.get(self, app):
+        if self.reliability_routes.get(self):
             return
-        if queue_workflow_http.get(self, app):
+        if self.workflow_routes.get(self):
             return
         if self.productivity_routes.get(self):
             return
@@ -965,7 +963,7 @@ class QueueHTTPHandlerMixin:
             return
         if queue_performance_http.post(self, app):
             return
-        if queue_reliability_http.post(self, app):
+        if self.reliability_routes.post(self):
             return
         if queue_reliability.maintenance_active(app.STORE) and queue_reliability.should_block_mutation(parsed.path, self.is_admin()):
             if parsed.path.startswith("/api/") or self.headers.get("X-Requested-With") == "fetch" or parsed.path.startswith("/chat"):
@@ -973,7 +971,7 @@ class QueueHTTPHandlerMixin:
             else:
                 self.redirect("/?notice=" + quote("Режим обслуживания: изменения временно заблокированы"))
             return
-        if queue_workflow_http.post(self, app):
+        if self.workflow_routes.post(self):
             return
         if self.productivity_routes.post(self):
             return
