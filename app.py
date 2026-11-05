@@ -619,7 +619,7 @@ def _outbound_media_matches_observation(
     """
     try:
         queued_body = normalize_message(str(row["body"] or ""))[:1000]
-    except Exception:
+    except (KeyError, IndexError):
         log_suppressed("app._outbound_media_matches_observation")
         queued_body = ""
     current_body = _observed_outbound_body(observed_body, observed_type)
@@ -628,7 +628,7 @@ def _outbound_media_matches_observation(
 
     try:
         queued_reply = normalize_message(str(row["reply_to_key"] or ""))[:160]
-    except Exception:
+    except (KeyError, IndexError):
         log_suppressed("app._outbound_media_matches_observation")
         queued_reply = ""
     current_reply = normalize_message(str(observed_reply_to or ""))[:160]
@@ -664,7 +664,7 @@ def preserved_system_outgoing_media(
             da, sa = queue_message_identity.parts(a)
             db, sb = queue_message_identity.parts(b)
             return bool(sa and sb and sa == sb and (not da or not db or da == db))
-        except Exception:
+        except (TypeError, ValueError):
             log_suppressed("app.same_provider_id")
             return False
 
@@ -684,7 +684,7 @@ def preserved_system_outgoing_media(
                     "SELECT id, provider_id, body, reply_to_key, media_mime, media_name FROM outbound_messages "
                     "WHERE status='sent' AND provider_id<>'' ORDER BY id DESC LIMIT 80"
                 ).fetchall())
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("app.preserved_system_outgoing_media")
         return {}
 
@@ -762,7 +762,7 @@ def reconcile_uncertain_system_outgoing_media(
                 """,
                 (safe_chat,),
             ).fetchall()
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("app.reconcile_uncertain_system_outgoing_media")
         return {}
 
@@ -811,7 +811,7 @@ def reconcile_uncertain_system_outgoing_media(
     else:
         try:
             preserved = ATTACHMENTS.preserve(row_id)
-        except Exception:
+        except (OSError, sqlite3.Error):
             log_suppressed("app.reconcile_uncertain_system_outgoing_media")
             preserved = {}
         if preserved:
@@ -869,7 +869,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                     phone_digits = re.sub(r"\D", "", phone)
                     if phone_digits:
                         participant_by_id[f"{phone_digits}@c.us"] = participant
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             log_suppressed("app.decorate_chat_messages")
             mention_names = {}
             participant_by_id = {}
@@ -916,7 +916,7 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                         (chat_id, str(item.get("id", ""))),
                     )
                     db.commit()
-            except Exception:
+            except sqlite3.Error:
                 log_suppressed("app.decorate_chat_messages")
 
         if item.get("from_me") and not item.get("deleted") and not item.get("media_path"):
@@ -1290,7 +1290,7 @@ PRODUCTIVITY_ROUTES = ProductivityRoutes(STORE, DATA_DIR, DATABASE_PATH, csrf_to
                                          admin_layout=admin_layout, category_items=active_ticket_category_items,
                                          active_employee=active_employee)
 WORKFLOW_ROUTES = WorkflowRoutes(STORE, csrf_token=csrf_token, layout=layout, admin_layout=admin_layout,
-                                 category_items=active_ticket_category_items, categories=CATEGORIES,
+                                 category_items=active_ticket_category_items,
                                  employees=EMPLOYEES, work_actor=work_actor,
                                  update_ticket_status=update_ticket_status, events=queue_realtime)
 RELIABILITY_ROUTES = ReliabilityRoutes(STORE, RELIABILITY, csrf_token=csrf_token, admin_layout=admin_layout,

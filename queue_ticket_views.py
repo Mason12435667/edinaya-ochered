@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import json
 import re
 from datetime import datetime, timezone
@@ -535,7 +536,7 @@ def render_my_page(query: dict[str, list[str]], show_admin: bool = False) -> str
     actor = work_actor()
     try:
         mine = app.STORE.list_tickets("", "", "", "", 400, 0, "mine", actor)
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("queue_ticket_views.render_my_page")
         mine = []
     active = [item for item in mine if str(item.get("status", "")) not in {"done", "invalid"}]

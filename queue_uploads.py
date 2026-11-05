@@ -1,4 +1,5 @@
 """Bounded, resumable chunk uploads. No whole-file base64 on the HTTP path."""
+import sqlite3
 import re
 import os
 import secrets
@@ -25,7 +26,7 @@ def _media_log(message: str) -> None:
         stamp = time.strftime('%Y-%m-%d %H:%M:%S')
         with (log_dir / 'media-upload.log').open('a', encoding='utf-8') as handle:
             handle.write(f'[{stamp}] {message}\n')
-    except Exception:
+    except (OSError, ValueError):
         log_suppressed("queue_uploads._media_log")
 
 
@@ -197,7 +198,7 @@ def recover_clipboard_attachment(store, attachments, chat_id, message_id, messag
 
     try:
         canonical = store.canonical_whatsapp_chat_id(safe_chat) or safe_chat
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("queue_uploads.recover_clipboard_attachment")
         canonical = safe_chat
 
@@ -218,7 +219,7 @@ def recover_clipboard_attachment(store, attachments, chat_id, message_id, messag
                  LIMIT 40
                 """
             ).fetchall()
-    except Exception:
+    except sqlite3.Error:
         log_suppressed("queue_uploads.recover_clipboard_attachment")
         return {}
 
@@ -231,7 +232,7 @@ def recover_clipboard_attachment(store, attachments, chat_id, message_id, messag
             continue
         try:
             row_chat = store.canonical_whatsapp_chat_id(str(row['chat_id'] or '')) or str(row['chat_id'] or '')
-        except Exception:
+        except sqlite3.Error:
             log_suppressed("queue_uploads.recover_clipboard_attachment")
             row_chat = str(row['chat_id'] or '')
         if row_chat != canonical:
@@ -245,7 +246,7 @@ def recover_clipboard_attachment(store, attachments, chat_id, message_id, messag
             if created.tzinfo is None:
                 created = created.replace(tzinfo=timezone.utc)
             created_ts = int(created.timestamp())
-        except Exception:
+        except (OSError, OverflowError, ValueError):
             log_suppressed("queue_uploads.recover_clipboard_attachment")
             continue
         delta = abs(ts - created_ts)
@@ -276,7 +277,7 @@ def recover_clipboard_attachment(store, attachments, chat_id, message_id, messag
     # were preserved, so complete_outbound_message may safely remove the temp.
     try:
         store.complete_outbound_message(queue_id, True, '', safe_message)
-    except Exception:
+    except sqlite3.Error:
         # The media itself is already safe; history can still use it.
         log_suppressed("queue_uploads.recover_clipboard_attachment")
 

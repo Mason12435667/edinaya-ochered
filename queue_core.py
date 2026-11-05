@@ -48,7 +48,7 @@ def _local_timezone():
         try:
             from zoneinfo import ZoneInfo
             return ZoneInfo(name)
-        except Exception:
+        except (ImportError, KeyError, OSError, ValueError):
             log_suppressed("queue_core._local_timezone")
     try:
         hours = float(str(os.getenv("QUEUE_UTC_OFFSET_HOURS", "5") or "5").strip())

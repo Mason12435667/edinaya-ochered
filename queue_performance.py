@@ -60,7 +60,7 @@ def _server_rss_mb() -> float:
         return round(value / 1024.0, 1)
     except ImportError:
         return 0.0
-    except Exception:
+    except (OSError, ValueError):
         log_suppressed("queue_performance._server_rss_mb")
         return 0.0
 

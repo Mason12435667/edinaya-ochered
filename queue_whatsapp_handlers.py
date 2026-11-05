@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import json
 import re
 import time
@@ -604,7 +605,7 @@ class WhatsAppHandlerMixin:
                     stored_message = app.STORE.get_whatsapp_message(chat_id, message_id)
                     if stored_message:
                         old_media_path = str(stored_message.get("media_path", "") or "")
-                except Exception:
+                except sqlite3.Error:
                     log_suppressed("queue_whatsapp_handlers.handle_chat_messages_sync")
                     old_media_path = ""
                 deleted_payloads.append((message_id, old_media_path, timestamp, bool(item.get("from_me"))))
@@ -1107,7 +1108,7 @@ class WhatsAppHandlerMixin:
                             unresolved_group_message_ids.append(message_id)
                     if len(unresolved_group_message_ids) >= 30:
                         break
-            except Exception:
+            except sqlite3.Error:
                 log_suppressed("queue_whatsapp_handlers.handle_chat_control")
                 unresolved_group_message_ids = []
         quote_probe_ids: list[str] = []
@@ -1122,7 +1123,7 @@ class WhatsAppHandlerMixin:
                         quote_probe_ids.append(message_id)
                     if len(quote_probe_ids) >= 20:
                         break
-            except Exception:
+            except sqlite3.Error:
                 log_suppressed("queue_whatsapp_handlers.handle_chat_control")
                 quote_probe_ids = []
         presence_ids: list[str] = []

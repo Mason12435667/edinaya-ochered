@@ -3,11 +3,8 @@ from __future__ import annotations
 import io
 import os
 import re
-import shutil
 import sqlite3
-import tempfile
 import zipfile
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -634,40 +631,6 @@ def close_meta(store, ticket_id: int) -> dict[str, Any]:
     with store.connection() as db:
         row = db.execute("SELECT * FROM workflow_ticket_close_meta WHERE ticket_id=?", (int(ticket_id),)).fetchone()
     return dict(row) if row else {}
-
-
-def quick_ticket_update(store, ticket_id: int, *, status: str = "", priority: str = "", actor: str = "", employee: str = "", reason: str = "", comment: str = "") -> dict[str, Any]:
-    ticket = store.get_ticket(int(ticket_id))
-    if not ticket:
-        raise ValueError("Заявка не найдена")
-    updated = False
-    if priority:
-        updated = bool(store.update_priority(int(ticket_id), clean(priority,40), clean(actor,120))) or updated
-    if employee and clean(employee,120) != clean(ticket.get("assigned_to"),120):
-        updated = transfer_ticket(store, int(ticket_id), employee, reason, actor) or updated
-    if status and status != clean(ticket.get("status"),40):
-        ok, message = validate_close(store, int(ticket_id), status, reason, comment)
-        if not ok:
-            raise ValueError(message)
-        assignee = clean(employee,120) or clean(ticket.get("assigned_to"),120) or clean(actor,120)
-        if not store.update_status(int(ticket_id), status, clean(actor,120), assignee):
-            raise ValueError("Не удалось изменить статус")
-        record_close_meta(store, int(ticket_id), status, reason, comment, actor)
-        updated = True
-    return {"updated": updated, "ticket": store.get_ticket(int(ticket_id))}
-
-
-def bulk_update(store, ticket_ids: list[int], actor: str, *, status: str = "", priority: str = "", employee: str = "", reason: str = "", comment: str = "") -> dict[str, int]:
-    ids = sorted({int(x) for x in ticket_ids if int(x) > 0})[:200]
-    updated = failed = 0
-    for ticket_id in ids:
-        try:
-            result = quick_ticket_update(store, ticket_id, status=status, priority=priority, employee=employee, actor=actor, reason=reason, comment=comment)
-            updated += int(bool(result.get("updated")))
-        except Exception:
-            log_suppressed("queue_workflow.bulk_update")
-            failed += 1
-    return {"selected": len(ids), "updated": updated, "failed": failed}
 
 
 def conversation_summary(store, chat_id: str) -> dict[str, Any]:
