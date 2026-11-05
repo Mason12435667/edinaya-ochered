@@ -32,9 +32,28 @@ class InboundSpool {
     const target = this.pathFor(payload);
     if (!target) return false;
     const temporary = `${target}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify({saved_at: Date.now(), payload}));
+    const descriptor = fs.openSync(temporary, 'w');
+    try {
+      fs.writeFileSync(descriptor, JSON.stringify({saved_at: Date.now(), payload}));
+      fs.fsyncSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
     fs.renameSync(temporary, target);
+    this.syncDirectory();
     return true;
+  }
+
+  // Makes the rename itself survive a power cut. Windows refuses fsync on a
+  // directory (EPERM); there the flushed file above is all we can do.
+  syncDirectory() {
+    if (process.platform === 'win32') return;
+    const descriptor = fs.openSync(this.directory, 'r');
+    try {
+      fs.fsyncSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
   }
 
   remove(payload) {

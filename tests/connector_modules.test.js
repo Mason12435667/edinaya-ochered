@@ -156,3 +156,26 @@ test('avatars: missing photo is reported, a chat is not re-synced too often', as
   assert.deepEqual(posts, [['/api/avatar-sync', {chat_id: '77010000001@c.us', missing: true}]]);
   assert.equal(await avatars.sync(client, postJson, ['77010000001@c.us']), 0);
 });
+
+test('spool flushes a record to disk before it becomes visible', () => {
+  const {spool, files} = tempSpool();
+  const steps = [];
+  const {fsyncSync, renameSync} = fs;
+  fs.fsyncSync = (descriptor) => { steps.push('fsync'); return fsyncSync(descriptor); };
+  fs.renameSync = (from, to) => { steps.push('rename'); return renameSync(from, to); };
+  try {
+    spool.enqueue({external_id: 'durable', text: 'a'});
+  } finally {
+    Object.assign(fs, {fsyncSync, renameSync});
+  }
+  assert.deepEqual(steps, process.platform === 'win32' ? ['fsync', 'rename'] : ['fsync', 'rename', 'fsync']);
+  assert.deepEqual(files(), ['durable.json']);
+});
+
+const wwebjsUtils = path.join(__dirname, '..', 'node_modules', 'whatsapp-web.js', 'src', 'util', 'Injected', 'Utils.js');
+
+test('media fix is applied to the installed whatsapp-web.js', {skip: !fs.existsSync(wwebjsUtils)}, () => {
+  const source = fs.readFileSync(wwebjsUtils, 'utf8');
+  assert.match(source, /delete message\.__x_id;/);
+  assert.ok(source.indexOf('delete message.__x_id;') > source.indexOf('...mediaOptions'));
+});
