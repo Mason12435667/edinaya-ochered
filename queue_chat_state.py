@@ -845,7 +845,7 @@ def notifications_snapshot() -> dict[str, object]:
         try: queue_reliability.resolve_persisted_alert(app.STORE, "connector")
         except Exception:
             log_suppressed("queue_chat_state.notifications_snapshot")
-    reliability_count, reliability_events = queue_reliability.reliability_notification_events(app)
+    reliability_count, reliability_events = app.RELIABILITY.notification_events()
     queue_reliability.reconcile_notification_dismissals(
         app.STORE, [item.get("id") or item.get("event_id") for item in system_events], ("system:",)
     )
