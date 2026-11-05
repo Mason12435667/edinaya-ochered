@@ -77,6 +77,53 @@ test('an invalid address moves on to the next alias', async () => {
   assert.deepEqual(client.calls, ['a@c.us', 'b@lid']);
 });
 
+test('a send that returned nothing is confirmed without sending again', async () => {
+  const client = fakeClient(() => undefined);
+  const echo = {id: {_serialized: 'true_a@c.us_2'}};
+  const outcome = await delivery.sendOnce({
+    client, recipient: 'a@c.us', aliases: ['b@lid'], content: 'hi', begin: async () => true,
+    confirm: async () => echo,
+  });
+  assert.equal(outcome.status, 'sent');
+  assert.equal(outcome.message, echo);
+  assert.deepEqual(client.calls, ['a@c.us']);
+});
+
+for (const [name, confirm] of [
+  ['finds nothing', async () => null],
+  ['fails', async () => { throw new Error('wid error: invalid wid'); }],
+]) {
+  test(`a send stays uncertain and is not repeated when confirmation ${name}`, async () => {
+    const client = fakeClient(() => undefined);
+    const outcome = await delivery.sendOnce({
+      client, recipient: 'a@c.us', aliases: ['b@lid'], content: 'hi', begin: async () => true, confirm,
+    });
+    assert.equal(outcome.status, 'uncertain');
+    assert.deepEqual(client.calls, ['a@c.us']);
+  });
+}
+
+test('waitForValue returns a late value and gives up after the timeout', async () => {
+  let value = null;
+  setTimeout(() => { value = 'echo'; }, 10);
+  assert.equal(await delivery.waitForValue(() => value, 500, 5), 'echo');
+  assert.equal(await delivery.waitForValue(() => null, 20, 5), null);
+});
+
+test('findSentMessage accepts only one unknown recent message of ours', () => {
+  const lookup = (extra = {}) => ({
+    text: 'hi', since: 100, readText: (message) => message.body, isKnown: () => false, ...extra,
+  });
+  const ours = {fromMe: true, timestamp: 101, body: 'hi'};
+  assert.equal(delivery.findSentMessage([ours], lookup()), ours);
+  assert.equal(delivery.findSentMessage([ours, {...ours}], lookup()), null, 'ambiguous');
+  assert.equal(delivery.findSentMessage([{...ours, timestamp: 99}], lookup()), null, 'too old');
+  assert.equal(delivery.findSentMessage([{...ours, body: 'other'}], lookup()), null, 'other text');
+  assert.equal(delivery.findSentMessage([{...ours, fromMe: false}], lookup()), null, 'not ours');
+  assert.equal(delivery.findSentMessage([ours], lookup({isKnown: () => true})), null, 'already linked');
+  assert.equal(delivery.findSentMessage(undefined, lookup()), null);
+});
+
 test('editError gives a readable reason', () => {
   assert.match(delivery.editError({reason: 'not_found'}), /не найдено/);
   assert.match(delivery.editError({}), /Не удалось/);

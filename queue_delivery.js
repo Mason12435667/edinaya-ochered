@@ -13,7 +13,30 @@ function errorText(error) {
   return String((error && error.message) || error || 'Неизвестная ошибка WhatsApp').slice(0, 300);
 }
 
-async function sendOnce({client, recipient, aliases = [], content, options = {}, begin}) {
+// Resolves with the first truthy read() or with null after timeoutMs.
+async function waitForValue(read, timeoutMs, intervalMs = 50) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = read();
+    if (value) return value;
+    if (Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+// Finds our message among recent ones. Two equal candidates cannot be told
+// apart, so the answer is null and the send stays uncertain.
+function findSentMessage(messages, {text, readText, since, isKnown}) {
+  const found = (messages || []).filter((message) => message && message.fromMe
+    && Number(message.timestamp || 0) >= since
+    && readText(message) === text
+    && !isKnown(message));
+  return found.length === 1 ? found[0] : null;
+}
+
+// confirm(target) is asked when whatsapp-web.js returned nothing: the message may
+// already be in the chat. It only looks for the message and never sends again.
+async function sendOnce({client, recipient, aliases = [], content, options = {}, begin, confirm}) {
   const targets = [...new Set([recipient, ...aliases].map((value) => String(value || '').trim()).filter(Boolean))];
   if (!targets.length) return {status: 'failed', error: 'Не указан получатель'};
   let started = false;
@@ -27,7 +50,8 @@ async function sendOnce({client, recipient, aliases = [], content, options = {},
   let lastError = null;
   for (const target of targets) {
     try {
-      const message = await client.sendMessage(target, content, options);
+      const returned = await client.sendMessage(target, content, options);
+      const message = returned || (confirm ? await confirm(target).catch(() => null) : null);
       if (!message) return {status: 'uncertain', error: 'WhatsApp не вернул отправленное сообщение. Проверьте переписку'};
       return {status: 'sent', message, recipient: target};
     } catch (error) {
@@ -77,4 +101,4 @@ function editError(result) {
   return reasons[result && result.reason] || 'Не удалось изменить сообщение в WhatsApp';
 }
 
-module.exports = {sendOnce, editInPage, editError, PRE_SEND_ERROR};
+module.exports = {waitForValue, findSentMessage, sendOnce, editInPage, editError, PRE_SEND_ERROR};

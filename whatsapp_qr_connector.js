@@ -628,6 +628,7 @@ const autoReplyExactCooldowns = new Map();
 const autoReplySourceInflight138 = new Set();
 const autoReplySourceSent138 = new Map();
 const pendingAutoReplyEchoes138 = new Map();
+const confirmedAutoReplyEchoes138 = new Map();
 const AUTO_REPLY_SOURCE_TTL_MS = 10 * 60 * 1000;
 const AUTO_REPLY_ECHO_TTL_MS = 20000;
 
@@ -655,7 +656,9 @@ function rememberPendingAutoReplyEcho138(recipients, content) {
 }
 
 function forgetPendingAutoReplyEcho138(token) {
-  if (token) pendingAutoReplyEchoes138.delete(token);
+  if (!token) return;
+  pendingAutoReplyEchoes138.delete(token);
+  confirmedAutoReplyEchoes138.delete(token);
 }
 
 function matchesPendingAutoReplyEcho138(message, rawChatId = '') {
@@ -671,6 +674,7 @@ function matchesPendingAutoReplyEcho138(message, rawChatId = '') {
     if (entry.body && body && entry.body !== body) continue;
     if (entry.body && !body) continue;
     pendingAutoReplyEchoes138.delete(token);
+    confirmedAutoReplyEchoes138.set(token, message);
     return true;
   }
   return false;
@@ -747,6 +751,43 @@ function matchesActiveInternalOutgoing(message, rawChatId = '') {
   if (expectedBody && liveBody === expectedBody) return true;
   if (marker.has_media && !expectedBody && !liveBody) return true;
   return false;
+}
+
+// message_create is the only event that still carries the real message when
+// client.sendMessage() returns nothing, so keep it for the send in progress.
+function captureActiveOutgoingEcho(message, rawChatId) {
+  if (!matchesActiveInternalOutgoing(message, rawChatId)) return;
+  const marker = activeInternalOutgoingFingerprint;
+  const sameBody = String(incomingText(message) || '').trim() === String(marker.body || '').trim();
+  if (marker.has_media || sameBody) marker.echo = message;
+}
+
+const SENT_ECHO_WAIT_MS = 1500;
+const SENT_LOOKUP_TIMEOUT_MS = 10000;
+
+// Current WhatsApp Web can accept a message while client.sendMessage() returns
+// nothing. Without the message the provider id is unknown and the site never
+// shows it, so look for it: first the message_create echo, then the chat itself.
+async function confirmSentMessage(target, body, readEcho, since) {
+  const echo = await delivery.waitForValue(readEcho, SENT_ECHO_WAIT_MS);
+  if (echo) return echo;
+  const text = typeof body === 'string' ? normalizeAutoReplyBody138(body) : '';
+  if (!text) return null;
+  const lookup = client.getChatById(target).then((chat) => chat.fetchMessages({limit: 15, fromMe: true}));
+  const recent = await Promise.race([
+    lookup,
+    new Promise((resolve) => setTimeout(() => resolve([]), SENT_LOOKUP_TIMEOUT_MS)),
+  ]);
+  return delivery.findSentMessage(recent, {
+    text,
+    since,
+    readText: (message) => normalizeAutoReplyBody138(incomingText(message)),
+    isKnown: (message) => isRememberedInternalOutgoing(normalizeMessageIdObject(message) || serializedId(message.id)),
+  });
+}
+
+function sendStartSeconds() {
+  return Math.floor(Date.now() / 1000) - 5; // tolerate a small clock difference
 }
 
 // Входящие звонки от обычных пользователей всегда отклоняются. Чтобы один
@@ -3283,8 +3324,10 @@ async function sendToUser(recipients, content) {
   try {
     // A transport exception can occur after delivery. Trying the same user via
     // the next PN/LID address would send the automatic reply twice.
+    const since = sendStartSeconds();
     outcome = await delivery.sendOnce({
       client, recipient:targets[0], aliases:targets, content, options:{}, begin:async()=>true,
+      confirm: (target) => confirmSentMessage(target, content, () => confirmedAutoReplyEchoes138.get(echoToken), since),
     });
     if (outcome.status !== 'sent') throw new Error(outcome.error);
     rememberInternalOutgoingMessage(outcome.message);
@@ -4110,9 +4153,12 @@ async function pollOutbound() {
       if (String(queued.body || '').trim()) options.caption=String(queued.body);
 
     }
+    const since = sendStartSeconds();
     const outcome = await delivery.sendOnce({
       client, recipient, content, options, aliases: sendAliases,
       begin: async () => Boolean((await postJson('/api/outbound/begin', {message_id:queued.id})).updated),
+      confirm: (target) => confirmSentMessage(target, String(queued.body || ''),
+        () => activeInternalOutgoingFingerprint && activeInternalOutgoingFingerprint.echo, since),
     });
     if (outcome.status !== 'sent') {
       await postJson('/api/outbound/result', {message_id:queued.id, status:outcome.status, error:outcome.error});
@@ -5166,6 +5212,7 @@ client.on('message_create', async (message) => {
     // WhatsApp id/stanza to the internal send. Otherwise the same screenshot is
     // imported as a "manual" message and its media is endlessly re-downloaded.
     const outgoingEventId = normalizeMessageIdObject(message) || serializedId(message && message.id);
+    captureActiveOutgoingEcho(message, rawChatId);
     const automaticReplyEcho = matchesPendingAutoReplyEcho138(message, rawChatId);
     let internalChatEvent = automaticReplyEcho || isRememberedInternalOutgoing(outgoingEventId) || isInternalOutgoing(rawChatId) || matchesActiveInternalOutgoing(message, rawChatId);
     let canonicalForInternal = rawChatId;
