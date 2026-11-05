@@ -58,6 +58,8 @@ from queue_attachment_archive import AttachmentArchive
 from queue_outbound_service import OutboundService
 from queue_stale_menu import StaleMenuRecovery
 from queue_productivity_http import ProductivityRoutes
+from queue_reliability_http import ReliabilityRoutes
+from queue_workflow_http import WorkflowRoutes
 
 # Public release from CHANGELOG.md; reported by /api/integration/ping.
 APP_VERSION = "v143"
@@ -1285,6 +1287,13 @@ RELIABILITY = queue_reliability.ReliabilityMonitor(STORE, DATA_DIR, DATABASE_PAT
 PRODUCTIVITY_ROUTES = ProductivityRoutes(STORE, DATA_DIR, DATABASE_PATH, csrf_token=csrf_token, layout=layout,
                                          admin_layout=admin_layout, category_items=active_ticket_category_items,
                                          active_employee=active_employee)
+WORKFLOW_ROUTES = WorkflowRoutes(STORE, csrf_token=csrf_token, layout=layout, admin_layout=admin_layout,
+                                 category_items=active_ticket_category_items, categories=CATEGORIES,
+                                 employees=EMPLOYEES, work_actor=work_actor,
+                                 update_ticket_status=update_ticket_status, events=queue_realtime)
+RELIABILITY_ROUTES = ReliabilityRoutes(STORE, RELIABILITY, csrf_token=csrf_token, admin_layout=admin_layout,
+                                       max_media_bytes=MAX_MEDIA_BYTES, active_employee=active_employee,
+                                       chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, avatars=AVATARS)
 
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
@@ -1292,6 +1301,8 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
     inbound_service = INBOUND_SERVICE
     outbound_service = OUTBOUND_SERVICE
     productivity_routes = PRODUCTIVITY_ROUTES
+    workflow_routes = WORKFLOW_ROUTES
+    reliability_routes = RELIABILITY_ROUTES
     server_version = "UnifiedQueue/1.00.1"
 
     def _generic_domain_path(self):

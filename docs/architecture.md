@@ -42,6 +42,12 @@ flowchart LR
 | `queue_stale_menu.py` | `StaleMenuRecovery`: фоновый повтор меню, если входящее сообщение осталось без автоответа |
 | `queue_reliability.py` | `ReliabilityMonitor`: проверки базы, диска и коннектора, тревоги, диагностика, отложенная отправка |
 | `queue_productivity_http.py` | `ProductivityRoutes`: напоминания, аналитика, резервные копии, метки и поиск в чате |
+| `queue_workflow_http.py` | `WorkflowRoutes`: недавние чаты, рабочие настройки, действия с заявками, экспорт чата |
+| `queue_reliability_http.py` | `ReliabilityRoutes`: страница «Надёжность», диагностика, отложенные сообщения |
+
+HTTP-модули с классами `*Routes` создаются в `app.py` и подключаются к обработчику
+запросов атрибутами класса (`productivity_routes`, `workflow_routes`, `reliability_routes`),
+как `inbound_service`. Новые обработчики добавляйте так же, а не через `get(handler, app)`.
 
 ## Границы зависимостей
 
