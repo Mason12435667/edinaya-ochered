@@ -60,6 +60,7 @@ from queue_stale_menu import StaleMenuRecovery
 from queue_productivity_http import ProductivityRoutes
 from queue_reliability_http import ReliabilityRoutes
 from queue_workflow_http import WorkflowRoutes
+from queue_feature_http import FeatureRoutes
 
 # Public release from CHANGELOG.md; reported by /api/integration/ping.
 APP_VERSION = "v143"
@@ -941,7 +942,8 @@ def decorate_chat_messages(chat_id: str, messages: list[dict[str, object]]) -> l
                 # [Фото] rows by matching the still-present clipboard upload to
                 # this exact chat and WhatsApp timestamp.
                 media = queue_uploads.recover_clipboard_attachment(
-                    sys.modules[__name__],
+                    STORE,
+                    ATTACHMENTS,
                     chat_id,
                     str(item.get("id", "")),
                     int(item.get("timestamp", item.get("message_timestamp", 0)) or 0),
@@ -1294,6 +1296,9 @@ WORKFLOW_ROUTES = WorkflowRoutes(STORE, csrf_token=csrf_token, layout=layout, ad
 RELIABILITY_ROUTES = ReliabilityRoutes(STORE, RELIABILITY, csrf_token=csrf_token, admin_layout=admin_layout,
                                        max_media_bytes=MAX_MEDIA_BYTES, active_employee=active_employee,
                                        chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, avatars=AVATARS)
+FEATURE_ROUTES = FeatureRoutes(STORE, AVATARS, ROOT, decorate_chat_messages=decorate_chat_messages,
+                               csrf_token=csrf_token, admin_layout=admin_layout)
+UPLOAD_ROUTES = queue_uploads.UploadRoutes(UPLOADS, work_actor)
 
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
@@ -1303,6 +1308,8 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
     productivity_routes = PRODUCTIVITY_ROUTES
     workflow_routes = WORKFLOW_ROUTES
     reliability_routes = RELIABILITY_ROUTES
+    feature_routes = FEATURE_ROUTES
+    upload_routes = UPLOAD_ROUTES
     server_version = "UnifiedQueue/1.00.1"
 
     def _generic_domain_path(self):

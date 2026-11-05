@@ -5,6 +5,7 @@ import secrets
 import shutil
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
@@ -124,49 +125,53 @@ def safe_mime(value):
     return value if re.fullmatch(r'[a-z0-9.+-]+/[a-z0-9.+-]+',value) else 'application/octet-stream'
 
 
-def post(handler, app):
-    parsed=urlparse(handler.path)
-    if not parsed.path.startswith('/upload/'): return False
-    user = handler.effective_user() or {}
-    owner = str(user.get('id') or ('legacy:' + str(user.get('username') or '')))
-    try:
-        if parsed.path == '/upload/start':
-            payload=handler.read_json_body(20000)
-            if payload is None: return True
-            if not handler.claim_conversation_write(str(payload.get('chat_id', ''))): return True
-            result=app.UPLOADS.start(payload,app.work_actor(),owner=owner)
-        elif parsed.path == '/upload/chunk':
-            q=parse_qs(parsed.query)
-            app.UPLOADS.authorized_chat(q.get('id',[''])[0],owner)
-            length=int(handler.headers.get('Content-Length','0'))
-            if length<=0 or length>CHUNK: raise ValueError('Недопустимый размер части')
-            data=handler.read_body(CHUNK)
-            if data is None or len(data)!=length: raise ValueError('Передача прервана')
-            result=app.UPLOADS.append(q.get('id',[''])[0],int(q.get('offset',['0'])[0]),data)
-        elif parsed.path in {'/upload/finish','/upload/cancel'}:
-            payload=handler.read_json_body(2000)
-            if payload is None: return True
-            token=str(payload.get('upload_id',''))
-            chat = app.UPLOADS.authorized_chat(token,owner)
-            if parsed.path.endswith('/finish') and not handler.claim_conversation_write(chat): return True
-            if parsed.path.endswith('/cancel'):
-                app.UPLOADS.cancel(token); result={'cancelled':True}
-            else: result=app.UPLOADS.finish(token)
-        else:
-            handler.json_response({'error':'Неизвестная операция'},404); return True
-        handler.json_response(result)
-    except PermissionError as exc:
-        handler.json_response({'error':str(exc)},403)
-    except (ValueError,TypeError,OSError) as exc:
-        _media_log(f"error route={parsed.path} reason={str(exc)[:180]!r}")
-        handler.json_response({'error':str(exc)[:180]},400)
-    return True
+class UploadRoutes:
+    """/upload/* endpoints of the chunked upload, on behalf of the signed-in user."""
+
+    def __init__(self, uploads: Uploads, work_actor: Callable[[], str]):
+        self.uploads = uploads
+        self.work_actor = work_actor
+
+    def post(self, handler):
+        parsed=urlparse(handler.path)
+        if not parsed.path.startswith('/upload/'): return False
+        user = handler.effective_user() or {}
+        owner = str(user.get('id') or ('legacy:' + str(user.get('username') or '')))
+        try:
+            if parsed.path == '/upload/start':
+                payload=handler.read_json_body(20000)
+                if payload is None: return True
+                if not handler.claim_conversation_write(str(payload.get('chat_id', ''))): return True
+                result=self.uploads.start(payload,self.work_actor(),owner=owner)
+            elif parsed.path == '/upload/chunk':
+                q=parse_qs(parsed.query)
+                self.uploads.authorized_chat(q.get('id',[''])[0],owner)
+                length=int(handler.headers.get('Content-Length','0'))
+                if length<=0 or length>CHUNK: raise ValueError('Недопустимый размер части')
+                data=handler.read_body(CHUNK)
+                if data is None or len(data)!=length: raise ValueError('Передача прервана')
+                result=self.uploads.append(q.get('id',[''])[0],int(q.get('offset',['0'])[0]),data)
+            elif parsed.path in {'/upload/finish','/upload/cancel'}:
+                payload=handler.read_json_body(2000)
+                if payload is None: return True
+                token=str(payload.get('upload_id',''))
+                chat = self.uploads.authorized_chat(token,owner)
+                if parsed.path.endswith('/finish') and not handler.claim_conversation_write(chat): return True
+                if parsed.path.endswith('/cancel'):
+                    self.uploads.cancel(token); result={'cancelled':True}
+                else: result=self.uploads.finish(token)
+            else:
+                handler.json_response({'error':'Неизвестная операция'},404); return True
+            handler.json_response(result)
+        except PermissionError as exc:
+            handler.json_response({'error':str(exc)},403)
+        except (ValueError,TypeError,OSError) as exc:
+            _media_log(f"error route={parsed.path} reason={str(exc)[:180]!r}")
+            handler.json_response({'error':str(exc)[:180]},400)
+        return True
 
 
-
-
-
-def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, body='', message_type=''):
+def recover_clipboard_attachment(store, attachments, chat_id, message_id, message_timestamp=0, body='', message_type=''):
     """Recover a Win+Shift+S attachment from the outbound queue by chat and time.
 
     WhatsApp can successfully deliver a clipboard screenshot while whatsapp-web.js
@@ -191,7 +196,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
         return {}
 
     try:
-        canonical = app.STORE.canonical_whatsapp_chat_id(safe_chat) or safe_chat
+        canonical = store.canonical_whatsapp_chat_id(safe_chat) or safe_chat
     except Exception:
         log_suppressed("queue_uploads.recover_clipboard_attachment")
         canonical = safe_chat
@@ -201,7 +206,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
     observed_cmp = '' if observed.casefold() in placeholders else observed
 
     try:
-        with app.STORE.connection() as db:
+        with store.connection() as db:
             rows = db.execute(
                 """
                 SELECT id, chat_id, body, status, provider_id, media_path,
@@ -225,7 +230,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
             # A different WhatsApp ID means this queue row was already paired.
             continue
         try:
-            row_chat = app.STORE.canonical_whatsapp_chat_id(str(row['chat_id'] or '')) or str(row['chat_id'] or '')
+            row_chat = store.canonical_whatsapp_chat_id(str(row['chat_id'] or '')) or str(row['chat_id'] or '')
         except Exception:
             log_suppressed("queue_uploads.recover_clipboard_attachment")
             row_chat = str(row['chat_id'] or '')
@@ -262,7 +267,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
     row = candidates[0][2]
     queue_id = int(row['id'])
 
-    preserved = app.ATTACHMENTS.preserve(queue_id)
+    preserved = attachments.preserve(queue_id)
     if not preserved:
         return {}
 
@@ -270,7 +275,7 @@ def recover_clipboard_attachment(app, chat_id, message_id, message_timestamp=0, 
     # uncertain queue item did reach WhatsApp.  Finalize it only after the bytes
     # were preserved, so complete_outbound_message may safely remove the temp.
     try:
-        app.STORE.complete_outbound_message(queue_id, True, '', safe_message)
+        store.complete_outbound_message(queue_id, True, '', safe_message)
     except Exception:
         # The media itself is already safe; history can still use it.
         log_suppressed("queue_uploads.recover_clipboard_attachment")

@@ -45,9 +45,9 @@ flowchart LR
 | `queue_workflow_http.py` | `WorkflowRoutes`: недавние чаты, рабочие настройки, действия с заявками, экспорт чата |
 | `queue_reliability_http.py` | `ReliabilityRoutes`: страница «Надёжность», диагностика, отложенные сообщения |
 
-HTTP-модули с классами `*Routes` создаются в `app.py` и подключаются к обработчику
-запросов атрибутами класса (`productivity_routes`, `workflow_routes`, `reliability_routes`),
-как `inbound_service`. Новые обработчики добавляйте так же, а не через `get(handler, app)`.
+HTTP-модули с классами `*Routes` (также `FeatureRoutes` и `UploadRoutes`) создаются в
+`app.py` и подключаются к обработчику запросов атрибутами класса (`productivity_routes`,
+`workflow_routes`, `reliability_routes`, `feature_routes`, `upload_routes`), как `inbound_service`. Новые обработчики добавляйте так же, а не через `get(handler, app)`.
 
 ## Границы зависимостей
 

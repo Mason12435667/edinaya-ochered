@@ -659,7 +659,8 @@ class WhatsAppHandlerMixin:
                 )
                 if not recovered_media:
                     recovered_media = queue_uploads.recover_clipboard_attachment(
-                        app,
+                        app.STORE,
+                        app.ATTACHMENTS,
                         chat_id,
                         message_id,
                         timestamp,
@@ -849,71 +850,6 @@ class WhatsAppHandlerMixin:
             "messages": messages,
             "has_more": bool(page.get("has_more")),
             "cursor": str(page.get("cursor", "")),
-        })
-
-    def handle_message_window(self, query: dict[str, list[str]]) -> None:
-        """Return a history page containing the message referenced by a quote.
-
-        WhatsApp Web does not always expose the same identifier for a quoted
-        message that whatsapp-web.js exposes for the original message.  Some
-        builds return only stanzaId.  Therefore we first try the exact id and,
-        if that fails, resolve the original by quoted text/sender immediately
-        before the reply.
-        """
-        chat_id = valid_conversation_id(query.get("chat_id", [""])[0])
-        requested_id = normalize_message(query.get("message_id", [""])[0])[:160]
-        quoted_body = normalize_message(query.get("quoted_body", [""])[0])[:1200]
-        quoted_sender = normalize_message(query.get("quoted_sender", [""])[0])[:100]
-        try:
-            before_ts = max(0, int(query.get("before_ts", ["0"])[0] or 0))
-        except (TypeError, ValueError):
-            before_ts = 0
-        if not chat_id or not (requested_id or quoted_body):
-            self.json_response({"messages": [], "has_more": False, "cursor": "", "error": "Не выбран чат или сообщение"}, HTTPStatus.BAD_REQUEST)
-            return
-
-        target = app.STORE.resolve_whatsapp_message(chat_id, requested_id)
-        resolved_id = str(target["message_key"]) if target else ""
-        found_page = None
-
-        if not target or bool(target.get("deleted")):
-            self.json_response({"messages": [], "has_more": False, "cursor": "", "error": "Сообщение недоступно"}, HTTPStatus.NOT_FOUND)
-            return
-
-        if found_page is not None:
-            page = found_page
-            raw_messages = list(page.get("messages", []))
-        else:
-            try:
-                target_ts = int(target.get("message_timestamp") or target.get("timestamp") or 0)
-                target_row = int(target.get("id") or target.get("history_row_id") or 0)
-            except (TypeError, ValueError):
-                target_ts = target_row = 0
-            cursor_before_target = f"{target_ts}:{target_row + 1}" if target_row > 0 else ""
-            page = app.STORE.list_saved_whatsapp_messages_page(chat_id, 100, cursor_before_target)
-            raw_messages = list(page.get("messages", []))
-            if not any(str(item.get("id", "")) == resolved_id for item in raw_messages):
-                raw_messages = []
-                cursor = ""
-                for _ in range(50):
-                    candidate = app.STORE.list_saved_whatsapp_messages_page(chat_id, 100, cursor)
-                    batch = list(candidate.get("messages", []))
-                    if any(str(item.get("id", "")) == resolved_id for item in batch):
-                        raw_messages = batch
-                        page = candidate
-                        break
-                    if not candidate.get("has_more") or not candidate.get("cursor"):
-                        break
-                    cursor = str(candidate.get("cursor", ""))
-        if not raw_messages:
-            self.json_response({"messages": [], "has_more": False, "cursor": "", "error": "Сообщение не найдено в истории"}, HTTPStatus.NOT_FOUND)
-            return
-        messages = app.decorate_chat_messages(chat_id, dedupe_whatsapp_messages(raw_messages))
-        self.json_response({
-            "messages": messages,
-            "has_more": bool(page.get("has_more")),
-            "cursor": str(page.get("cursor", "")),
-            "target_id": resolved_id,
         })
 
     def handle_chat_media(self, query: dict[str, list[str]]) -> None:
