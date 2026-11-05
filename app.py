@@ -36,7 +36,6 @@ import queue_admin_views
 import queue_chat_state
 import queue_chat_views
 import queue_whatsapp_handlers
-import queue_stale_menu
 import queue_http_handler
 import queue_ticket_service
 import queue_work_context
@@ -49,15 +48,16 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from ticketing import CATEGORIES, PRIORITIES, STATUSES, TicketStore
-from queue_store_conversations import MENU_CONTEXT, MENU_GATE_CONTEXT
+from queue_store_conversations import MENU_CONTEXT
 from queue_core import log_suppressed, normalize_message
 import queue_generic_profile
 from queue_menu_config import MenuConfig
 from queue_bot_menu import BotMenu
-from queue_contact_profiles import ContactProfiles, USER_PROFILE_CONTEXT
+from queue_contact_profiles import ContactProfiles
 from queue_inbound_service import InboundDependencies, InboundService
 from queue_attachment_archive import AttachmentArchive
 from queue_outbound_service import OutboundService
+from queue_stale_menu import StaleMenuRecovery
 
 # Public release from CHANGELOG.md; reported by /api/integration/ping.
 APP_VERSION = "v143"
@@ -1281,6 +1281,7 @@ INBOUND_SERVICE = InboundService(InboundDependencies(
 
 ATTACHMENTS = AttachmentArchive(STORE, MEDIA_DIR, OUTBOUND_MEDIA_DIR, UPLOADS.root)
 OUTBOUND_SERVICE = OutboundService(STORE, ATTACHMENTS, queue_realtime, global_auto_reply_enabled)
+STALE_MENU = StaleMenuRecovery(STORE, MENU, CONTACTS, queue_realtime, global_auto_reply_enabled)
 
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
@@ -1319,7 +1320,7 @@ def main() -> None:
     threading.Thread(target=scheduled_backup_worker, name="queue-scheduled-backup", daemon=True).start()
     threading.Thread(target=queue_reliability.worker_loop, args=(sys.modules[__name__],), name="queue-reliability", daemon=True).start()
     threading.Thread(target=queue_performance.worker_loop, args=(sys.modules[__name__],), name="queue-performance", daemon=True).start()
-    threading.Thread(target=queue_stale_menu.worker_loop, args=(sys.modules[__name__],), name="queue-stale-menu", daemon=True).start()
+    threading.Thread(target=STALE_MENU.worker_loop, name="queue-stale-menu", daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), TicketHandler)
     address = f"http://127.0.0.1:{PORT}"
     print(f"Единая очередь запущена: {address}")
