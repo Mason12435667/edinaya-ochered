@@ -466,6 +466,10 @@ function internalMessageStanza(value, message = null) {
 
 function rememberInternalOutgoingMessage(message, ttlMs = 2 * 60 * 60 * 1000) {
   const messageId = normalizeMessageIdObject(message) || serializedId(message && message.id);
+  return rememberInternalOutgoingMessageId(messageId, ttlMs, message);
+}
+
+function rememberInternalOutgoingMessageId(messageId, ttlMs, message = null) {
   const until = Date.now() + ttlMs;
   if (messageId) internalOutgoingMessageIds.set(messageId, until);
   const stanza = internalMessageStanza(messageId, message);

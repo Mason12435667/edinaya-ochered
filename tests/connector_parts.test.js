@@ -80,6 +80,22 @@ test('the common part depends on no other part', () => {
   assert.deepEqual(requires.filter((name) => FILES.includes(name)), []);
 });
 
+test('media recovered by the server is remembered and the request succeeds', async () => {
+  const ids = ['true_77010000001@c.us_RECOVERED1', 'true_77010000001@c.us_RECOVERED2'];
+  const answer = {local_media_recovered: ids};
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ok: true, status: 200, json: async () => answer});
+  try {
+    assert.deepEqual(await common.postJsonOnce('/api/chat-messages-sync', {messages: []}), answer);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  for (const id of ids) {
+    assert.ok(common.locallyRecoveredMediaIds.has(id), id);
+    assert.ok(common.isRememberedInternalOutgoing(id), id);
+  }
+});
+
 test('the connector starts only from its entry point', () => {
   for (const file of FILES.filter((name) => name !== 'whatsapp_qr_connector')) {
     assert.doesNotMatch(sourceOf(file), /client\.initialize\(/, file);
