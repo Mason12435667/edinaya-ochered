@@ -1,0 +1,39 @@
+
+      <section class="page-heading whatsapp-heading conversation-heading-compact">
+        <span class="connection-badge offline" id="whatsapp-connection">Проверка подключения</span>
+      </section>
+      <section class="chat-shell" data-conversation-page data-whatsapp-page data-state-endpoint="/api/chat-state" data-send-endpoint="/chat-send" data-media-send-endpoint="/chat-media-send" data-forward-endpoint="/chat-forward" data-initial-chat-id="{{ initial_chat_id }}" data-list-empty="Личные чаты пока не загружены" data-select-title="Выберите пользователя">
+        <aside class="panel chat-sidebar">
+          <div class="chat-sidebar-head">
+            <h2>Чаты</h2>
+            <button class="icon-button" type="button" data-chat-refresh title="Обновить">Обновить</button>
+          </div>
+          <input type="search" data-chat-search placeholder="Поиск по имени или номеру">
+          <div class="chat-list" data-chat-list><p class="chat-placeholder">Загрузка чатов...</p></div>
+        </aside>
+        <section class="panel chat-main">
+          <header class="chat-header">
+            <div><small>Диалог WhatsApp</small><h2 data-chat-title>Выберите пользователя</h2><span class="contact-presence" data-contact-presence hidden></span><span class="manual-mode-state" data-manual-mode-state></span><div class="contact-profile-summary" data-contact-profile-summary hidden></div></div>
+            <div class="chat-header-actions">
+              <button class="button compact" type="button" data-profile-toggle disabled>Профиль</button>
+              <button class="button compact toolbar-overflow-source" type="button" data-manual-mode-toggle disabled>Выключить автоответчик</button>
+            </div>
+          </header>
+          <div class="chat-messages" data-chat-messages>
+            <p class="chat-placeholder">Выберите чат слева, чтобы увидеть последние сообщения</p>
+          </div>
+          <div class="forward-toolbar" data-forward-toolbar hidden><strong data-forward-count>0 сообщений выбрано</strong><select data-forward-target aria-label="Куда переслать"></select><button class="button compact" type="button" data-forward-cancel>Отмена</button><button class="button primary compact" type="button" data-forward-send>Переслать</button></div>
+          <form class="chat-composer" data-chat-composer>
+            <input type="hidden" name="chat_id" data-chat-id>
+            <input type="hidden" name="reply_to" data-reply-to>
+            <div class="reply-preview" data-reply-preview hidden><div><strong data-reply-sender></strong><span data-reply-body></span></div><button type="button" data-reply-cancel aria-label="Отменить ответ">×</button></div>
+            <span class="composer-file-name" data-media-name></span>
+            <textarea class="composer-message-input" name="message" rows="2" maxlength="32000" placeholder="Введите сообщение"></textarea>
+            <button class="button primary composer-send" type="submit">Отправить</button>
+            <div class="composer-tools"><button class="composer-tool" type="button" data-emoji-toggle title="Смайлы">☺</button><label class="composer-tool composer-attach" title="Прикрепить файл">📎<input type="file" data-media-input multiple accept="image/*,video/*,audio/*,.pdf,.txt,.csv,.docx,.xlsx,.json,.xml,.zip,.rar,.7z" hidden></label></div>
+            <div class="emoji-picker" data-emoji-picker hidden></div>
+          </form>
+        </section>
+      </section>
+      <p class="muted chat-page-note">Для работы вкладки должны быть запущены программа и WhatsApp-коннектор. Телефон постоянно держать рядом не требуется.</p>
+    

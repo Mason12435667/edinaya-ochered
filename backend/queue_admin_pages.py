@@ -23,6 +23,7 @@ from queue_ticket_service import TicketService
 from queue_user_locale import tr
 from queue_work_context import category_options, employee_options, monitor_log_entries, priority_options, system_status_snapshot
 from ticketing import STATUSES, TicketStore
+from queue_templates import render_template
 
 ERROR_REPORT_STATUS_LABELS = {
     "new": "Новая",
@@ -58,16 +59,19 @@ def _category_editor_row(suffix: str, row: dict[str, object], used_numbers: set[
     delete = (f'<label class="checkbox-label danger-choice"><input type="checkbox" name="delete_{suffix}" value="1">Удалить категорию</label>'
               if suffix != "new" else "")
     required_attr = "required" if suffix != "new" else ""
-    return f"""<article class="menu-editor-row panel">
-      {key_field}
-      <label>Номер в меню<select name="number_{suffix}">{options}</select></label>
-      <label>Название (RU)<input name="label_ru_{suffix}" maxlength="80" value="{e(str(row.get('label_ru', '')))}" {required_attr}></label>
-      <label>Название (KZ)<input name="label_kz_{suffix}" maxlength="80" value="{e(str(row.get('label_kz', '')))}"></label>
-      <label>Подсказка после выбора (RU)<textarea name="prompt_ru_{suffix}" maxlength="1200" rows="2">{e(str(row.get('prompt_ru', '')))}</textarea></label>
-      <label>Подсказка после выбора (KZ)<textarea name="prompt_kz_{suffix}" maxlength="1200" rows="2">{e(str(row.get('prompt_kz', '')))}</textarea></label>
-      <fieldset class="checkbox-group"><legend>Бот обязательно спросит</legend>{checks}</fieldset>
-      {delete}
-    </article>"""
+    return render_template(
+        "admin/category_editor_row.html",
+        key_field=key_field,
+        suffix=suffix,
+        options=options,
+        label_ru=e(str(row.get('label_ru', ''))),
+        required_attr=required_attr,
+        label_kz=e(str(row.get('label_kz', ''))),
+        prompt_ru=e(str(row.get('prompt_ru', ''))),
+        prompt_kz=e(str(row.get('prompt_kz', ''))),
+        checks=checks,
+        delete=delete,
+    )
 
 
 def avatar_html(avatars: AvatarCache, chat_id: str, name: str) -> str:
@@ -106,31 +110,17 @@ class AdminPages:
         groups = len(self.deps.store.list_whatsapp_groups())
         error_counts = self.deps.store.error_report_counts()
         open_errors = int(error_counts.get("new", 0)) + int(error_counts.get("in_progress", 0))
-        cards = f"""
-      <section class="admin-card-grid">
-        <a class="panel admin-card" href="/admin/users"><span>Доступ</span><strong>{len(self.deps.auth.list_users())}</strong><small>Логины, пароли и роли пользователей</small></a>
-        <a class="panel admin-card" href="/admin/employees"><span>Сотрудники</span><strong>{len(self.deps.employees)}</strong><small>Имена и количество сотрудников</small></a>
-        <a class="panel admin-card" href="/admin/manual"><span>Ручная заявка</span><strong>+</strong><small>Создать запрос от имени сотрудника</small></a>
-        <a class="panel admin-card" href="/admin/menu"><span>Тексты WhatsApp</span><strong>RU/KZ</strong><small>Актуальный пользовательский сценарий и системные ответы</small></a>
-        <a class="panel admin-card" href="/admin/categories"><span>Категории</span><strong>{len(self.deps.menu.active_ticket_category_items())}</strong><small>Добавить, убрать или переименовать виды заявок</small></a>
-        <a class="panel admin-card" href="/admin/errors"><span>Ошибки</span><strong>{open_errors}</strong><small>Отдельные репорты пользователей, не являющиеся заявками</small></a>
-        <a class="panel admin-card" href="/admin/contacts"><span>Контакты WhatsApp</span><strong>{contacts}</strong><small>Добавление пользователя по номеру</small></a>
-        <a class="panel admin-card" href="/groups"><span>Группы WhatsApp</span><strong>{groups}</strong><small>Общая переписка и отправка сообщений</small></a>
-        <a class="panel admin-card" href="/admin/audit"><span>Журнал</span><strong>≡</strong><small>Действия сотрудников, сообщения и ошибки</small></a>
-        <a class="panel admin-card" href="/admin/analytics"><span>Аналитика</span><strong>↗</strong><small>Сотрудники, смены, категории и время обработки</small></a>
-        <a class="panel admin-card" href="/admin/manager"><span>Dashboard руководителя</span><strong>▦</strong><small>Нагрузка, скорость обработки и частые проблемы</small></a>
-        <a class="panel admin-card" href="/admin/api-keys"><span>API-ключи</span><strong>⌘</strong><small>Read-only ключи для будущих интеграций</small></a>
-        <a class="panel admin-card" href="/admin/backups"><span>Бэкапы</span><strong>⟳</strong><small>Создание, проверка и восстановление базы</small></a>
-        <a class="panel admin-card" href="/admin/workflow"><span>Хранение / процессы</span><strong>⚙</strong><small>Сроки хранения, очистка медиа и правила закрытия</small></a>
-        <a class="panel admin-card" href="/admin/reliability"><span>Надёжность</span><strong>🛡</strong><small>Диагностика, очередь ошибок, бэкапы и обслуживание</small></a>
-        <a class="panel admin-card" href="/admin/system"><span>Система</span><strong>●</strong><small>Состояние, очередь отправки и хранилище</small></a>
-      </section>
-      <section class="panel integration-status">
-        <h2>{'Локальный тестовый режим' if self.deps.local_mode else 'Авторизация приложения'}</h2>
-        <div><span>Учётных записей</span><strong>{len(self.deps.auth.list_users())}</strong></div>
-        <p class="muted">{'Windows-копия использует отдельную тестовую базу и отдельные логины.' if self.deps.local_mode else 'Пользователи входят через /login. Существующий Nginx-администратор сохранён как аварийный путь для первичной настройки и восстановления доступа.'}</p>
-      </section>
-    """
+        cards = render_template(
+            "admin/home.html",
+            users_count=len(self.deps.auth.list_users()),
+            employees_count=len(self.deps.employees),
+            categories_count=len(self.deps.menu.active_ticket_category_items()),
+            open_errors=open_errors,
+            contacts=contacts,
+            groups=groups,
+            local_mode_text='Локальный тестовый режим' if self.deps.local_mode else 'Авторизация приложения',
+            local_mode_text_2='Windows-копия использует отдельную тестовую базу и отдельные логины.' if self.deps.local_mode else 'Пользователи входят через /login. Существующий Nginx-администратор сохранён как аварийный путь для первичной настройки и восстановления доступа.',
+        )
         return self.deps.admin_layout("Админка", cards, "home")
 
     def error_report_status_badge(self, status: str) -> str:
@@ -157,30 +147,29 @@ class AdminPages:
             phone = display_phone(str(report.get("phone", ""))) if report.get("phone") else "—"
             attachment = str(report.get("attachment_name", "") or "")
             rows.append(
-                f'<tr><td><a class="ticket-title-link" href="/admin/error?id={report_id}">#{report_id}</a></td>'
-                f'<td>{self.error_report_status_badge(str(report.get("status", "new")))}</td>'
-                f'<td><strong>{e(sender)}</strong><small>{e(phone)}</small></td>'
-                f'<td><strong>{e(description[:150] or "Без текста")}</strong>'
-                f'<small>{e(("Вложение: " + attachment) if attachment else "")}</small></td>'
-                f'<td>{e(human_time(str(report.get("created_at", ""))) or "—")}</td></tr>'
+                render_template(
+                    "admin/error_row.html",
+                    report_id=report_id,
+                    error_report_status_badge=self.error_report_status_badge(str(report.get("status", "new"))),
+                    sender=e(sender),
+                    phone=e(phone),
+                    description=e(description[:150] or "Без текста"),
+                    attachment_text=e(("Вложение: " + attachment) if attachment else ""),
+                    human_time=e(human_time(str(report.get("created_at", ""))) or "—"),
+                )
             )
         table_rows = "".join(rows) or '<tr><td colspan="5" class="empty">Репортов по этому фильтру нет</td></tr>'
         options = '<option value="">Все статусы</option>' + "".join(
             f'<option value="{key}" {"selected" if selected_status == key else ""}>{e(label)}</option>'
             for key, label in ERROR_REPORT_STATUS_LABELS.items()
         )
-        content = f'''\
-      {notice_html}
-      <section class="panel table-panel">
-        <div class="section-heading"><div><p class="eyebrow">Отдельно от заявок</p><h2>Репорты об ошибках</h2><p>Сообщения пользователей о багах системы. Они не участвуют в SLA и не попадают в список заявок.</p></div></div>
-        <form class="filters" method="get" action="/admin/errors">
-          <input type="search" name="q" value="{e(search)}" placeholder="Текст, имя, телефон, номер репорта...">
-          <select name="status">{options}</select>
-          <button class="button" type="submit">Найти</button><a class="button ghost" href="/admin/errors">Сбросить</a>
-        </form>
-        <div class="table-scroll"><table><thead><tr><th>ID</th><th>Статус</th><th>Пользователь</th><th>Описание</th><th>Создан</th></tr></thead><tbody>{table_rows}</tbody></table></div>
-      </section>
-    '''
+        content = render_template(
+            "admin/errors.html",
+            notice_html=notice_html,
+            search=e(search),
+            options=options,
+            table_rows=table_rows,
+        )
         return self.deps.admin_layout("Ошибки", content, "errors")
 
     def render_admin_error(self, report_id: int, query: dict[str, list[str]]) -> str:
@@ -208,28 +197,21 @@ class AdminPages:
             f'<option value="{key}" {"selected" if str(report.get("status", "new")) == key else ""}>{e(label)}</option>'
             for key, label in ERROR_REPORT_STATUS_LABELS.items()
         )
-        content = f'''\
-      {notice_html}
-      <section class="section-heading"><div><p class="eyebrow">Репорт #{int(report.get("id", 0) or 0)}</p><h2>Ошибка пользователя</h2><p>{e(human_time(str(report.get("created_at", ""))))}</p></div>{chat_link}</section>
-      <section class="panel ticket-details">
-        <div><span>Статус</span><strong>{self.error_report_status_badge(str(report.get("status", "new")))}</strong></div>
-        <div><span>Пользователь</span><strong>{e(str(report.get("sender", "") or "Неизвестный"))}</strong></div>
-        <div><span>Телефон</span><strong>{e(display_phone(str(report.get("phone", ""))) if report.get("phone") else "—")}</strong></div>
-        <div><span>Описание</span><strong style="white-space:pre-wrap">{e(str(report.get("description", "") or "Без текста"))}</strong></div>
-      </section>
-      {attachment_html}
-      <section class="panel">
-        <div class="section-heading"><div><h2>Обработка репорта</h2><p>Статус и служебная заметка видны только внутри «Единой очереди».</p></div></div>
-        <form class="manual-form" method="post" action="/admin/errors">
-          <input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}">
-          <input type="hidden" name="report_id" value="{int(report.get("id", 0) or 0)}">
-          <label>Статус<select name="status">{status_options}</select></label>
-          <label class="wide">Заметка<textarea name="admin_note" rows="4" maxlength="3000" placeholder="Что проверили / как исправили">{e(str(report.get("admin_note", "") or ""))}</textarea></label>
-          <button class="button primary" type="submit">Сохранить</button>
-          <a class="button ghost" href="/admin/errors">К списку ошибок</a>
-        </form>
-      </section>
-    '''
+        content = render_template(
+            "admin/error.html",
+            notice_html=notice_html,
+            id=int(report.get("id", 0) or 0),
+            human_time=e(human_time(str(report.get("created_at", "")))),
+            chat_link=chat_link,
+            error_report_status_badge=self.error_report_status_badge(str(report.get("status", "new"))),
+            sender=e(str(report.get("sender", "") or "Неизвестный")),
+            phone_text=e(display_phone(str(report.get("phone", ""))) if report.get("phone") else "—"),
+            description=e(str(report.get("description", "") or "Без текста")),
+            attachment_html=attachment_html,
+            csrf_token=e(self.deps.csrf_token()),
+            status_options=status_options,
+            admin_note=e(str(report.get("admin_note", "") or "")),
+        )
         return self.deps.admin_layout(f"Ошибка #{report_id}", content, "errors")
 
     def render_admin_audit(self, query: dict[str, list[str]]) -> str:
@@ -258,19 +240,17 @@ class AdminPages:
             f'<option value="{key}" {"selected" if level == key else ""}>{label}</option>'
             for key, label in [("info","Инфо"),("warning","Внимание"),("error","Ошибка")]
         )
-        content = f'''
-      <section class="panel audit-panel">
-        <div class="section-heading"><div><p class="eyebrow">Аудит</p><h2>Журнал действий и ошибок</h2><p>Кто менял заявки, отправлял сообщения, переключал автоответчик и какие ошибки возникали</p></div></div>
-        <form class="filters audit-filters" method="get" action="/admin/audit">
-          <input type="search" name="q" value="{e(search)}" placeholder="Сотрудник, действие, № заявки, чат...">
-          <select name="level">{levels}</select><button class="button" type="submit">Найти</button><a class="button ghost" href="/admin/audit">Сбросить</a>
-        </form>
-        <div class="table-scroll"><table class="audit-table"><thead><tr><th>Время</th><th>Уровень</th><th>Кто</th><th>Действие</th><th>Объект</th></tr></thead><tbody>{audit_rows}</tbody></table></div>
-      </section>
-      <section class="panel table-panel"><div class="section-heading"><div><h2>Доступ и учётные записи</h2><p>Изменения пользователей, паролей, сессий и блокировок диалогов</p></div></div><div class="table-scroll"><table><thead><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Объект</th></tr></thead><tbody>{auth_audit_html}</tbody></table></div></section>
-      <section class="panel table-panel"><div class="section-heading"><div><h2>Общий журнал сотрудников</h2><p>Единая лента изменений заявок, сообщений, админки и учётных записей</p></div></div><form class="filters" method="get" action="/admin/audit"><input name="actor" value="{e(str(query.get('actor',[''])[0] or ''))}" placeholder="Сотрудник"><input name="action" value="{e(str(query.get('action',[''])[0] or ''))}" placeholder="Действие / объект"><button class="button" type="submit">Фильтр</button></form><div class="table-scroll"><table><thead><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Объект</th><th>Источник</th></tr></thead><tbody>{self._unified_audit_rows(query)}</tbody></table></div></section>
-      <section class="panel history-panel"><h2>Системные предупреждения</h2><ul>{monitor_html}</ul></section>
-    '''
+        content = render_template(
+            "admin/audit.html",
+            search=e(search),
+            levels=levels,
+            audit_rows=audit_rows,
+            auth_audit_html=auth_audit_html,
+            actor_filter=e(str(query.get('actor',[''])[0] or '')),
+            action_filter=e(str(query.get('action',[''])[0] or '')),
+            unified_audit_rows=self._unified_audit_rows(query),
+            monitor_html=monitor_html,
+        )
         return self.deps.admin_layout("Журнал", content, "audit")
 
     def _analytics_filters(self, query: dict[str, list[str]], action: str) -> str:
@@ -339,14 +319,18 @@ class AdminPages:
             else ("нет данных" if heartbeat_age is None else ("только что" if int(heartbeat_age) < 60 else f"{int(heartbeat_age)//60} мин назад"))
         )
         monitor_label = "Локальный режим" if local_monitor else ("Активно" if state.get("monitor_ok") else "Нет свежего сигнала")
-        cards = f"""
-      <section class="system-status-grid">
-        <div class="panel system-card"><span>Сайт</span><strong class="system-ok">Работает</strong><small>HTTP-приложение отвечает</small></div>
-        <div class="panel system-card"><span>WhatsApp</span><strong class="{'system-ok' if connector_ok else 'system-bad'}">{e('Подключён' if connector_ok else connector_status)}</strong><small>Последний сигнал: {e(str(connector.get('updated_at',''))[:19] if isinstance(connector,dict) else '')}</small></div>
-        <div class="panel system-card"><span>База данных</span><strong class="{'system-ok' if database.get('ok') else 'system-bad'}">{e('OK' if database.get('ok') else 'Ошибка')}</strong><small>{e(str(database.get('result','')))}</small></div>
-        <div class="panel system-card"><span>Автовосстановление</span><strong class="{'system-ok' if state.get('monitor_ok') else 'system-warn'}">{e(monitor_label)}</strong><small>{e('На Windows watchdog отключён' if local_monitor else 'Проверка: ' + heartbeat_text)}</small></div>
-      </section>
-    """
+        cards = render_template(
+            "admin/system_cards.html",
+            connector_ok_text='system-ok' if connector_ok else 'system-bad',
+            connector_ok_text_2=e('Подключён' if connector_ok else connector_status),
+            connector_updated_at=e(str(connector.get('updated_at',''))[:19] if isinstance(connector,dict) else ''),
+            ok_text='system-ok' if database.get('ok') else 'system-bad',
+            ok_text_2=e('OK' if database.get('ok') else 'Ошибка'),
+            result=e(str(database.get('result',''))),
+            monitor_ok_text='system-ok' if state.get('monitor_ok') else 'system-warn',
+            monitor_label=e(monitor_label),
+            local_monitor_text=e('На Windows watchdog отключён' if local_monitor else 'Проверка: ' + heartbeat_text),
+        )
         queue_rows = []
         status_labels = {"pending":"ожидает", "processing":"отправляется", "sent":"отправлено", "failed":"ошибка", "sending":"отправляется", "uncertain":"проверьте переписку"}
         for row in queue.get("rows", []) if isinstance(queue, dict) else []:
@@ -360,25 +344,33 @@ class AdminPages:
             )
         queue_table = "".join(queue_rows) or '<tr><td colspan="6" class="empty">Очередь пока пуста</td></tr>'
         logs = "".join(f"<li><code>{e(line)}</code></li>" for line in state.get("logs", [])) or '<li class="empty">Журнал мониторинга пока пуст</li>'
-        content = f"""
-      {notice_html}
-      {cards}
-      <section class="panel system-storage">
-        <div class="section-heading"><div><h2>Хранилище</h2><p>Свободно {human_bytes(disk_free)} из {human_bytes(disk_total)} ({disk_percent}%)</p></div></div>
-        <div class="system-metrics"><div><span>База</span><strong>{human_bytes(int(state.get('db_size',0) or 0))}</strong></div><div><span>Медиа чатов</span><strong>{human_bytes(int(state.get('media_size',0) or 0))}</strong></div><div><span>RAM процесса</span><strong>{human_bytes(int(resources.get('rss_bytes',0) or 0))}</strong></div><div><span>CPU</span><strong>{int(resources.get('cpu_count',1) or 1)} ядер</strong><small>{'Load: ' + e(str(resources.get('load'))) if resources.get('load') else 'CPU time: ' + e(str(resources.get('cpu_time'))) + ' с'}</small></div></div>
-        <form class="system-actions" method="post" action="/admin/system"><input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}"><input type="hidden" name="action" value="cleanup"><button class="button" type="submit" onclick="return confirm('Запустить очистку старых данных сейчас?')">Очистить сейчас</button></form>
-      </section>
-      <section class="panel"><div class="section-heading"><div><h2>Автоматические резервные копии</h2><p>{e(restore_label)}</p><p>Последняя: {e(str(backup_state.get('last_file') or 'ещё нет'))} · копий: {int(backup_state.get('count',0) or 0)}{(' · ошибка: ' + e(str(backup_state.get('last_error')))) if backup_state.get('last_error') else ''}</p></div></div>
-        <form class="manual-form" method="post" action="/admin/system"><input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}"><input type="hidden" name="action" value="backup_settings"><label>Интервал, часов<input type="number" name="backup_hours" min="1" max="168" value="{int(backup_state.get('hours',24) or 24)}"></label><label>Хранить копий<input type="number" name="backup_keep" min="2" max="90" value="{int(backup_state.get('keep',14) or 14)}"></label><button class="button" type="submit">Сохранить расписание</button></form>
-        <form class="system-actions" method="post" action="/admin/system"><input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}"><input type="hidden" name="action" value="backup_now"><button class="button primary" type="submit">Создать копию сейчас</button></form>
-      </section>
-      <section class="panel table-panel">
-        <div class="section-heading"><div><h2>Очередь отправки</h2><p>Ожидает: {int(counts.get('pending',0) or 0)} · Отправляется: {int(counts.get('processing',0) or 0) + int(counts.get('sending',0) or 0)} · Отправлено: {int(counts.get('sent',0) or 0)} · Требует проверки: {int(counts.get('uncertain',0) or 0)} · Ошибка: {int(counts.get('failed',0) or 0)}</p></div>
-        <form method="post" action="/admin/system"><input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}"><input type="hidden" name="action" value="retry_failed"><button class="button" type="submit">Повторить ошибки</button></form></div>
-        <div class="table-scroll"><table><thead><tr><th>ID</th><th>Статус</th><th>Попытки</th><th>Получатель</th><th>Ошибка</th><th>Обновлено</th></tr></thead><tbody>{queue_table}</tbody></table></div>
-      </section>
-      <section class="panel system-log"><div class="section-heading"><div><h2>Журнал мониторинга</h2><p>Последние проверки и автоматические перезапуски</p></div></div><ul>{logs}</ul></section>
-    """
+        content = render_template(
+            "admin/system.html",
+            notice_html=notice_html,
+            cards=cards,
+            human_bytes=human_bytes(disk_free),
+            human_bytes_2=human_bytes(disk_total),
+            disk_percent=disk_percent,
+            human_bytes_3=human_bytes(int(state.get('db_size',0) or 0)),
+            human_bytes_4=human_bytes(int(state.get('media_size',0) or 0)),
+            human_bytes_5=human_bytes(int(resources.get('rss_bytes',0) or 0)),
+            cpu_count=int(resources.get('cpu_count',1) or 1),
+            load_text='Load: ' + e(str(resources.get('load'))) if resources.get('load') else 'CPU time: ' + e(str(resources.get('cpu_time'))) + ' с',
+            csrf_token=e(self.deps.csrf_token()),
+            restore_label=e(restore_label),
+            last_file=e(str(backup_state.get('last_file') or 'ещё нет')),
+            count=int(backup_state.get('count',0) or 0),
+            last_error_text=(' · ошибка: ' + e(str(backup_state.get('last_error')))) if backup_state.get('last_error') else '',
+            hours=int(backup_state.get('hours',24) or 24),
+            keep=int(backup_state.get('keep',14) or 14),
+            pending=int(counts.get('pending',0) or 0),
+            sending_count=int(counts.get('processing',0) or 0) + int(counts.get('sending',0) or 0),
+            sent=int(counts.get('sent',0) or 0),
+            uncertain=int(counts.get('uncertain',0) or 0),
+            failed=int(counts.get('failed',0) or 0),
+            queue_table=queue_table,
+            logs=logs,
+        )
         return self.deps.admin_layout("Система", content, "system")
 
     def admin_employee_count(self, query: dict[str, list[str]]) -> int:
@@ -404,53 +396,28 @@ class AdminPages:
             for index, name in enumerate(proposed, start=1)
         )
 
-        content = f"""
-      <section class="section-heading"><div><h2>Сотрудники</h2><p>Количество, имена и список выбора сотрудника на смене</p></div></section>
-      {notice_html}
-      <section class="panel manual-panel">
-        <div>
-          <h2>Количество сотрудников</h2>
-          <p>Сейчас в системе: <strong>{len(self.deps.employees)}</strong></p>
-        </div>
-        <form class="manual-form" method="get" action="/admin/employees">
-          <label>Количество
-            <input type="number" name="count" value="{count}" min="1" max="{self.deps.max_employees}" required>
-          </label>
-          <button class="button" type="submit">Применить количество</button>
-        </form>
-      </section>
-      <section class="panel">
-        <h2>Имена сотрудников</h2>
-        <form class="manual-form" method="post" action="/admin/employees">
-          <input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}">
-          <input type="hidden" name="employee_count" value="{count}">
-          {fields}
-          <button class="button primary" type="submit">Сохранить</button>
-        </form>
-        <p class="muted">Новые имена применяются к спискам выбора и новым назначениям. История уже созданных заявок не переписывается.</p>
-      </section>
-    """
+        content = render_template(
+            "admin/employees.html",
+            notice_html=notice_html,
+            employees_count=len(self.deps.employees),
+            count=count,
+            max_employees=self.deps.max_employees,
+            csrf_token=e(self.deps.csrf_token()),
+            fields=fields,
+        )
         return self.deps.admin_layout("Сотрудники", content, "employees")
 
     def render_admin_manual(self, query: dict[str, list[str]]) -> str:
         notice = query.get("notice", [""])[0]
         notice_html = f'<div class="notice">{e(notice)}</div>' if notice else ""
-        content = f"""
-      {notice_html}
-      <section class="section-heading"><div><h2>Ручное создание заявки</h2><p>Для обращения, которое нужно завести в систему без WhatsApp</p></div></section>
-      <section class="panel">
-        <form class="manual-form" method="post" action="/admin/manual">
-          <input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}">
-          <label>Название<input name="title" maxlength="160" placeholder="Например, Не работает личный кабинет" required></label>
-          <label>Категория<select name="category">{category_options('general')}</select></label>
-          <label>Приоритет<select name="priority">{priority_options('normal')}</select></label>
-          <label>Сотрудник<select name="employee">{employee_options()}</select></label>
-          <label>Статус<select name="status"><option value="new">Не тронута</option><option value="in_progress">В работе</option><option value="done">Сделано</option><option value="invalid">Недействительная</option></select></label>
-          <label class="wide">Описание<textarea name="summary" rows="4" maxlength="2000" placeholder="Опишите проблему, укажите номер обращения или другие подробности" required></textarea></label>
-          <button class="button primary" type="submit">Создать заявку</button>
-        </form>
-      </section>
-    """
+        content = render_template(
+            "admin/manual.html",
+            notice_html=notice_html,
+            csrf_token=e(self.deps.csrf_token()),
+            category_options=category_options('general'),
+            priority_options=priority_options('normal'),
+            employee_options=employee_options(),
+        )
         return self.deps.admin_layout("Ручная заявка", content, "manual")
 
     def _admin_live_flow_snapshot(self, language: str) -> dict[str, object]:
@@ -497,41 +464,34 @@ class AdminPages:
             _admin_flow_message(label, prompt, "После выбора пункта меню")
             for label, prompt in snapshot["categories"]
         )
-        return f'''
-      <section class="admin-flow-language" id="flow-{e(language)}">
-        <div class="section-heading admin-flow-language-heading"><div><p class="eyebrow">{e(language.upper())}</p><h2>{e(title)}</h2><p>Тексты ниже формируются теми же функциями, которые отвечают пользователю WhatsApp.</p></div></div>
-        {_admin_flow_message("Шаг 2 · Подразделение и должность", str(snapshot["profile"]))}
-        {_admin_flow_message("Шаг 3 · Главное меню", str(snapshot["menu"]))}
-        <details class="panel admin-flow-group" open><summary>Категории 1–7</summary><div class="admin-flow-stack">{category_cards}</div></details>
-        <details class="panel admin-flow-group"><summary>Пункт 8 · Мои активные заявки</summary><div class="admin-flow-stack">{_admin_flow_message("Есть активные заявки", str(snapshot["active"]))}{_admin_flow_message("Активных заявок нет", str(snapshot["active_empty"]))}</div></details>
-        <details class="panel admin-flow-group" open><summary>Системные ответы</summary><div class="admin-flow-stack">
-          {_admin_flow_message("Заявка принята", str(snapshot["accepted"]))}
-          {_admin_flow_message("Не хватает данных", str(snapshot["missing"]))}
-          {_admin_flow_message("Дублирующаяся заявка", str(snapshot["duplicate"]))}
-          {_admin_flow_message("Заявка выполнена", str(snapshot["done"]))}
-          {_admin_flow_message("Заявка закрыта / отклонена", str(snapshot["invalid"]))}
-        </div></details>
-      </section>
-    '''
+        return render_template(
+            "admin/flow_language_column.html",
+            language=e(language),
+            upper=e(language.upper()),
+            title=e(title),
+            admin_flow_message=_admin_flow_message("Шаг 2 · Подразделение и должность", str(snapshot["profile"])),
+            admin_flow_message_2=_admin_flow_message("Шаг 3 · Главное меню", str(snapshot["menu"])),
+            category_cards=category_cards,
+            admin_flow_message_3=_admin_flow_message("Есть активные заявки", str(snapshot["active"])),
+            admin_flow_message_4=_admin_flow_message("Активных заявок нет", str(snapshot["active_empty"])),
+            admin_flow_message_5=_admin_flow_message("Заявка принята", str(snapshot["accepted"])),
+            admin_flow_message_6=_admin_flow_message("Не хватает данных", str(snapshot["missing"])),
+            admin_flow_message_7=_admin_flow_message("Дублирующаяся заявка", str(snapshot["duplicate"])),
+            admin_flow_message_8=_admin_flow_message("Заявка выполнена", str(snapshot["done"])),
+            admin_flow_message_9=_admin_flow_message("Заявка закрыта / отклонена", str(snapshot["invalid"])),
+        )
 
     def render_admin_menu(self, query: dict[str, list[str]]) -> str:
         notice = query.get("notice", [""])[0]
         notice_html = f'<div class="notice">{e(notice)}</div>' if notice else ""
         language_text = language_selection_text_v3()
-        content = f'''
-      {notice_html}
-      <section class="section-heading admin-flow-heading">
-        <div><p class="eyebrow">Живой сценарий</p><h2>Актуальные тексты WhatsApp</h2><p>Это не отдельная копия текста: предпросмотр строится из тех же функций, которые используются при реальном общении с пользователем.</p></div>
-        <div class="admin-flow-jumps"><a class="button ghost" href="#flow-ru">Русский</a><a class="button ghost" href="#flow-kz">Қазақша</a></div>
-      </section>
-      <section class="notice success admin-flow-live-note"><strong>Источник истины один.</strong> Если пользовательский сценарий меняется в коде, эта страница автоматически показывает новую версию после обновления.</section>
-      {_admin_flow_message("Шаг 1 · Выбор языка", language_text, "Общее сообщение RU/KZ")}
-      <div class="admin-flow-columns">
-        {self._admin_flow_language_column(queue_user_locale.LANG_RU, "Русский сценарий")}
-        {self._admin_flow_language_column(queue_user_locale.LANG_KZ, "Қазақша сценарий")}
-      </div>
-      <section class="panel admin-flow-legacy-note"><p class="muted">Приветствие и категории меняются на странице <a href="/admin/categories">«Категории»</a>.</p></section>
-    '''
+        content = render_template(
+            "admin/menu.html",
+            notice_html=notice_html,
+            admin_flow_message=_admin_flow_message("Шаг 1 · Выбор языка", language_text, "Общее сообщение RU/KZ"),
+            admin_flow_language_column=self._admin_flow_language_column(queue_user_locale.LANG_RU, "Русский сценарий"),
+            admin_flow_language_column_2=self._admin_flow_language_column(queue_user_locale.LANG_KZ, "Қазақша сценарий"),
+        )
         return self.deps.admin_layout("Тексты WhatsApp", content, "menu")
 
     def render_admin_categories(self, query: dict[str, list[str]]) -> str:
@@ -544,25 +504,15 @@ class AdminPages:
         free = [n for n in queue_generic_profile.MENU_NUMBERS if n not in used]
         add_row = (_category_editor_row("new", {"number": free[0], "label_ru": "", "label_kz": ""}, used)
                    if free and len(rows) < 8 else '<p class="muted">Все номера меню заняты.</p>')
-        content = f"""
-      {notice_html}
-      <section class="section-heading"><div><h2>Меню бота и категории заявок</h2>
-        <p>Изменения сохраняются в базе и сразу применяются в WhatsApp. Файл config/company.json используется только при первом запуске.
-        Номер 8 зарезервирован за «Мои активные заявки», 0 открывает меню, 00 меняет язык.</p></div></section>
-      <form class="menu-editor" method="post" action="/admin/categories">
-        <input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}">
-        <section class="panel">
-          <label>Приветствие (RU)<input name="greeting_ru" maxlength="500" value="{e(str(profile.get('greeting_ru', '')))}"></label>
-          <label>Приветствие (KZ)<input name="greeting_kz" maxlength="500" value="{e(str(profile.get('greeting_kz', '')))}"></label>
-        </section>
-        {editors}
-        <h3>Новая категория</h3>
-        {add_row}
-        <button class="button primary" type="submit">Сохранить</button>
-      </form>
-      <p class="muted">При удалении старые заявки не ломаются: название категории сохраняется в истории, но для новых обращений она больше не показывается.
-        Как бот отвечает сейчас, видно на странице <a href="/admin/menu">«Тексты WhatsApp»</a>.</p>
-    """
+        content = render_template(
+            "admin/categories.html",
+            notice_html=notice_html,
+            csrf_token=e(self.deps.csrf_token()),
+            greeting_ru=e(str(profile.get('greeting_ru', ''))),
+            greeting_kz=e(str(profile.get('greeting_kz', ''))),
+            editors=editors,
+            add_row=add_row,
+        )
         return self.deps.admin_layout("Категории", content, "categories")
 
     def discovered_contact_rows(self, search_raw: str = "", limit: int = 80) -> str:
@@ -601,10 +551,13 @@ class AdminPages:
         table = "".join(rows) or '<tr><td colspan="4" class="empty">Контакты вручную ещё не добавлены</td></tr>'
         search_raw = query.get("q", [""])[0]
         found_table = self.discovered_contact_rows(search_raw, 80)
-        content = f"""
-      {notice_html}
-      <section class="panel manual-panel admin-contact-form"><div><h2>Добавить пользователя WhatsApp</h2><p>У добавленных контактов автоответчик всегда отключён. Они используются для обычной личной переписки.</p></div><form class="manual-form" method="post" action="/admin/contacts"><input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}"><input type="hidden" name="action" value="save"><label>Имя<input name="name" maxlength="100" required></label><label>Мобильный номер<input name="phone" inputmode="tel" maxlength="30" placeholder="+7 777 123 45 67" required></label><button class="button primary" type="submit">Добавить контакт</button></form></section>
-      <section class="panel table-panel"><div class="section-heading"><div><h2>Добавленные контакты</h2><p>Для них нет переключателя автоответчика: автоматика выключена постоянно.</p></div></div><div class="table-scroll"><table><thead><tr><th>Имя</th><th>Номер</th><th>Добавлен</th><th>Действия</th></tr></thead><tbody>{table}</tbody></table></div></section>
-      <section class="panel table-panel" data-contact-search-panel><div class="section-heading"><div><h2>Поиск контактов WhatsApp</h2><p>Можно вводить имя, часть номера, +7 или 8. Пробелы, скобки и дефисы не мешают поиску.</p></div><a class="button" href="/admin/contacts?q={quote(search_raw)}">Обновить</a></div><form class="filters" method="get" action="/admin/contacts" data-contact-search-form><input type="search" name="q" value="{e(search_raw)}" placeholder="Имя или номер" data-live-contact-search autocomplete="off"><button class="button primary" type="submit">Найти</button><a class="button ghost" href="/admin/contacts">Сбросить</a></form><div class="table-scroll"><table><thead><tr><th>Имя</th><th>Номер</th><th>Сохранён в WhatsApp</th><th>Действия</th></tr></thead><tbody data-contact-search-results>{found_table}</tbody></table></div></section>
-    """
+        content = render_template(
+            "admin/contacts.html",
+            notice_html=notice_html,
+            csrf_token=e(self.deps.csrf_token()),
+            table=table,
+            search_raw=quote(search_raw),
+            search_raw_2=e(search_raw),
+            found_table=found_table,
+        )
         return self.deps.admin_layout("Контакты WhatsApp", content, "contacts")

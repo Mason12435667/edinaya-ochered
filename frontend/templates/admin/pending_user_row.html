@@ -1,0 +1,5 @@
+
+          <tr><td><strong>{{ display_name }}</strong><small>@{{ username }}</small></td>
+          <td>{{ requested_at }}</td>
+          <td><details class="auth-reset-details"><summary>Назначить новый пароль</summary><form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="password"><input type="hidden" name="user_id" value="{{ user_id }}"><input type="password" name="password" minlength="10" placeholder="Новый пароль" required><label class="auth-check"><input type="checkbox" name="temporary_password" value="1" checked> временный</label><button class="button" type="submit">Сбросить</button></form></details></td></tr>
+        

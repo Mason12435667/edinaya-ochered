@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 import queue_auth
+from queue_templates import render_template
 
 
 # Bump on every change to static/; appended as ?v= to bust browser caches.
@@ -20,15 +21,11 @@ def script_tags(names) -> str:
 
 
 def _head(title: str) -> str:
-    return f'''<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#112a25">
-  <title>{title} · Единая очередь</title>
-  <link rel="icon" type="image/png" href="/static/favicon.png">
-  <script>document.documentElement.dataset.theme = localStorage.getItem("queue-theme") || "dark";</script>
-{stylesheet_tags(AUTH_STYLESHEETS)}
-</head>'''
+    return render_template(
+        "auth/head.html",
+        title=title,
+        stylesheet_tags=stylesheet_tags(AUTH_STYLESHEETS),
+    )
 
 
 def _script() -> str:
@@ -56,30 +53,17 @@ def render_login(
         else:
             setup_hint = '<p class="auth-hint">Учётные записи ещё не созданы. Администратору нужно войти через существующий серверный админ-доступ и открыть раздел «Доступ».</p>'
     error_html = f'<div class="auth-error">{escape(error)}</div>' if error else ""
-    return f'''<!doctype html>
-<html lang="ru">
-{_head("Вход")}
-<body class="auth-page">
-  <main class="auth-shell">
-    <section class="auth-card">
-      <div class="auth-brand"><span class="auth-brand-mark">Q</span><div><strong>Единая очередь</strong><small>{'WINDOWS · ТЕСТ' if local_mode else 'Авторизация'}</small></div><button class="auth-theme-toggle" type="button" data-auth-theme-toggle>Тема</button></div>
-      <h1>Вход в систему</h1>
-      <p>Используйте личную учётную запись сотрудника.</p>
-      {error_html}
-      {setup_hint}
-      <form method="post" action="/login" class="auth-form" autocomplete="on">
-        <input type="hidden" name="next" value="{escape(next_path)}">
-        <label>Логин<input name="username" autocomplete="username" maxlength="32" required autofocus></label>
-        <label>Пароль<input type="password" name="password" autocomplete="current-password" maxlength="256" required></label>
-        <button class="auth-primary" type="submit">Войти</button>
-      </form>
-      <div class="auth-links">{'<a href="/register">Создать аккаунт</a><span>•</span>' if queue_auth.self_registration_enabled() else ""}<a href="/forgot-password">Восстановить пароль</a></div>
-      <small class="auth-foot">Сеанс автоматически истекает через {int(session_hours)} ч.</small>
-    </section>
-  </main>
-  {_script()}
-</body>
-</html>'''
+    return render_template(
+        "auth/login.html",
+        head=_head("Вход"),
+        local_mode_text='WINDOWS · ТЕСТ' if local_mode else 'Авторизация',
+        error_html=error_html,
+        setup_hint=setup_hint,
+        next_path=escape(next_path),
+        registration_enabled_text='<a href="/register">Создать аккаунт</a><span>•</span>' if queue_auth.self_registration_enabled() else "",
+        session_hours=int(session_hours),
+        script=_script(),
+    )
 
 
 def render_register(
@@ -95,28 +79,15 @@ def render_register(
     elif auth.enabled_admin_count() < 1:
         form_html = '<div class="auth-hint">Сначала должен быть создан администратор системы. После этого можно регистрировать аккаунты сотрудников.</div>'
     else:
-        form_html = '''<form method="post" action="/register" class="auth-form" autocomplete="on">
-          <label>Логин<input name="username" autocomplete="username" maxlength="32" pattern="[A-Za-z0-9_.-]{3,32}" placeholder="ivan.petrov" required autofocus></label>
-          <label>Имя<input name="display_name" autocomplete="name" maxlength="80" placeholder="Иван Петров" required></label>
-          <label>Пароль<input type="password" name="password" autocomplete="new-password" minlength="10" maxlength="256" required></label>
-          <label>Повторите пароль<input type="password" name="password2" autocomplete="new-password" minlength="10" maxlength="256" required></label>
-          <button class="auth-primary" type="submit">Создать аккаунт сотрудника</button>
-        </form>
-        <div class="auth-hint">Можно создавать несколько аккаунтов сотрудников. Каждый логин должен быть уникальным.</div>'''
-    return f'''<!doctype html>
-<html lang="ru">
-{_head("Создать аккаунт")}
-<body class="auth-page">
-  <main class="auth-shell"><section class="auth-card">
-    <div class="auth-brand"><span class="auth-brand-mark">Q</span><div><strong>Единая очередь</strong><small>{'WINDOWS · ТЕСТ' if local_mode else 'Регистрация'}</small></div><button class="auth-theme-toggle" type="button" data-auth-theme-toggle>Тема</button></div>
-    <h1>Создать аккаунт</h1>
-    <p>Самостоятельная регистрация создаёт только учётную запись с ролью «Сотрудник». Роль администратора через эту страницу получить нельзя.</p>
-    {error_html}
-    {form_html}
-    <div class="auth-links"><a href="/login">Вернуться ко входу</a><span>•</span><a href="/forgot-password">Восстановить пароль</a></div>
-  </section></main>
-  {_script()}
-</body></html>'''
+        form_html = render_template("auth/register_form.html")
+    return render_template(
+        "auth/register.html",
+        head=_head("Создать аккаунт"),
+        local_mode_text='WINDOWS · ТЕСТ' if local_mode else 'Регистрация',
+        error_html=error_html,
+        form_html=form_html,
+        script=_script(),
+    )
 
 
 def render_forgot_password(
@@ -128,46 +99,25 @@ def render_forgot_password(
 ) -> str:
     error_html = f'<div class="auth-error">{escape(error)}</div>' if error else ""
     notice_html = f'<div class="auth-success">{escape(notice)}</div>' if notice else ""
-    return f'''<!doctype html>
-<html lang="ru">
-{_head("Восстановление пароля")}
-<body class="auth-page">
-  <main class="auth-shell"><section class="auth-card">
-    <div class="auth-brand"><span class="auth-brand-mark">Q</span><div><strong>Единая очередь</strong><small>{'WINDOWS · ТЕСТ' if local_mode else 'Восстановление доступа'}</small></div><button class="auth-theme-toggle" type="button" data-auth-theme-toggle>Тема</button></div>
-    <h1>Восстановить пароль</h1>
-    <p>Укажите логин. Запрос появится у администратора, после чего он сможет назначить новый пароль.</p>
-    {error_html}{notice_html}
-    <form method="post" action="/forgot-password" class="auth-form" autocomplete="on">
-      <label>Логин<input name="username" autocomplete="username" maxlength="32" required autofocus></label>
-      <button class="auth-primary" type="submit">Отправить запрос</button>
-    </form>
-    <div class="auth-links"><a href="/login">Вернуться ко входу</a>{'<span>•</span><a href="/register">Создать аккаунт</a>' if queue_auth.self_registration_enabled() else ""}</div>
-  </section></main>
-  {_script()}
-</body></html>'''
+    return render_template(
+        "auth/forgot_password.html",
+        head=_head("Восстановление пароля"),
+        local_mode_text='WINDOWS · ТЕСТ' if local_mode else 'Восстановление доступа',
+        error_html=error_html,
+        notice_html=notice_html,
+        registration_enabled_text='<span>•</span><a href="/register">Создать аккаунт</a>' if queue_auth.self_registration_enabled() else "",
+        script=_script(),
+    )
 
 
 def render_local_setup(error: str = "", *, escape: Callable[[Any], str]) -> str:
     error_html = f'<div class="auth-error">{escape(error)}</div>' if error else ""
-    return f'''<!doctype html>
-<html lang="ru">
-{_head("Первый запуск")}
-<body class="auth-page">
-  <main class="auth-shell"><section class="auth-card">
-    <div class="auth-brand"><span class="auth-brand-mark">Q</span><div><strong>Единая очередь</strong><small>WINDOWS · ТЕСТ</small></div><button class="auth-theme-toggle" type="button" data-auth-theme-toggle>Тема</button></div>
-    <h1>Создание администратора</h1>
-    <p>Эта страница доступна только локально и только пока в тестовой базе нет пользователей.</p>
-    {error_html}
-    <form method="post" action="/setup" class="auth-form">
-      <label>Логин<input name="username" value="admin" maxlength="32" required></label>
-      <label>Имя<input name="display_name" value="Администратор" maxlength="80" required></label>
-      <label>Пароль<input type="password" name="password" minlength="10" maxlength="256" required></label>
-      <label>Повторите пароль<input type="password" name="password2" minlength="10" maxlength="256" required></label>
-      <button class="auth-primary" type="submit">Создать и войти</button>
-    </form>
-  </section></main>
-  {_script()}
-</body></html>'''
+    return render_template(
+        "auth/local_setup.html",
+        head=_head("Первый запуск"),
+        error_html=error_html,
+        script=_script(),
+    )
 
 
 def render_account(
@@ -182,24 +132,11 @@ def render_account(
     notice_html = f'<div class="auth-error">{escape(notice)}</div>' if notice else ""
     if not user.get("must_change_password"):
         return ""
-    return f'''<!doctype html>
-<html lang="ru">
-{_head("Смена временного пароля")}
-<body class="auth-page" data-auth-user-id="{int(user.get('id', 0) or 0)}">
-  <main class="auth-shell"><section class="auth-card">
-    <div class="auth-brand"><span class="auth-brand-mark">Q</span><div><strong>Единая очередь</strong><small>Безопасность аккаунта</small></div></div>
-    <h1>Смените временный пароль</h1>
-    <p>После смены временного пароля откроется доступ к рабочей системе.</p>
-    {notice_html}
-    <form class="auth-form" method="post" action="/account/password">
-      <input type="hidden" name="csrf_token" value="{escape(csrf_token)}">
-      <input type="hidden" name="next" value="/">
-      <label>Текущий пароль<input type="password" name="current_password" autocomplete="current-password" required autofocus></label>
-      <label>Новый пароль<input type="password" name="new_password" minlength="10" autocomplete="new-password" required></label>
-      <label>Повторите новый пароль<input type="password" name="new_password2" minlength="10" autocomplete="new-password" required></label>
-      <button class="auth-primary" type="submit">Сменить пароль</button>
-    </form>
-    <div class="auth-links"><a href="/logout">Выйти</a></div>
-  </section></main>
-  {_script()}
-</body></html>'''
+    return render_template(
+        "auth/account.html",
+        head=_head("Смена временного пароля"),
+        id=int(user.get('id', 0) or 0),
+        notice_html=notice_html,
+        csrf_token=escape(csrf_token),
+        script=_script(),
+    )

@@ -1,0 +1,9 @@
+
+          <section class="panel handoff-panel">
+            <h2>Передача смене</h2>
+            <div class="notice warning-notice">Передано следующей смене: {{ handoff_from }}<br><small>{{ human_time }}</small></div>
+            <form method="post" action="/handoff">
+              <input type="hidden" name="ticket_id" value="{{ id }}">
+              <button class="button primary" name="action" value="accept" type="submit">Принять со смены</button>
+            </form>
+          </section>

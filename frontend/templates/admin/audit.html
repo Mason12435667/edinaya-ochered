@@ -1,0 +1,13 @@
+
+      <section class="panel audit-panel">
+        <div class="section-heading"><div><p class="eyebrow">Аудит</p><h2>Журнал действий и ошибок</h2><p>Кто менял заявки, отправлял сообщения, переключал автоответчик и какие ошибки возникали</p></div></div>
+        <form class="filters audit-filters" method="get" action="/admin/audit">
+          <input type="search" name="q" value="{{ search }}" placeholder="Сотрудник, действие, № заявки, чат...">
+          <select name="level">{{ levels }}</select><button class="button" type="submit">Найти</button><a class="button ghost" href="/admin/audit">Сбросить</a>
+        </form>
+        <div class="table-scroll"><table class="audit-table"><thead><tr><th>Время</th><th>Уровень</th><th>Кто</th><th>Действие</th><th>Объект</th></tr></thead><tbody>{{ audit_rows }}</tbody></table></div>
+      </section>
+      <section class="panel table-panel"><div class="section-heading"><div><h2>Доступ и учётные записи</h2><p>Изменения пользователей, паролей, сессий и блокировок диалогов</p></div></div><div class="table-scroll"><table><thead><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Объект</th></tr></thead><tbody>{{ auth_audit_html }}</tbody></table></div></section>
+      <section class="panel table-panel"><div class="section-heading"><div><h2>Общий журнал сотрудников</h2><p>Единая лента изменений заявок, сообщений, админки и учётных записей</p></div></div><form class="filters" method="get" action="/admin/audit"><input name="actor" value="{{ actor_filter }}" placeholder="Сотрудник"><input name="action" value="{{ action_filter }}" placeholder="Действие / объект"><button class="button" type="submit">Фильтр</button></form><div class="table-scroll"><table><thead><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Объект</th><th>Источник</th></tr></thead><tbody>{{ unified_audit_rows }}</tbody></table></div></section>
+      <section class="panel history-panel"><h2>Системные предупреждения</h2><ul>{{ monitor_html }}</ul></section>
+    

@@ -1,0 +1,26 @@
+
+      <section class="section-heading"><div><h2>Сотрудники</h2><p>Количество, имена и список выбора сотрудника на смене</p></div></section>
+      {{ notice_html }}
+      <section class="panel manual-panel">
+        <div>
+          <h2>Количество сотрудников</h2>
+          <p>Сейчас в системе: <strong>{{ employees_count }}</strong></p>
+        </div>
+        <form class="manual-form" method="get" action="/admin/employees">
+          <label>Количество
+            <input type="number" name="count" value="{{ count }}" min="1" max="{{ max_employees }}" required>
+          </label>
+          <button class="button" type="submit">Применить количество</button>
+        </form>
+      </section>
+      <section class="panel">
+        <h2>Имена сотрудников</h2>
+        <form class="manual-form" method="post" action="/admin/employees">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="employee_count" value="{{ count }}">
+          {{ fields }}
+          <button class="button primary" type="submit">Сохранить</button>
+        </form>
+        <p class="muted">Новые имена применяются к спискам выбора и новым назначениям. История уже созданных заявок не переписывается.</p>
+      </section>
+    

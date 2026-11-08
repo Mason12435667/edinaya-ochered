@@ -1,0 +1,19 @@
+
+      {{ notice_html }}
+      <section class="section-heading"><div><h2>Меню бота и категории заявок</h2>
+        <p>Изменения сохраняются в базе и сразу применяются в WhatsApp. Файл config/company.json используется только при первом запуске.
+        Номер 8 зарезервирован за «Мои активные заявки», 0 открывает меню, 00 меняет язык.</p></div></section>
+      <form class="menu-editor" method="post" action="/admin/categories">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <section class="panel">
+          <label>Приветствие (RU)<input name="greeting_ru" maxlength="500" value="{{ greeting_ru }}"></label>
+          <label>Приветствие (KZ)<input name="greeting_kz" maxlength="500" value="{{ greeting_kz }}"></label>
+        </section>
+        {{ editors }}
+        <h3>Новая категория</h3>
+        {{ add_row }}
+        <button class="button primary" type="submit">Сохранить</button>
+      </form>
+      <p class="muted">При удалении старые заявки не ломаются: название категории сохраняется в истории, но для новых обращений она больше не показывается.
+        Как бот отвечает сейчас, видно на странице <a href="/admin/menu">«Тексты WhatsApp»</a>.</p>
+    

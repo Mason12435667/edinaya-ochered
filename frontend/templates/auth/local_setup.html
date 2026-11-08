@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+{{ head }}
+<body class="auth-page">
+  <main class="auth-shell"><section class="auth-card">
+    <div class="auth-brand"><span class="auth-brand-mark">Q</span><div><strong>Единая очередь</strong><small>WINDOWS · ТЕСТ</small></div><button class="auth-theme-toggle" type="button" data-auth-theme-toggle>Тема</button></div>
+    <h1>Создание администратора</h1>
+    <p>Эта страница доступна только локально и только пока в тестовой базе нет пользователей.</p>
+    {{ error_html }}
+    <form method="post" action="/setup" class="auth-form">
+      <label>Логин<input name="username" value="admin" maxlength="32" required></label>
+      <label>Имя<input name="display_name" value="Администратор" maxlength="80" required></label>
+      <label>Пароль<input type="password" name="password" minlength="10" maxlength="256" required></label>
+      <label>Повторите пароль<input type="password" name="password2" minlength="10" maxlength="256" required></label>
+      <button class="auth-primary" type="submit">Создать и войти</button>
+    </form>
+  </section></main>
+  {{ script }}
+</body></html>

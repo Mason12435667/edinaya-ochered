@@ -15,6 +15,7 @@ from queue_auth_views import script_tags, stylesheet_tags
 from queue_core import LOCAL_TIMEZONE, display_phone, e, human_time, log_suppressed, normalize_phone, parse_iso_datetime
 from queue_work_context import active_employee, category_options, employee_identity, employee_options, priority_badge, priority_options, query_page, render_pagination, render_ticket_rows, sla_badge, status_badge, ticket_sla_state, work_actor
 from ticketing import PRIORITIES, STATUSES, TicketStore
+from queue_templates import render_template
 
 # Load order is the CSS cascade order: later files override earlier ones.
 MAIN_STYLESHEETS = (
@@ -69,58 +70,33 @@ class TicketViews:
             preferred_theme = ""
         shift_note = "Работает от имени аккаунта" if str(auth_user.get("role")) == "admin" else f"На смене автоматически: {e(employee_identity(auth_user) or current_employee)}"
         legacy_note = bool(auth_user.get("legacy"))
-        password_form = "" if legacy_note else f'''<form class="auth-profile-password" method="post" action="/account/password">
-          <input type="hidden" name="csrf_token" value="{e(self.csrf_token())}">
-          <input type="hidden" name="next" value="/">
-          <label>Текущий пароль<input type="password" name="current_password" autocomplete="current-password" required></label>
-          <label>Новый пароль<input type="password" name="new_password" minlength="10" autocomplete="new-password" required></label>
-          <label>Повторите пароль<input type="password" name="new_password2" minlength="10" autocomplete="new-password" required></label>
-          <button class="button primary" type="submit">Сменить пароль</button>
-        </form>'''
-        auth_profile = f'''<details class="auth-profile-menu">
-      <summary class="auth-user-chip" title="Профиль"><strong>{e(auth_name)}</strong><small>{e(auth_role)}</small></summary>
-      <div class="auth-profile-popover">
-        <div class="auth-profile-head"><strong>{e(auth_name)}</strong><span>@{e(str(auth_user.get("username") or ""))}</span><small>{shift_note}</small></div>
-        {password_form}
-        <a class="button ghost auth-profile-page" href="/me">Моя страница</a>
-        <a class="button ghost auth-profile-page" href="/accounts">Сменить аккаунт</a>
-        <a class="button ghost auth-profile-logout" href="/logout">Выйти</a>
-      </div>
-    </details>'''
-        return f"""<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="queue-csrf" content="{e(self.csrf_token())}">
-  <title>{e(title)} · Единая очередь</title>
-  <meta name="theme-color" content="#112a25">
-  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png?v=3.3.79">
-  <link rel="apple-touch-icon" href="/static/favicon.png?v=3.3.79">
-  <script>document.documentElement.dataset.theme = {json.dumps(preferred_theme)} || localStorage.getItem("queue-theme") || "light";</script>
-{stylesheet_tags(MAIN_STYLESHEETS)}
-</head>
-<body data-admin="{'1' if show_admin else '0'}" data-auth-user-id="{user_id}">
-  <header class="topbar">
-    <a class="brand" href="/"><span class="brand-mark">Q</span><span>Единая очередь</span></a>
-    {'<span class="local-mode-badge">WINDOWS · ТЕСТ</span>' if self.local_mode else ''}
-    <nav>{nav}</nav>
-    <button class="notification-button" type="button" data-notification-center aria-label="Уведомления">
-      <span aria-hidden="true">🔔</span><b data-notification-count hidden>0</b>
-    </button>
-    <div class="notification-popover" data-notification-popover hidden>
-      <strong>Уведомления</strong><div data-notification-items>Проверка новых событий...</div>
-    </div>
-    {auth_profile}
-    <button class="theme-toggle" type="button" data-theme-toggle aria-label="Сменить оформление">Тёмная тема</button>
-  </header>
-  <div class="toast-stack" data-toast-stack aria-live="polite" aria-atomic="false"></div>
-  {'<div class="maintenance-banner">Режим обслуживания включён: просмотр доступен, изменения сотрудников временно заблокированы.</div>' if queue_reliability.maintenance_active(self.store) else ''}
-  <main class="page">{content}</main>
-  <footer>Единая очередь · рабочая система обработки заявок</footer>
-{script_tags(MAIN_SCRIPTS)}
-</body>
-</html>"""
+        password_form = "" if legacy_note else render_template(
+            "tickets/profile_password_form.html",
+            csrf_token=e(self.csrf_token()),
+        )
+        auth_profile = render_template(
+            "tickets/profile_menu.html",
+            auth_name=e(auth_name),
+            auth_role=e(auth_role),
+            username=e(str(auth_user.get("username") or "")),
+            shift_note=shift_note,
+            password_form=password_form,
+        )
+        return render_template(
+            "tickets/layout.html",
+            csrf_token=e(self.csrf_token()),
+            title=e(title),
+            dumps=json.dumps(preferred_theme),
+            stylesheet_tags=stylesheet_tags(MAIN_STYLESHEETS),
+            show_admin_text='1' if show_admin else '0',
+            user_id=user_id,
+            local_mode_text='<span class="local-mode-badge">WINDOWS · ТЕСТ</span>' if self.local_mode else '',
+            nav=nav,
+            auth_profile=auth_profile,
+            maintenance_active_text='<div class="maintenance-banner">Режим обслуживания включён: просмотр доступен, изменения сотрудников временно заблокированы.</div>' if queue_reliability.maintenance_active(self.store) else '',
+            content=content,
+            script_tags=script_tags(MAIN_SCRIPTS),
+        )
 
     def render_dashboard(self, query: dict[str, list[str]], show_admin: bool = False) -> str:
         notice = query.get("notice", [""])[0]
@@ -202,57 +178,27 @@ class TicketViews:
             handoff_board = f'<section class="panel handoff-board"><div class="section-heading"><div><p class="eyebrow">Передача смены</p><h2>Переданные заявки <span class="handoff-badge large">{len(handoff_tickets)}</span></h2><p>Отдельный список заявок, которые ждут следующую смену</p></div></div><div class="handoff-list">{handoff_items}</div></section>'
         else:
             handoff_board = ""
-        content = f"""
-      <section class="page-heading">
-        <div><p class="eyebrow">Service Desk</p><h1>Заявки</h1><p>WhatsApp-запросы и ручные заявки в одной очереди</p></div>
-        <a class="button primary" href="/whatsapp">Открыть WhatsApp</a>
-      </section>
-      {notice_html}
-      <section class="metrics">{cards}</section>
-      <section class="smart-shift-panel"><div><strong>Текущая смена: {e(current_employee)}</strong>{shift_note}</div><div class="shift-metrics">{shift_cards}</div></section>
-      {handoff_board}
-      <section class="panel filters-panel">
-        <form class="filters" method="get" action="/" data-dashboard-filter-form>
-          <input type="hidden" name="view" value="{e(selected_view)}">
-          <input type="search" name="q" value="{e(search)}" placeholder="№ заявки, ФИО, телефон, подразделение, текст..." data-live-ticket-search autocomplete="off">
-          <select name="status">{status_options}</select>
-          <select name="category">{category_options(selected_category, True)}</select>
-          <select name="priority">{priority_options(selected_priority, True)}</select>
-          <input type="number" name="no_answer_minutes" value="{no_answer_minutes or ''}" min="0" max="10080" step="5" placeholder="Без ответа > N мин" title="Показать заявки без первого ответа дольше N минут">
-          <button class="button" type="submit">Применить</button>
-          <a class="button ghost" href="/">Сбросить</a>
-        </form>
-      </section>
-      <section class="panel table-panel" data-dashboard data-dashboard-version="{e(self.store.dashboard_version())}">
-        <div class="table-hint"><span>Приоритет меняется в левом столбце. Правой кнопкой мыши по заявке можно быстро изменить статус.</span><span id="auto-refresh-state">Автообновление включено</span></div>
-        <div class="table-scroll"><table>
-          <thead><tr><th>Приоритет</th><th>№</th><th>Источник</th><th>Отправитель</th><th>Запрос</th><th>Статус</th><th>Время</th></tr></thead>
-          <tbody id="ticket-table-body">{table_body}</tbody>
-        </table></div>
-        <div class="pagination" id="ticket-pagination">{render_pagination(query, total, page)}</div>
-      </section>
-      <section class="panel manual-panel">
-        <div><p class="eyebrow">Ручная заявка</p><h2>Быстро добавить запрос</h2><p>Для обращений, поступивших по телефону, почте или из других каналов</p></div>
-        <form class="manual-form" method="post" action="/manual">
-          <input type="hidden" name="csrf_token" value="{e(self.csrf_token())}">
-          <label>Тип запроса<input name="title" value="" placeholder="Например, сброс пароля" required></label>
-          <label>Номер / идентификатор<input name="reference" placeholder="Например, 784512"></label>
-          <label class="wide">Комментарий<textarea name="comment" rows="2" placeholder="Дополнительная информация"></textarea></label>
-          <label>Приоритет<select name="priority">{priority_options('normal')}</select></label>
-          <label>Сотрудник<select name="employee">{employee_options()}</select></label>
-          <label>Начальный статус<select name="status"><option value="new">Не сделано</option><option value="done">Сделано</option></select></label>
-          <button class="button primary" type="submit">Добавить</button>
-        </form>
-      </section>
-      <div id="ticket-context-menu" class="context-menu" hidden>
-        <div class="context-heading"><small>Изменить статус</small><strong id="context-ticket-title">Заявка</strong></div>
-        <button type="button" data-quick-status="new"><span class="context-dot dot-new"></span>Не тронута</button>
-        <button type="button" data-quick-status="in_progress"><span class="context-dot dot-in_progress"></span>В работе</button>
-        <button type="button" data-quick-status="done"><span class="context-dot dot-done"></span>Сделано</button>
-        <button type="button" data-quick-status="invalid"><span class="context-dot dot-invalid"></span>Недействительная</button>
-        <button type="button" data-quick-handoff="1"><span class="context-dot dot-handoff"></span>Передать следующей смене</button>
-      </div>
-    """
+        content = render_template(
+            "tickets/dashboard.html",
+            notice_html=notice_html,
+            cards=cards,
+            current_employee=e(current_employee),
+            shift_note=shift_note,
+            shift_cards=shift_cards,
+            handoff_board=handoff_board,
+            selected_view=e(selected_view),
+            search=e(search),
+            status_options=status_options,
+            category_options=category_options(selected_category, True),
+            priority_options=priority_options(selected_priority, True),
+            no_answer_minutes=no_answer_minutes or '',
+            dashboard_version=e(self.store.dashboard_version()),
+            table_body=table_body,
+            render_pagination=render_pagination(query, total, page),
+            csrf_token=e(self.csrf_token()),
+            priority_options_2=priority_options('normal'),
+            employee_options=employee_options(),
+        )
         return self.layout("Заявки", content, show_admin=show_admin)
 
     def render_ticket(
@@ -317,20 +263,20 @@ class TicketViews:
             actions = ""
             if display_value:
                 actions += (
-                    f'<form class="context-history-apply" method="post" action="/context-history/apply">'
-                    f'<input type="hidden" name="ticket_id" value="{ticket_id}">'
-                    f'<input type="hidden" name="history_id" value="{int(item.get("id",0) or 0)}">'
-                    '<input type="hidden" name="mode" value="field">'
-                    f'<select name="field_name">{field_option_html}</select>'
-                    '<button class="button" type="submit">В поле</button></form>'
+                    render_template(
+                        "tickets/context_field_form.html",
+                        ticket_id=ticket_id,
+                        id=int(item.get("id",0) or 0),
+                        field_option_html=field_option_html,
+                    )
                 )
             if str(item.get("message_key", "")) and str(item.get("chat_id", "")):
                 actions += (
-                    f'<form class="context-history-apply" method="post" action="/context-history/apply">'
-                    f'<input type="hidden" name="ticket_id" value="{ticket_id}">'
-                    f'<input type="hidden" name="history_id" value="{int(item.get("id",0) or 0)}">'
-                    '<input type="hidden" name="mode" value="media">'
-                    '<button class="button ghost" type="submit">Привязать сообщение / файл</button></form>'
+                    render_template(
+                        "tickets/context_attach_form.html",
+                        ticket_id=ticket_id,
+                        id=int(item.get("id",0) or 0),
+                    )
                 )
             history_cards.append(
                 f'<article class="context-history-card"><div class="context-history-head"><strong>{e(event_type.replace("_", " "))}</strong>'
@@ -417,12 +363,13 @@ class TicketViews:
 
         sla_state = ticket_sla_state(ticket)
         if sla_state.get("active"):
-            sla_panel = f'''
-          <section class="panel sla-panel {'sla-panel-overdue' if sla_state.get('overdue') else ''}">
-            <h2>SLA реакции</h2>
-            <div>{sla_badge(ticket)}</div>
-            <p class="muted">Лимит для приоритета «{e(PRIORITIES.get(str(ticket.get('priority','normal')), str(ticket.get('priority','normal'))))}»: {int(sla_state.get('limit_minutes',0) or 0)} мин.</p>
-          </section>'''
+            sla_panel = render_template(
+                "tickets/sla_panel.html",
+                overdue_text='sla-panel-overdue' if sla_state.get('overdue') else '',
+                sla_badge=sla_badge(ticket),
+                get=e(PRIORITIES.get(str(ticket.get('priority','normal')), str(ticket.get('priority','normal')))),
+                limit_minutes=int(sla_state.get('limit_minutes',0) or 0),
+            )
         else:
             first_response = parse_iso_datetime(ticket.get("first_response_at"))
             created = parse_iso_datetime(ticket.get("created_at"))
@@ -435,89 +382,54 @@ class TicketViews:
         if terminal_status:
             handoff_panel = ""
         elif handoff_enabled:
-            handoff_panel = f"""
-          <section class="panel handoff-panel">
-            <h2>Передача смене</h2>
-            <div class="notice warning-notice">Передано следующей смене: {e(ticket.get('handoff_from', ''))}<br><small>{e(human_time(str(ticket.get('handoff_at', ''))))}</small></div>
-            <form method="post" action="/handoff">
-              <input type="hidden" name="ticket_id" value="{ticket['id']}">
-              <button class="button primary" name="action" value="accept" type="submit">Принять со смены</button>
-            </form>
-          </section>"""
+            handoff_panel = render_template(
+                "tickets/handoff_pending_panel.html",
+                handoff_from=e(ticket.get('handoff_from', '')),
+                human_time=e(human_time(str(ticket.get('handoff_at', '')))),
+                id=ticket['id'],
+            )
         else:
-            handoff_panel = f"""
-          <section class="panel handoff-panel">
-            <h2>Передача смене</h2>
-            <p class="muted">Если не успеваете закончить заявку, отметьте её для следующей смены.</p>
-            <form method="post" action="/handoff">
-              <input type="hidden" name="ticket_id" value="{ticket['id']}">
-              <button class="button" name="action" value="transfer" type="submit">Передать следующей смене</button>
-            </form>
-          </section>"""
+            handoff_panel = render_template(
+                "tickets/handoff_form_panel.html",
+                id=ticket['id'],
+            )
 
         handoff_badge = '<span class="handoff-badge large">Следующая смена</span>' if handoff_enabled else ""
         admin_delete_panel = ""
         if show_admin:
-            admin_delete_panel = f"""
-          <section class="panel danger-panel">
-            <h2>Администратор</h2>
-            <p class="muted">Удаление происходит только внутри системы. Пользователю ничего не отправляется.</p>
-            <form method="post" action="/admin/ticket-delete" onsubmit="return confirm('Удалить заявку №{ticket['id']}? Пользователь не получит уведомление.')">
-              <input type="hidden" name="csrf_token" value="{e(self.csrf_token())}">
-              <input type="hidden" name="ticket_id" value="{ticket['id']}">
-              <button class="button danger" type="submit">Удалить заявку</button>
-            </form>
-          </section>"""
-        content = f"""
-      <a class="back" href="/">← Все заявки</a>
-      {notice_html}
-      <section class="ticket-header">
-        <div><p class="eyebrow">Заявка #{ticket['id']}</p><h1>{e(ticket['title'])}</h1><p>{e(ticket['summary'])}</p></div>
-        <div class="ticket-badges">{priority_badge(ticket['priority'])}{status_badge(ticket['status'])}{handoff_badge}</div>
-      </section>
-      <div class="ticket-layout">
-        <section class="panel ticket-main">
-          <div class="ticket-main-heading"><h2>Данные запроса</h2>{chat_button}</div>
-          
-          <div class="detail-grid">
-            <div><span>Источник</span><strong>{e(ticket['source'])}</strong></div>
-            <div><span>Отправитель</span><strong>{e(ticket['sender'])}</strong></div>
-            <div><span>Телефон</span><strong>{e(display_phone(ticket['phone']))}</strong></div>
-            <div><span>Категория</span><strong>{e(self.categories.get(ticket['category'], ticket['category']))}</strong></div>
-            <div><span>Приоритет</span><strong>{e(PRIORITIES.get(ticket['priority'], ticket['priority']))}</strong></div>
-            <div><span>Создана</span><strong>{e(human_time(ticket['created_at']))}</strong></div>
-          </div>
-          
-          <h3>Исходное сообщение</h3>
-          <pre class="message">{e(ticket['original_text'] or ticket['summary'])}</pre>
-          {attachment}
-          {context_fields_panel}
-          {context_history_panel}
-        </section>
-        <aside>
-          <section class="panel actions-panel">
-            <h2>Изменить статус</h2>
-            <form method="post" action="/status">
-              <input type="hidden" name="ticket_id" value="{ticket['id']}">
-              <label>Сотрудник<select name="employee">{employee_options(ticket['assigned_to'])}</select></label>
-              <div class="status-actions">{status_buttons}</div>
-            </form>
-          </section>
-          {sla_panel}
-          {handoff_panel}
-          <section class="panel classification-panel">
-            <h2>Приоритет</h2>
-            <form method="post" action="/classification">
-              <input type="hidden" name="ticket_id" value="{ticket['id']}">
-              <label>Приоритет<select name="priority">{priority_options(ticket['priority'])}</select></label>
-              <button class="button" type="submit">Сохранить</button>
-            </form>
-          </section>
-          {admin_delete_panel}
-          <section class="panel history-panel"><h2>История заявки</h2><ul>{event_rows}</ul></section>
-        </aside>
-      </div>
-    """
+            admin_delete_panel = render_template(
+                "tickets/admin_delete_panel.html",
+                id=ticket['id'],
+                csrf_token=e(self.csrf_token()),
+            )
+        content = render_template(
+            "tickets/ticket.html",
+            notice_html=notice_html,
+            id=ticket['id'],
+            title=e(ticket['title']),
+            summary=e(ticket['summary']),
+            priority_badge=priority_badge(ticket['priority']),
+            status_badge=status_badge(ticket['status']),
+            handoff_badge=handoff_badge,
+            chat_button=chat_button,
+            source=e(ticket['source']),
+            sender=e(ticket['sender']),
+            display_phone=e(display_phone(ticket['phone'])),
+            get=e(self.categories.get(ticket['category'], ticket['category'])),
+            get_2=e(PRIORITIES.get(ticket['priority'], ticket['priority'])),
+            human_time=e(human_time(ticket['created_at'])),
+            original_text=e(ticket['original_text'] or ticket['summary']),
+            attachment=attachment,
+            context_fields_panel=context_fields_panel,
+            context_history_panel=context_history_panel,
+            employee_options=employee_options(ticket['assigned_to']),
+            status_buttons=status_buttons,
+            sla_panel=sla_panel,
+            handoff_panel=handoff_panel,
+            priority_options=priority_options(ticket['priority']),
+            admin_delete_panel=admin_delete_panel,
+            event_rows=event_rows,
+        )
         revision_field = f'<input type="hidden" name="revision" value="{int(ticket.get("revision",0))}"><input type="hidden" name="csrf_token" value="{e(self.csrf_token())}">'
         content = content.replace(f'<input type="hidden" name="ticket_id" value="{ticket_id}">', f'<input type="hidden" name="ticket_id" value="{ticket_id}">'+revision_field)
         content = content.replace('<button class="button" name="action" value="transfer"', '<label>Что сделано и что осталось<textarea name="handoff_note" maxlength="2000" required></textarea></label><button class="button" name="action" value="transfer"')
@@ -589,19 +501,20 @@ class TicketViews:
         session_count = self.auth.active_session_count_for_user(user_id)
         shift_text = "Не используется для администратора" if role == "admin" else f"Автоматически на смене: {employee_name or '—'}"
 
-        content = f"""
-      <section class="page-heading my-account-heading"><div><p class="eyebrow">Учётная запись</p><h1>{e(display_name)}</h1><p>@{e(username)} · {e(role_label)}</p></div></section>
-      <section class="my-account-grid">
-        <div class="panel my-account-summary-card"><span>Роль</span><strong>{e(role_label)}</strong><small>{e(shift_text)}</small></div>
-        <div class="panel my-account-summary-card"><span>Активные заявки</span><strong>{len(active)}</strong><small>Назначены на вас сейчас</small></div>
-        <div class="panel my-account-summary-card"><span>Выполнено</span><strong>{len(done)}</strong><small>Заявки со статусом «Сделано»</small></div>
-        <div class="panel my-account-summary-card"><span>Активные сессии</span><strong>{session_count}</strong><small>Ваши текущие входы в систему</small></div>
-      </section>
-      <section class="panel my-account-panel"><div class="section-heading"><div><h2>Текущие заявки</h2><p>Заявки, которые сейчас закреплены за вашим аккаунтом.</p></div></div><div class="my-ticket-list">{ticket_cards(active, "Активных заявок нет")}</div></section>
-      <section class="panel my-account-panel"><div class="section-heading"><div><h2>Последние выполненные</h2><p>Последние заявки, завершённые от вашего имени.</p></div></div><div class="my-ticket-list">{ticket_cards(done, "Выполненных заявок пока нет")}</div></section>
-      <section class="panel table-panel"><div class="section-heading"><div><h2>Мои входы</h2><p>Последние успешные и неуспешные попытки авторизации.</p></div></div><div class="table-scroll"><table><thead><tr><th>Время</th><th>Результат</th><th>Причина</th><th>IP</th></tr></thead><tbody>{login_table}</tbody></table></div></section>
-      <section class="panel table-panel"><div class="section-heading"><div><h2>Моя активность</h2><p>Последние действия, которые система связала с вашим аккаунтом.</p></div></div><div class="table-scroll"><table><thead><tr><th>Время</th><th>Действие</th><th>Объект</th></tr></thead><tbody>{activity_table}</tbody></table></div></section>
-    """
+        content = render_template(
+            "tickets/my_page.html",
+            display_name=e(display_name),
+            username=e(username),
+            role_label=e(role_label),
+            shift_text=e(shift_text),
+            active_count=len(active),
+            done_count=len(done),
+            session_count=session_count,
+            ticket_cards=ticket_cards(active, "Активных заявок нет"),
+            ticket_cards_2=ticket_cards(done, "Выполненных заявок пока нет"),
+            login_table=login_table,
+            activity_table=activity_table,
+        )
         return self.layout("Мой аккаунт", content, "", show_admin)
 
     def render_account_switcher(
@@ -625,25 +538,24 @@ class TicketViews:
             if is_active:
                 action = '<span class="status-badge done">Текущий аккаунт</span>'
             else:
-                action = f'''<form method="post" action="/accounts/switch">
-          <input type="hidden" name="csrf_token" value="{e(self.csrf_token())}">
-          <input type="hidden" name="slot" value="{slot}">
-          <button class="button primary" type="submit">Переключиться</button>
-        </form>'''
-            cards.append(f'''<article class="panel my-account-summary-card">
-          <span>{e(role)}</span>
-          <strong>{e(display_name)}</strong>
-          <small>@{e(username)}</small>
-          <div>{action}</div>
-        </article>''')
+                action = render_template(
+                    "tickets/account_switch_form.html",
+                    csrf_token=e(self.csrf_token()),
+                    slot=slot,
+                )
+            cards.append(render_template(
+                "tickets/account_card.html",
+                role=e(role),
+                display_name=e(display_name),
+                username=e(username),
+                action=action,
+            ))
         if not cards:
             cards.append('<div class="panel empty">Сохранённых аккаунтов нет</div>')
-        content = f'''
-      <section class="page-heading"><div><p class="eyebrow">Общий компьютер</p><h1>Аккаунты на этом устройстве</h1><p>Можно сохранить несколько входов в одном браузере и переключаться между ними без выхода из остальных аккаунтов.</p></div>
-        <div class="instruction-live-actions"><a class="button primary" href="/login?add=1&next=/accounts">Добавить существующий</a>{'<a class="button ghost" href="/register">Создать новый аккаунт</a>' if queue_auth.self_registration_enabled() else ''}</div>
-      </section>
-      {notice_html}
-      <section class="my-account-grid">{''.join(cards)}</section>
-      <section class="panel"><div class="section-heading"><div><h2>Как это работает</h2><p>Активным остаётся один аккаунт. При переключении заявки, сообщения и действия будут записываться от имени выбранного пользователя.</p></div></div></section>
-    '''
+        content = render_template(
+            "tickets/account_switcher.html",
+            registration_enabled_text='<a class="button ghost" href="/register">Создать новый аккаунт</a>' if queue_auth.self_registration_enabled() else '',
+            notice_html=notice_html,
+            join=''.join(cards),
+        )
         return self.layout("Аккаунты", content, "", show_admin)

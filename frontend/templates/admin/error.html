@@ -1,0 +1,21 @@
+      {{ notice_html }}
+      <section class="section-heading"><div><p class="eyebrow">Репорт #{{ id }}</p><h2>Ошибка пользователя</h2><p>{{ human_time }}</p></div>{{ chat_link }}</section>
+      <section class="panel ticket-details">
+        <div><span>Статус</span><strong>{{ error_report_status_badge }}</strong></div>
+        <div><span>Пользователь</span><strong>{{ sender }}</strong></div>
+        <div><span>Телефон</span><strong>{{ phone_text }}</strong></div>
+        <div><span>Описание</span><strong style="white-space:pre-wrap">{{ description }}</strong></div>
+      </section>
+      {{ attachment_html }}
+      <section class="panel">
+        <div class="section-heading"><div><h2>Обработка репорта</h2><p>Статус и служебная заметка видны только внутри «Единой очереди».</p></div></div>
+        <form class="manual-form" method="post" action="/admin/errors">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="report_id" value="{{ id }}">
+          <label>Статус<select name="status">{{ status_options }}</select></label>
+          <label class="wide">Заметка<textarea name="admin_note" rows="4" maxlength="3000" placeholder="Что проверили / как исправили">{{ admin_note }}</textarea></label>
+          <button class="button primary" type="submit">Сохранить</button>
+          <a class="button ghost" href="/admin/errors">К списку ошибок</a>
+        </form>
+      </section>
+    

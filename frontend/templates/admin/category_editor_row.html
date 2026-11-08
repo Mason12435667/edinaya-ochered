@@ -1,0 +1,10 @@
+<article class="menu-editor-row panel">
+      {{ key_field }}
+      <label>Номер в меню<select name="number_{{ suffix }}">{{ options }}</select></label>
+      <label>Название (RU)<input name="label_ru_{{ suffix }}" maxlength="80" value="{{ label_ru }}" {{ required_attr }}></label>
+      <label>Название (KZ)<input name="label_kz_{{ suffix }}" maxlength="80" value="{{ label_kz }}"></label>
+      <label>Подсказка после выбора (RU)<textarea name="prompt_ru_{{ suffix }}" maxlength="1200" rows="2">{{ prompt_ru }}</textarea></label>
+      <label>Подсказка после выбора (KZ)<textarea name="prompt_kz_{{ suffix }}" maxlength="1200" rows="2">{{ prompt_kz }}</textarea></label>
+      <fieldset class="checkbox-group"><legend>Бот обязательно спросит</legend>{{ checks }}</fieldset>
+      {{ delete }}
+    </article>

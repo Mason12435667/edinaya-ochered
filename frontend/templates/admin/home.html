@@ -1,0 +1,25 @@
+
+      <section class="admin-card-grid">
+        <a class="panel admin-card" href="/admin/users"><span>Доступ</span><strong>{{ users_count }}</strong><small>Логины, пароли и роли пользователей</small></a>
+        <a class="panel admin-card" href="/admin/employees"><span>Сотрудники</span><strong>{{ employees_count }}</strong><small>Имена и количество сотрудников</small></a>
+        <a class="panel admin-card" href="/admin/manual"><span>Ручная заявка</span><strong>+</strong><small>Создать запрос от имени сотрудника</small></a>
+        <a class="panel admin-card" href="/admin/menu"><span>Тексты WhatsApp</span><strong>RU/KZ</strong><small>Актуальный пользовательский сценарий и системные ответы</small></a>
+        <a class="panel admin-card" href="/admin/categories"><span>Категории</span><strong>{{ categories_count }}</strong><small>Добавить, убрать или переименовать виды заявок</small></a>
+        <a class="panel admin-card" href="/admin/errors"><span>Ошибки</span><strong>{{ open_errors }}</strong><small>Отдельные репорты пользователей, не являющиеся заявками</small></a>
+        <a class="panel admin-card" href="/admin/contacts"><span>Контакты WhatsApp</span><strong>{{ contacts }}</strong><small>Добавление пользователя по номеру</small></a>
+        <a class="panel admin-card" href="/groups"><span>Группы WhatsApp</span><strong>{{ groups }}</strong><small>Общая переписка и отправка сообщений</small></a>
+        <a class="panel admin-card" href="/admin/audit"><span>Журнал</span><strong>≡</strong><small>Действия сотрудников, сообщения и ошибки</small></a>
+        <a class="panel admin-card" href="/admin/analytics"><span>Аналитика</span><strong>↗</strong><small>Сотрудники, смены, категории и время обработки</small></a>
+        <a class="panel admin-card" href="/admin/manager"><span>Dashboard руководителя</span><strong>▦</strong><small>Нагрузка, скорость обработки и частые проблемы</small></a>
+        <a class="panel admin-card" href="/admin/api-keys"><span>API-ключи</span><strong>⌘</strong><small>Read-only ключи для будущих интеграций</small></a>
+        <a class="panel admin-card" href="/admin/backups"><span>Бэкапы</span><strong>⟳</strong><small>Создание, проверка и восстановление базы</small></a>
+        <a class="panel admin-card" href="/admin/workflow"><span>Хранение / процессы</span><strong>⚙</strong><small>Сроки хранения, очистка медиа и правила закрытия</small></a>
+        <a class="panel admin-card" href="/admin/reliability"><span>Надёжность</span><strong>🛡</strong><small>Диагностика, очередь ошибок, бэкапы и обслуживание</small></a>
+        <a class="panel admin-card" href="/admin/system"><span>Система</span><strong>●</strong><small>Состояние, очередь отправки и хранилище</small></a>
+      </section>
+      <section class="panel integration-status">
+        <h2>{{ local_mode_text }}</h2>
+        <div><span>Учётных записей</span><strong>{{ users_count }}</strong></div>
+        <p class="muted">{{ local_mode_text_2 }}</p>
+      </section>
+    

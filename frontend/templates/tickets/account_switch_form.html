@@ -1,0 +1,5 @@
+<form method="post" action="/accounts/switch">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="slot" value="{{ slot }}">
+          <button class="button primary" type="submit">Переключиться</button>
+        </form>

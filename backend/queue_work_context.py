@@ -14,6 +14,7 @@ import queue_auth
 import queue_features
 from queue_core import directory_size, display_phone, e, human_time, log_suppressed, normalize_message, parse_iso_datetime
 from ticketing import TicketStore
+from queue_templates import render_template
 
 PAGE_SIZE = 25
 
@@ -332,15 +333,25 @@ def render_ticket_rows(tickets: list[dict[str, object]]) -> str:
         sla = ticket_sla_state(ticket)
         row_sla_class = " sla-row-overdue" if sla.get("overdue") else " sla-row-warning" if sla.get("warning") else ""
         rows.append(
-            f"""<tr class="{row_sla_class.strip()}" data-ticket-row data-revision="{int(ticket.get('revision',0))}" data-ticket-id="{ticket['id']}" data-ticket-title="{e(ticket['title'])}" data-assigned-to="{e(ticket['assigned_to'])}" data-ticket-status="{e(ticket['status'])}">
-              <td class="priority-cell">{inline_priority_select(int(ticket['id']), str(ticket['priority']))}</td>
-              <td class="ticket-number">#{ticket['id']}</td>
-              <td><span class="source source-{e(ticket['source'])}">{e(source_label)}</span></td>
-              <td><strong>{e(ticket['sender'])}</strong><small>{e(display_phone(str(ticket['phone'])))}</small></td>
-              <td><a class="ticket-title-link" href="/ticket?id={ticket['id']}"><strong>{e(ticket['title'])}</strong></a><small class="summary">{e(ticket['summary'])}</small></td>
-              <td>{status_badge(str(ticket['status']))}{'<span class="handoff-badge">Следующая смена</span>' if int(ticket.get('shift_handoff', 0) or 0) else ''}{sla_badge(ticket)}<small>{e(ticket['assigned_to'])}</small></td>
-              <td><time>{e(human_time(str(ticket['created_at'])))}</time></td>
-            </tr>"""
+            render_template(
+                "tickets/ticket_rows.html",
+                strip=row_sla_class.strip(),
+                revision=int(ticket.get('revision',0)),
+                id=ticket['id'],
+                title=e(ticket['title']),
+                assigned_to=e(ticket['assigned_to']),
+                status=e(ticket['status']),
+                inline_priority_select=inline_priority_select(int(ticket['id']), str(ticket['priority'])),
+                source=e(ticket['source']),
+                source_label=e(source_label),
+                sender=e(ticket['sender']),
+                display_phone=e(display_phone(str(ticket['phone']))),
+                summary=e(ticket['summary']),
+                status_badge=status_badge(str(ticket['status'])),
+                shift_handoff_text='<span class="handoff-badge">Следующая смена</span>' if int(ticket.get('shift_handoff', 0) or 0) else '',
+                sla_badge=sla_badge(ticket),
+                human_time=e(human_time(str(ticket['created_at']))),
+            )
         )
     return "".join(rows) or '<tr><td colspan="7" class="empty">Заявок пока нет. Запусти WhatsApp QR-коннектор или добавь заявку вручную.</td></tr>'
 

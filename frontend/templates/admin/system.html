@@ -1,0 +1,19 @@
+
+      {{ notice_html }}
+      {{ cards }}
+      <section class="panel system-storage">
+        <div class="section-heading"><div><h2>Хранилище</h2><p>Свободно {{ human_bytes }} из {{ human_bytes_2 }} ({{ disk_percent }}%)</p></div></div>
+        <div class="system-metrics"><div><span>База</span><strong>{{ human_bytes_3 }}</strong></div><div><span>Медиа чатов</span><strong>{{ human_bytes_4 }}</strong></div><div><span>RAM процесса</span><strong>{{ human_bytes_5 }}</strong></div><div><span>CPU</span><strong>{{ cpu_count }} ядер</strong><small>{{ load_text }}</small></div></div>
+        <form class="system-actions" method="post" action="/admin/system"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="cleanup"><button class="button" type="submit" onclick="return confirm('Запустить очистку старых данных сейчас?')">Очистить сейчас</button></form>
+      </section>
+      <section class="panel"><div class="section-heading"><div><h2>Автоматические резервные копии</h2><p>{{ restore_label }}</p><p>Последняя: {{ last_file }} · копий: {{ count }}{{ last_error_text }}</p></div></div>
+        <form class="manual-form" method="post" action="/admin/system"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="backup_settings"><label>Интервал, часов<input type="number" name="backup_hours" min="1" max="168" value="{{ hours }}"></label><label>Хранить копий<input type="number" name="backup_keep" min="2" max="90" value="{{ keep }}"></label><button class="button" type="submit">Сохранить расписание</button></form>
+        <form class="system-actions" method="post" action="/admin/system"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="backup_now"><button class="button primary" type="submit">Создать копию сейчас</button></form>
+      </section>
+      <section class="panel table-panel">
+        <div class="section-heading"><div><h2>Очередь отправки</h2><p>Ожидает: {{ pending }} · Отправляется: {{ sending_count }} · Отправлено: {{ sent }} · Требует проверки: {{ uncertain }} · Ошибка: {{ failed }}</p></div>
+        <form method="post" action="/admin/system"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="retry_failed"><button class="button" type="submit">Повторить ошибки</button></form></div>
+        <div class="table-scroll"><table><thead><tr><th>ID</th><th>Статус</th><th>Попытки</th><th>Получатель</th><th>Ошибка</th><th>Обновлено</th></tr></thead><tbody>{{ queue_table }}</tbody></table></div>
+      </section>
+      <section class="panel system-log"><div class="section-heading"><div><h2>Журнал мониторинга</h2><p>Последние проверки и автоматические перезапуски</p></div></div><ul>{{ logs }}</ul></section>
+    

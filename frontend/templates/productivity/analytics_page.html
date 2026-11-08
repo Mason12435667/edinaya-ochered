@@ -1,0 +1,6 @@
+
+      <section class="page-heading"><div><p class="eyebrow">Отчёты</p><h1>Аналитика</h1><p>Статистика заявок без SLA-показателей</p></div><a class="button" href="/admin/analytics.csv">Экспорт CSV (открывается в Excel)</a></section>
+      <section class="stats-grid productivity-stats"><article class="stat-card"><span>Всего</span><strong>{{ total }}</strong></article><article class="stat-card"><span>Открытые</span><strong>{{ open }}</strong></article><article class="stat-card"><span>Закрытые</span><strong>{{ closed }}</strong></article><article class="stat-card"><span>Первый ответ</span><strong>{{ avg_first_minutes }} мин</strong></article><article class="stat-card"><span>Решение</span><strong>{{ avg_solution_minutes }} мин</strong></article></section>
+      <section class="analytics-grid analytics-grid-two"><div class="panel"><h2>По категориям</h2><div class="table-scroll"><table><thead><tr><th>Категория</th><th>Количество</th></tr></thead><tbody>{{ rows }}</tbody></table></div></div>
+      <div class="panel"><h2>По сотрудникам</h2><div class="table-scroll"><table><thead><tr><th>Сотрудник</th><th>Количество</th></tr></thead><tbody>{{ rows_2 }}</tbody></table></div></div></section>
+    

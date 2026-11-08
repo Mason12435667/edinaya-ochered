@@ -1,0 +1,8 @@
+<form method="post" action="/register" class="auth-form" autocomplete="on">
+          <label>Логин<input name="username" autocomplete="username" maxlength="32" pattern="[A-Za-z0-9_.-]{3,32}" placeholder="ivan.petrov" required autofocus></label>
+          <label>Имя<input name="display_name" autocomplete="name" maxlength="80" placeholder="Иван Петров" required></label>
+          <label>Пароль<input type="password" name="password" autocomplete="new-password" minlength="10" maxlength="256" required></label>
+          <label>Повторите пароль<input type="password" name="password2" autocomplete="new-password" minlength="10" maxlength="256" required></label>
+          <button class="auth-primary" type="submit">Создать аккаунт сотрудника</button>
+        </form>
+        <div class="auth-hint">Можно создавать несколько аккаунтов сотрудников. Каждый логин должен быть уникальным.</div>

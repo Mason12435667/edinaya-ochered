@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+{{ head }}
+<body class="auth-page" data-auth-user-id="{{ id }}">
+  <main class="auth-shell"><section class="auth-card">
+    <div class="auth-brand"><span class="auth-brand-mark">Q</span><div><strong>Единая очередь</strong><small>Безопасность аккаунта</small></div></div>
+    <h1>Смените временный пароль</h1>
+    <p>После смены временного пароля откроется доступ к рабочей системе.</p>
+    {{ notice_html }}
+    <form class="auth-form" method="post" action="/account/password">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="/">
+      <label>Текущий пароль<input type="password" name="current_password" autocomplete="current-password" required autofocus></label>
+      <label>Новый пароль<input type="password" name="new_password" minlength="10" autocomplete="new-password" required></label>
+      <label>Повторите новый пароль<input type="password" name="new_password2" minlength="10" autocomplete="new-password" required></label>
+      <button class="auth-primary" type="submit">Сменить пароль</button>
+    </form>
+    <div class="auth-links"><a href="/logout">Выйти</a></div>
+  </section></main>
+  {{ script }}
+</body></html>

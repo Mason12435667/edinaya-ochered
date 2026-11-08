@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, quote, urlparse
 import queue_productivity as qp
 from queue_core import e, human_bytes
 from ticketing import TicketStore
+from queue_templates import render_template
 
 
 def _value(query, key, default=""):
@@ -44,12 +45,16 @@ class ProductivityRoutes:
         if not handler.require_admin(): return
         data=qp.analytics(self.store)
         def rows(items): return ''.join(f'<tr><td>{e(name)}</td><td>{count}</td></tr>' for name,count in items) or '<tr><td colspan="2" class="empty">Нет данных</td></tr>'
-        content=f"""
-      <section class="page-heading"><div><p class="eyebrow">Отчёты</p><h1>Аналитика</h1><p>Статистика заявок без SLA-показателей</p></div><a class="button" href="/admin/analytics.csv">Экспорт CSV (открывается в Excel)</a></section>
-      <section class="stats-grid productivity-stats"><article class="stat-card"><span>Всего</span><strong>{data['total']}</strong></article><article class="stat-card"><span>Открытые</span><strong>{data['open']}</strong></article><article class="stat-card"><span>Закрытые</span><strong>{data['closed']}</strong></article><article class="stat-card"><span>Первый ответ</span><strong>{data['avg_first_minutes']} мин</strong></article><article class="stat-card"><span>Решение</span><strong>{data['avg_solution_minutes']} мин</strong></article></section>
-      <section class="analytics-grid analytics-grid-two"><div class="panel"><h2>По категориям</h2><div class="table-scroll"><table><thead><tr><th>Категория</th><th>Количество</th></tr></thead><tbody>{rows(data['by_category'])}</tbody></table></div></div>
-      <div class="panel"><h2>По сотрудникам</h2><div class="table-scroll"><table><thead><tr><th>Сотрудник</th><th>Количество</th></tr></thead><tbody>{rows(data['by_employee'])}</tbody></table></div></div></section>
-    """
+        content=render_template(
+            "productivity/analytics_page.html",
+            total=data['total'],
+            open=data['open'],
+            closed=data['closed'],
+            avg_first_minutes=data['avg_first_minutes'],
+            avg_solution_minutes=data['avg_solution_minutes'],
+            rows=rows(data['by_category']),
+            rows_2=rows(data['by_employee']),
+        )
         handler.html_response(self.admin_layout("Аналитика",content,"analytics"))
 
     def _backups_page(self, handler, query):
@@ -60,13 +65,12 @@ class ProductivityRoutes:
             size=human_bytes(row['size'])
             status='Исправна' if row['ok'] else 'Ошибка'
             cards.append(f"""<tr class="backup-row"><td><div class="backup-name"><span class="backup-icon">DB</span><strong>{e(row['name'])}</strong></div></td><td>{e(size)}</td><td><span class="backup-status {'ok' if row['ok'] else 'error'}"><i></i>{status}</span></td><td><span class="backup-detail">{e(row['detail'])}</span></td><td><form method="post" action="/admin/backups" data-backup-restore-form><input type="hidden" name="csrf_token" value="{e(self.csrf_token())}"><input type="hidden" name="action" value="restore"><input type="hidden" name="name" value="{e(row['name'])}"><button class="button compact backup-restore" {'disabled' if not row['ok'] else ''}>Восстановить</button></form></td></tr>""")
-        content=f"""
-      {f'<div class="notice">{e(notice)}</div>' if notice else ''}
-      <section class="page-heading backup-heading"><div><p class="eyebrow">Надёжность</p><h1>Резервные копии базы</h1><p>Создание, проверка целостности и безопасное восстановление SQLite</p></div>
-      <form method="post" action="/admin/backups" class="backup-create-form"><input type="hidden" name="csrf_token" value="{e(self.csrf_token())}"><input type="hidden" name="action" value="create"><button class="button primary backup-create"><span>＋</span> Создать копию сейчас</button></form></section>
-      <section class="backup-summary"><article class="panel backup-summary-card"><span class="backup-summary-icon">◫</span><div><small>Хранилище</small><strong>SQLite</strong><span>Локальные резервные копии</span></div></article><article class="panel backup-summary-card"><span class="backup-summary-icon">✓</span><div><small>Проверка</small><strong>Автоматическая</strong><span>Целостность каждой копии</span></div></article><article class="panel backup-summary-card"><span class="backup-summary-icon">↶</span><div><small>Восстановление</small><strong>Со страховкой</strong><span>Перед откатом создаётся копия</span></div></article></section>
-      <section class="panel table-panel backup-table-panel"><div class="section-heading backup-section-heading"><div><h2>Доступные копии</h2><p>Восстанавливать можно только копии, прошедшие проверку</p></div></div><div class="table-scroll"><table class="backup-table"><thead><tr><th>Копия</th><th>Размер</th><th>Проверка</th><th>Результат</th><th></th></tr></thead><tbody>{''.join(cards) or '<tr><td colspan="5" class="empty">Копий пока нет</td></tr>'}</tbody></table></div></section>
-    """
+        content=render_template(
+            "productivity/backups_page.html",
+            notice_text=f'<div class="notice">{e(notice)}</div>' if notice else '',
+            csrf_token=e(self.csrf_token()),
+            join=''.join(cards) or '<tr><td colspan="5" class="empty">Копий пока нет</td></tr>',
+        )
         handler.html_response(self.admin_layout("Резервные копии",content,"backups"))
 
     def _reminders_page(self, handler):

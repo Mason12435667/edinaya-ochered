@@ -1,0 +1,15 @@
+
+      {{ notice_text }}
+      <section class="page-heading"><div><p class="eyebrow">Надёжность и диагностика</p><h1>Контроль системы</h1><p>Проверки базы, очереди, бэкапов, ограничений файлов и режим обслуживания.</p></div></section>
+      <section class="reliability-grid">
+        <article class="panel reliability-card"><span>База данных</span><strong class="{{ ok_text }}">{{ ok_text_2 }}</strong><small>{{ detail }}</small></article>
+        <article class="panel reliability-card"><span>WhatsApp</span><strong class="{{ connected_text }}">{{ connected_text_2 }}</strong><small>{{ status }}</small></article>
+        <article class="panel reliability-card"><span>Свободно на диске</span><strong>{{ human }}</strong><small>из {{ human_2 }}</small></article>
+        <article class="panel reliability-card"><span>Лимит вложения</span><strong>{{ human_3 }}</strong><small>опасные исполняемые расширения блокируются до отправки</small></article>
+      </section>
+      <section class="panel reliability-maintenance"><div><h2>Режим обслуживания</h2><p>При включении сотрудники могут просматривать систему, но изменения и отправка сообщений блокируются. Коннектор продолжает синхронизацию.</p></div>
+        <form method="post" action="/admin/reliability"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="maintenance"><input type="hidden" name="enabled" value="{{ maintenance_text }}"><button class="button {{ value_text }}" type="submit">{{ maintenance_text_2 }}</button></form></section>
+      <section class="panel"><h2>Хранение секретов</h2><p>{{ env_text }}</p></section>
+      <section class="panel"><div class="section-heading"><div><h2>Неотправленные / зависшие</h2><p>Точная причина ошибки и ручной повтор. «Только файл» создаёт новую отправку без повторения текста.</p></div></div><div class="table-scroll"><table><thead><tr><th>ID</th><th>Статус</th><th>Чат</th><th>Сообщение</th><th>Причина</th><th>Действия</th></tr></thead><tbody>{{ problem_rows }}</tbody></table></div></section>
+      <section class="panel"><div class="section-heading"><div><h2>Проверка резервных копий</h2><p>SQLite quick_check выполняется только на чтение.</p></div></div><div class="table-scroll"><table><thead><tr><th>Копия</th><th>Размер</th><th>Дата</th><th>Проверка</th></tr></thead><tbody>{{ backup_rows }}</tbody></table></div></section>
+    

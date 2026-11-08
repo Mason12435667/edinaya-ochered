@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Iterable
+from queue_templates import render_template
 
 
 def admin_tabs(active: str, *, escape: Callable[[Any], str]) -> str:
@@ -37,11 +38,7 @@ def admin_layout(
     layout_func: Callable[..., str],
     escape: Callable[[Any], str],
 ) -> str:
-    heading = """
-      <section class="page-heading admin-heading">
-        <div><p class="eyebrow">Управление системой</p><h1>Админка</h1><p>Сотрудники, контакты, группы и настройки обращений</p></div>
-      </section>
-    """
+    heading = render_template("admin/layout.html")
     return layout_func(title, heading + admin_tabs(active, escape=escape) + content, "admin", True)
 
 
@@ -63,11 +60,14 @@ def render_admin_users(
     for request in auth.list_password_reset_requests():
         user_id = int(request["user_id"])
         requested_at = human_time(str(request.get("requested_at") or "")) if request.get("requested_at") else ""
-        reset_rows.append(f"""
-          <tr><td><strong>{escape(str(request.get('display_name') or request.get('username') or ''))}</strong><small>@{escape(str(request.get('username') or ''))}</small></td>
-          <td>{escape(requested_at)}</td>
-          <td><details class="auth-reset-details"><summary>Назначить новый пароль</summary><form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{escape(csrf_token)}"><input type="hidden" name="action" value="password"><input type="hidden" name="user_id" value="{user_id}"><input type="password" name="password" minlength="10" placeholder="Новый пароль" required><label class="auth-check"><input type="checkbox" name="temporary_password" value="1" checked> временный</label><button class="button" type="submit">Сбросить</button></form></details></td></tr>
-        """)
+        reset_rows.append(render_template(
+            "admin/pending_user_row.html",
+            display_name=escape(str(request.get('display_name') or request.get('username') or '')),
+            username=escape(str(request.get('username') or '')),
+            requested_at=escape(requested_at),
+            csrf_token=escape(csrf_token),
+            user_id=user_id,
+        ))
     recovery_panel = ""
     if reset_rows:
         recovery_panel = f"""<section class="panel table-panel auth-recovery-panel"><div class="section-heading"><div><h2>Запросы на восстановление пароля</h2><p>При временном пароле пользователь обязан сменить его сразу после входа.</p></div></div><div class="table-scroll"><table><thead><tr><th>Пользователь</th><th>Запрошено</th><th>Действие</th></tr></thead><tbody>{''.join(reset_rows)}</tbody></table></div></section>"""
@@ -95,22 +95,25 @@ def render_admin_users(
             f'<option value="{escape(name)}" {"selected" if name == linked else ""}>{escape(name)}</option>'
             for name in employees
         )
-        rows.append(f"""
-          <tr>
-            <td><strong>{escape(str(user['display_name']))}</strong><small>@{escape(str(user['username']))}</small>{f'<small>Привязан: {escape(linked)}</small>' if linked else ''}</td>
-            <td><span class="auth-role auth-role-{escape(role)}">{escape(role_label)}</span></td>
-            <td><span class="auth-state {'is-on' if enabled else 'is-off'}">{escape(state)}</span></td>
-            <td>{escape(last_login)}</td>
-            <td class="table-actions auth-user-actions">
-              <form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{escape(csrf_token)}"><input type="hidden" name="action" value="toggle"><input type="hidden" name="user_id" value="{user_id}"><input type="hidden" name="enabled" value="{'0' if enabled else '1'}"><button class="button ghost" type="submit">{'Отключить' if enabled else 'Включить'}</button></form>
-              <form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{escape(csrf_token)}"><input type="hidden" name="action" value="role"><input type="hidden" name="user_id" value="{user_id}"><input type="hidden" name="role" value="{escape(next_role)}"><button class="button ghost" type="submit">{escape(next_role_label)}</button></form>
-              <details class="auth-reset-details"><summary>Пароль</summary><form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{escape(csrf_token)}"><input type="hidden" name="action" value="password"><input type="hidden" name="user_id" value="{user_id}"><input type="password" name="password" minlength="10" placeholder="Новый пароль" required><label class="auth-check"><input type="checkbox" name="temporary_password" value="1"> временный</label><button class="button" type="submit">Сбросить</button></form></details>
-              <details class="auth-reset-details"><summary>Тема</summary><form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{escape(csrf_token)}"><input type="hidden" name="action" value="theme"><input type="hidden" name="user_id" value="{user_id}"><select name="theme">{theme_select}</select><button class="button" type="submit">Сохранить</button></form></details>
-              {f'<details class="auth-reset-details"><summary>Привязка</summary><form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{escape(csrf_token)}"><input type="hidden" name="action" value="employee_link"><input type="hidden" name="user_id" value="{user_id}"><select name="employee_name">{employee_select}</select><button class="button" type="submit">Сохранить</button></form></details>' if role == 'employee' else ''}
-              <form class="auth-delete-user-form" method="post" action="/admin/users" onsubmit="return confirm('Удалить пользователя? Аккаунт, его активные сессии и персональные настройки будут удалены. Действие необратимо.')"><input type="hidden" name="csrf_token" value="{escape(csrf_token)}"><input type="hidden" name="action" value="delete"><input type="hidden" name="user_id" value="{user_id}"><button class="button danger auth-delete-user" type="submit" title="Удалить учётную запись">Удалить</button></form>
-            </td>
-          </tr>
-        """)
+        rows.append(render_template(
+            "admin/user_row.html",
+            display_name=escape(str(user['display_name'])),
+            username=escape(str(user['username'])),
+            linked_text=f'<small>Привязан: {escape(linked)}</small>' if linked else '',
+            role=escape(role),
+            role_label=escape(role_label),
+            enabled_text='is-on' if enabled else 'is-off',
+            state=escape(state),
+            last_login=escape(last_login),
+            csrf_token=escape(csrf_token),
+            user_id=user_id,
+            enabled_text_2='0' if enabled else '1',
+            enabled_text_3='Отключить' if enabled else 'Включить',
+            next_role=escape(next_role),
+            next_role_label=escape(next_role_label),
+            theme_select=theme_select,
+            link_form=f'<details class="auth-reset-details"><summary>Привязка</summary><form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{escape(csrf_token)}"><input type="hidden" name="action" value="employee_link"><input type="hidden" name="user_id" value="{user_id}"><select name="employee_name">{employee_select}</select><button class="button" type="submit">Сохранить</button></form></details>' if role == 'employee' else '',
+        ))
     table_rows = "".join(rows) or '<tr><td colspan="5">Пользователей пока нет</td></tr>'
 
     session_rows: list[str] = []
@@ -137,21 +140,13 @@ def render_admin_users(
         )
     login_table = "".join(login_rows) or '<tr><td colspan="4" class="empty">История входов пуста</td></tr>'
 
-    content = f"""
-      {notice_html}{recovery_panel}
-      <section class="panel manual-panel"><div><h2>Добавить пользователя</h2><p>Для временного пароля включите соответствующий флажок: после первого входа остальные разделы будут заблокированы до смены пароля.</p></div>
-        <form class="manual-form auth-create-user" method="post" action="/admin/users">
-          <input type="hidden" name="csrf_token" value="{escape(csrf_token)}"><input type="hidden" name="action" value="create">
-          <label>Логин<input name="username" maxlength="32" pattern="[A-Za-z0-9_.-]{{3,32}}" placeholder="ivan.petrov" required></label>
-          <label>Имя<input name="display_name" maxlength="80" placeholder="Иван Петров" required></label>
-          <label>Роль<select name="role"><option value="employee">Сотрудник</option><option value="admin">Администратор</option></select></label>
-          <label>Пароль<input type="password" name="password" minlength="10" maxlength="256" required></label>
-          <label class="auth-check"><input type="checkbox" name="temporary_password" value="1" checked> Временный пароль, потребовать смену при первом входе</label>
-          <button class="button primary" type="submit">Создать пользователя</button>
-        </form>
-      </section>
-      <section class="panel table-panel auth-users-panel"><div class="section-heading"><div><h2>Учётные записи</h2><p>Здесь можно управлять доступом, ролью, темой и привязкой сотрудника. Удаление завершает активные сессии пользователя; удалить собственный аккаунт и последнего активного администратора нельзя.</p></div></div><div class="table-scroll"><table><thead><tr><th>Пользователь</th><th>Роль</th><th>Статус</th><th>Последний вход</th><th>Действия</th></tr></thead><tbody>{table_rows}</tbody></table></div></section>
-      <section class="panel table-panel"><div class="section-heading"><div><h2>Активные сессии</h2><p>Администратор может завершить отдельный сеанс пользователя.</p></div></div><div class="table-scroll"><table><thead><tr><th>Пользователь</th><th>IP</th><th>Последняя активность</th><th>Устройство</th><th></th></tr></thead><tbody>{session_table}</tbody></table></div></section>
-      <section class="panel table-panel"><div class="section-heading"><div><h2>История авторизаций</h2><p>Успешные и неуспешные попытки входа.</p></div></div><div class="table-scroll"><table><thead><tr><th>Время</th><th>Логин</th><th>Результат</th><th>IP</th></tr></thead><tbody>{login_table}</tbody></table></div></section>
-    """
+    content = render_template(
+        "admin/users.html",
+        notice_html=notice_html,
+        recovery_panel=recovery_panel,
+        csrf_token=escape(csrf_token),
+        table_rows=table_rows,
+        session_table=session_table,
+        login_table=login_table,
+    )
     return admin_layout_func("Доступ", content, "users")

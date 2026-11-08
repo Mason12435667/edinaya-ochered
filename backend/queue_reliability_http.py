@@ -9,6 +9,7 @@ import queue_reliability as qr
 from queue_avatars import AvatarCache
 from queue_core import e, human_bytes, log_suppressed
 from ticketing import TicketStore
+from queue_templates import render_template
 
 
 def _value(query,key,default=''):
@@ -56,21 +57,26 @@ class ReliabilityRoutes:
         ) or '<tr><td colspan="4" class="muted">Резервные копии tickets.db не найдены в стандартных каталогах</td></tr>'
         secret=snap['secret_storage']
         maintenance=bool(snap['maintenance'])
-        content=f'''
-      {f'<div class="notice">{e(notice)}</div>' if notice else ''}
-      <section class="page-heading"><div><p class="eyebrow">Надёжность и диагностика</p><h1>Контроль системы</h1><p>Проверки базы, очереди, бэкапов, ограничений файлов и режим обслуживания.</p></div></section>
-      <section class="reliability-grid">
-        <article class="panel reliability-card"><span>База данных</span><strong class="{'system-ok' if db.get('ok') else 'system-bad'}">{'OK' if db.get('ok') else 'Ошибка'}</strong><small>{e(str(db.get('detail','')))}</small></article>
-        <article class="panel reliability-card"><span>WhatsApp</span><strong class="{'system-ok' if conn.get('connected') else 'system-bad'}">{'Подключён' if conn.get('connected') else 'Недоступен'}</strong><small>{e(str(conn.get('status','')))}</small></article>
-        <article class="panel reliability-card"><span>Свободно на диске</span><strong>{_human(disk.get('free',0))}</strong><small>из {_human(disk.get('total',0))}</small></article>
-        <article class="panel reliability-card"><span>Лимит вложения</span><strong>{_human(snap.get('max_media_bytes',0))}</strong><small>опасные исполняемые расширения блокируются до отправки</small></article>
-      </section>
-      <section class="panel reliability-maintenance"><div><h2>Режим обслуживания</h2><p>При включении сотрудники могут просматривать систему, но изменения и отправка сообщений блокируются. Коннектор продолжает синхронизацию.</p></div>
-        <form method="post" action="/admin/reliability"><input type="hidden" name="csrf_token" value="{e(self.csrf_token())}"><input type="hidden" name="action" value="maintenance"><input type="hidden" name="enabled" value="{'0' if maintenance else '1'}"><button class="button {'danger' if not maintenance else 'primary'}" type="submit">{'Выключить обслуживание' if maintenance else 'Включить обслуживание'}</button></form></section>
-      <section class="panel"><h2>Хранение секретов</h2><p>{'WEBHOOK_TOKEN берётся из окружения systemd.' if secret.get('env') else 'Сейчас используется совместимый локальный token-файл. Для полной изоляции задайте WEBHOOK_TOKEN через EnvironmentFile systemd; патч не переносит рабочий токен автоматически, чтобы не оборвать коннектор.'}</p></section>
-      <section class="panel"><div class="section-heading"><div><h2>Неотправленные / зависшие</h2><p>Точная причина ошибки и ручной повтор. «Только файл» создаёт новую отправку без повторения текста.</p></div></div><div class="table-scroll"><table><thead><tr><th>ID</th><th>Статус</th><th>Чат</th><th>Сообщение</th><th>Причина</th><th>Действия</th></tr></thead><tbody>{problem_rows}</tbody></table></div></section>
-      <section class="panel"><div class="section-heading"><div><h2>Проверка резервных копий</h2><p>SQLite quick_check выполняется только на чтение.</p></div></div><div class="table-scroll"><table><thead><tr><th>Копия</th><th>Размер</th><th>Дата</th><th>Проверка</th></tr></thead><tbody>{backup_rows}</tbody></table></div></section>
-    '''
+        content=render_template(
+            "reliability/page.html",
+            notice_text=f'<div class="notice">{e(notice)}</div>' if notice else '',
+            ok_text='system-ok' if db.get('ok') else 'system-bad',
+            ok_text_2='OK' if db.get('ok') else 'Ошибка',
+            detail=e(str(db.get('detail',''))),
+            connected_text='system-ok' if conn.get('connected') else 'system-bad',
+            connected_text_2='Подключён' if conn.get('connected') else 'Недоступен',
+            status=e(str(conn.get('status',''))),
+            human=_human(disk.get('free',0)),
+            human_2=_human(disk.get('total',0)),
+            human_3=_human(snap.get('max_media_bytes',0)),
+            csrf_token=e(self.csrf_token()),
+            maintenance_text='0' if maintenance else '1',
+            value_text='danger' if not maintenance else 'primary',
+            maintenance_text_2='Выключить обслуживание' if maintenance else 'Включить обслуживание',
+            env_text='WEBHOOK_TOKEN берётся из окружения systemd.' if secret.get('env') else 'Сейчас используется совместимый локальный token-файл. Для полной изоляции задайте WEBHOOK_TOKEN через EnvironmentFile systemd; патч не переносит рабочий токен автоматически, чтобы не оборвать коннектор.',
+            problem_rows=problem_rows,
+            backup_rows=backup_rows,
+        )
         handler.html_response(self.admin_layout('Надёжность',content,'reliability'))
 
 

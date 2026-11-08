@@ -1,0 +1,16 @@
+
+      {{ notice_html }}
+      <section class="section-heading"><div><h2>Ручное создание заявки</h2><p>Для обращения, которое нужно завести в систему без WhatsApp</p></div></section>
+      <section class="panel">
+        <form class="manual-form" method="post" action="/admin/manual">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Название<input name="title" maxlength="160" placeholder="Например, Не работает личный кабинет" required></label>
+          <label>Категория<select name="category">{{ category_options }}</select></label>
+          <label>Приоритет<select name="priority">{{ priority_options }}</select></label>
+          <label>Сотрудник<select name="employee">{{ employee_options }}</select></label>
+          <label>Статус<select name="status"><option value="new">Не тронута</option><option value="in_progress">В работе</option><option value="done">Сделано</option><option value="invalid">Недействительная</option></select></label>
+          <label class="wide">Описание<textarea name="summary" rows="4" maxlength="2000" placeholder="Опишите проблему, укажите номер обращения или другие подробности" required></textarea></label>
+          <button class="button primary" type="submit">Создать заявку</button>
+        </form>
+      </section>
+    

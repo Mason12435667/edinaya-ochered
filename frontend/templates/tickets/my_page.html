@@ -1,0 +1,13 @@
+
+      <section class="page-heading my-account-heading"><div><p class="eyebrow">Учётная запись</p><h1>{{ display_name }}</h1><p>@{{ username }} · {{ role_label }}</p></div></section>
+      <section class="my-account-grid">
+        <div class="panel my-account-summary-card"><span>Роль</span><strong>{{ role_label }}</strong><small>{{ shift_text }}</small></div>
+        <div class="panel my-account-summary-card"><span>Активные заявки</span><strong>{{ active_count }}</strong><small>Назначены на вас сейчас</small></div>
+        <div class="panel my-account-summary-card"><span>Выполнено</span><strong>{{ done_count }}</strong><small>Заявки со статусом «Сделано»</small></div>
+        <div class="panel my-account-summary-card"><span>Активные сессии</span><strong>{{ session_count }}</strong><small>Ваши текущие входы в систему</small></div>
+      </section>
+      <section class="panel my-account-panel"><div class="section-heading"><div><h2>Текущие заявки</h2><p>Заявки, которые сейчас закреплены за вашим аккаунтом.</p></div></div><div class="my-ticket-list">{{ ticket_cards }}</div></section>
+      <section class="panel my-account-panel"><div class="section-heading"><div><h2>Последние выполненные</h2><p>Последние заявки, завершённые от вашего имени.</p></div></div><div class="my-ticket-list">{{ ticket_cards_2 }}</div></section>
+      <section class="panel table-panel"><div class="section-heading"><div><h2>Мои входы</h2><p>Последние успешные и неуспешные попытки авторизации.</p></div></div><div class="table-scroll"><table><thead><tr><th>Время</th><th>Результат</th><th>Причина</th><th>IP</th></tr></thead><tbody>{{ login_table }}</tbody></table></div></section>
+      <section class="panel table-panel"><div class="section-heading"><div><h2>Моя активность</h2><p>Последние действия, которые система связала с вашим аккаунтом.</p></div></div><div class="table-scroll"><table><thead><tr><th>Время</th><th>Действие</th><th>Объект</th></tr></thead><tbody>{{ activity_table }}</tbody></table></div></section>
+    

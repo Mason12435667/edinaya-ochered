@@ -1,0 +1,51 @@
+
+      <section class="page-heading">
+        <div><p class="eyebrow">Service Desk</p><h1>Заявки</h1><p>WhatsApp-запросы и ручные заявки в одной очереди</p></div>
+        <a class="button primary" href="/whatsapp">Открыть WhatsApp</a>
+      </section>
+      {{ notice_html }}
+      <section class="metrics">{{ cards }}</section>
+      <section class="smart-shift-panel"><div><strong>Текущая смена: {{ current_employee }}</strong>{{ shift_note }}</div><div class="shift-metrics">{{ shift_cards }}</div></section>
+      {{ handoff_board }}
+      <section class="panel filters-panel">
+        <form class="filters" method="get" action="/" data-dashboard-filter-form>
+          <input type="hidden" name="view" value="{{ selected_view }}">
+          <input type="search" name="q" value="{{ search }}" placeholder="№ заявки, ФИО, телефон, подразделение, текст..." data-live-ticket-search autocomplete="off">
+          <select name="status">{{ status_options }}</select>
+          <select name="category">{{ category_options }}</select>
+          <select name="priority">{{ priority_options }}</select>
+          <input type="number" name="no_answer_minutes" value="{{ no_answer_minutes }}" min="0" max="10080" step="5" placeholder="Без ответа > N мин" title="Показать заявки без первого ответа дольше N минут">
+          <button class="button" type="submit">Применить</button>
+          <a class="button ghost" href="/">Сбросить</a>
+        </form>
+      </section>
+      <section class="panel table-panel" data-dashboard data-dashboard-version="{{ dashboard_version }}">
+        <div class="table-hint"><span>Приоритет меняется в левом столбце. Правой кнопкой мыши по заявке можно быстро изменить статус.</span><span id="auto-refresh-state">Автообновление включено</span></div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Приоритет</th><th>№</th><th>Источник</th><th>Отправитель</th><th>Запрос</th><th>Статус</th><th>Время</th></tr></thead>
+          <tbody id="ticket-table-body">{{ table_body }}</tbody>
+        </table></div>
+        <div class="pagination" id="ticket-pagination">{{ render_pagination }}</div>
+      </section>
+      <section class="panel manual-panel">
+        <div><p class="eyebrow">Ручная заявка</p><h2>Быстро добавить запрос</h2><p>Для обращений, поступивших по телефону, почте или из других каналов</p></div>
+        <form class="manual-form" method="post" action="/manual">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Тип запроса<input name="title" value="" placeholder="Например, сброс пароля" required></label>
+          <label>Номер / идентификатор<input name="reference" placeholder="Например, 784512"></label>
+          <label class="wide">Комментарий<textarea name="comment" rows="2" placeholder="Дополнительная информация"></textarea></label>
+          <label>Приоритет<select name="priority">{{ priority_options_2 }}</select></label>
+          <label>Сотрудник<select name="employee">{{ employee_options }}</select></label>
+          <label>Начальный статус<select name="status"><option value="new">Не сделано</option><option value="done">Сделано</option></select></label>
+          <button class="button primary" type="submit">Добавить</button>
+        </form>
+      </section>
+      <div id="ticket-context-menu" class="context-menu" hidden>
+        <div class="context-heading"><small>Изменить статус</small><strong id="context-ticket-title">Заявка</strong></div>
+        <button type="button" data-quick-status="new"><span class="context-dot dot-new"></span>Не тронута</button>
+        <button type="button" data-quick-status="in_progress"><span class="context-dot dot-in_progress"></span>В работе</button>
+        <button type="button" data-quick-status="done"><span class="context-dot dot-done"></span>Сделано</button>
+        <button type="button" data-quick-status="invalid"><span class="context-dot dot-invalid"></span>Недействительная</button>
+        <button type="button" data-quick-handoff="1"><span class="context-dot dot-handoff"></span>Передать следующей смене</button>
+      </div>
+    

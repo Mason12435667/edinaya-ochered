@@ -1,0 +1,12 @@
+<tr>
+                  <td><strong>{{ name }}</strong></td>
+                  <td>{{ participant_count }}</td>
+                  <td>
+                    <form method="post" action="/admin/groups">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <input type="hidden" name="action" value="add_discovered">
+                      <input type="hidden" name="chat_id" value="{{ group_id }}">
+                      <button class="button primary" type="submit">Добавить</button>
+                    </form>
+                  </td>
+                </tr>

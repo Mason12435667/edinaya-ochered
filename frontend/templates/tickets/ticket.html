@@ -1,0 +1,50 @@
+
+      <a class="back" href="/">← Все заявки</a>
+      {{ notice_html }}
+      <section class="ticket-header">
+        <div><p class="eyebrow">Заявка #{{ id }}</p><h1>{{ title }}</h1><p>{{ summary }}</p></div>
+        <div class="ticket-badges">{{ priority_badge }}{{ status_badge }}{{ handoff_badge }}</div>
+      </section>
+      <div class="ticket-layout">
+        <section class="panel ticket-main">
+          <div class="ticket-main-heading"><h2>Данные запроса</h2>{{ chat_button }}</div>
+          
+          <div class="detail-grid">
+            <div><span>Источник</span><strong>{{ source }}</strong></div>
+            <div><span>Отправитель</span><strong>{{ sender }}</strong></div>
+            <div><span>Телефон</span><strong>{{ display_phone }}</strong></div>
+            <div><span>Категория</span><strong>{{ get }}</strong></div>
+            <div><span>Приоритет</span><strong>{{ get_2 }}</strong></div>
+            <div><span>Создана</span><strong>{{ human_time }}</strong></div>
+          </div>
+          
+          <h3>Исходное сообщение</h3>
+          <pre class="message">{{ original_text }}</pre>
+          {{ attachment }}
+          {{ context_fields_panel }}
+          {{ context_history_panel }}
+        </section>
+        <aside>
+          <section class="panel actions-panel">
+            <h2>Изменить статус</h2>
+            <form method="post" action="/status">
+              <input type="hidden" name="ticket_id" value="{{ id }}">
+              <label>Сотрудник<select name="employee">{{ employee_options }}</select></label>
+              <div class="status-actions">{{ status_buttons }}</div>
+            </form>
+          </section>
+          {{ sla_panel }}
+          {{ handoff_panel }}
+          <section class="panel classification-panel">
+            <h2>Приоритет</h2>
+            <form method="post" action="/classification">
+              <input type="hidden" name="ticket_id" value="{{ id }}">
+              <label>Приоритет<select name="priority">{{ priority_options }}</select></label>
+              <button class="button" type="submit">Сохранить</button>
+            </form>
+          </section>
+          {{ admin_delete_panel }}
+          <section class="panel history-panel"><h2>История заявки</h2><ul>{{ event_rows }}</ul></section>
+        </aside>
+      </div>
+    

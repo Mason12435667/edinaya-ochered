@@ -1,0 +1,16 @@
+
+          <tr>
+            <td><strong>{{ display_name }}</strong><small>@{{ username }}</small>{{ linked_text }}</td>
+            <td><span class="auth-role auth-role-{{ role }}">{{ role_label }}</span></td>
+            <td><span class="auth-state {{ enabled_text }}">{{ state }}</span></td>
+            <td>{{ last_login }}</td>
+            <td class="table-actions auth-user-actions">
+              <form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="toggle"><input type="hidden" name="user_id" value="{{ user_id }}"><input type="hidden" name="enabled" value="{{ enabled_text_2 }}"><button class="button ghost" type="submit">{{ enabled_text_3 }}</button></form>
+              <form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="role"><input type="hidden" name="user_id" value="{{ user_id }}"><input type="hidden" name="role" value="{{ next_role }}"><button class="button ghost" type="submit">{{ next_role_label }}</button></form>
+              <details class="auth-reset-details"><summary>Пароль</summary><form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="password"><input type="hidden" name="user_id" value="{{ user_id }}"><input type="password" name="password" minlength="10" placeholder="Новый пароль" required><label class="auth-check"><input type="checkbox" name="temporary_password" value="1"> временный</label><button class="button" type="submit">Сбросить</button></form></details>
+              <details class="auth-reset-details"><summary>Тема</summary><form method="post" action="/admin/users"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="theme"><input type="hidden" name="user_id" value="{{ user_id }}"><select name="theme">{{ theme_select }}</select><button class="button" type="submit">Сохранить</button></form></details>
+              {{ link_form }}
+              <form class="auth-delete-user-form" method="post" action="/admin/users" onsubmit="return confirm('Удалить пользователя? Аккаунт, его активные сессии и персональные настройки будут удалены. Действие необратимо.')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="user_id" value="{{ user_id }}"><button class="button danger auth-delete-user" type="submit" title="Удалить учётную запись">Удалить</button></form>
+            </td>
+          </tr>
+        

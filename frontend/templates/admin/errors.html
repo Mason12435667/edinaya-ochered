@@ -1,0 +1,11 @@
+      {{ notice_html }}
+      <section class="panel table-panel">
+        <div class="section-heading"><div><p class="eyebrow">Отдельно от заявок</p><h2>Репорты об ошибках</h2><p>Сообщения пользователей о багах системы. Они не участвуют в SLA и не попадают в список заявок.</p></div></div>
+        <form class="filters" method="get" action="/admin/errors">
+          <input type="search" name="q" value="{{ search }}" placeholder="Текст, имя, телефон, номер репорта...">
+          <select name="status">{{ options }}</select>
+          <button class="button" type="submit">Найти</button><a class="button ghost" href="/admin/errors">Сбросить</a>
+        </form>
+        <div class="table-scroll"><table><thead><tr><th>ID</th><th>Статус</th><th>Пользователь</th><th>Описание</th><th>Создан</th></tr></thead><tbody>{{ table_rows }}</tbody></table></div>
+      </section>
+    

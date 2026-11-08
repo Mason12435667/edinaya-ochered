@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 import queue_workflow as qw
 from queue_core import e, human_bytes, log_suppressed
 from ticketing import TicketStore
+from queue_templates import render_template
 
 
 def _value(query, key, default=""):
@@ -91,33 +92,16 @@ class WorkflowRoutes:
             f'<article class="stat-card"><span>{label}</span><strong>{_human_bytes(stats[kind]["bytes"])}</strong><small>{stats[kind]["count"]} файлов</small></article>'
             for kind, label in (("photo","Фото"),("video","Видео"),("voice","Голосовые"),("file","Документы"))
         )
-        content = f'''
-      {f'<div class="notice">{e(notice)}</div>' if notice else ''}
-      <section class="page-heading"><div><p class="eyebrow">Хранение и процессы</p><h1>Рабочие настройки</h1><p>Сроки хранения, очистка медиа и правила закрытия заявок</p></div></section>
-      <section class="workflow-admin-grid">
-        <form class="panel workflow-settings-card" method="post" action="/admin/workflow">
-          <input type="hidden" name="csrf_token" value="{e(self.csrf_token())}"><input type="hidden" name="action" value="retention">
-          <h2>Срок хранения</h2><p class="muted">Активные заявки и связанные с ними медиа автоматически не удаляются.</p>
-          <label>Сообщения, дней<input type="number" name="messages" min="1" max="3650" value="{settings['messages']}"></label>
-          <label>Медиа, дней<input type="number" name="media" min="1" max="3650" value="{settings['media']}"></label>
-          <label>Закрытые заявки, дней<input type="number" name="tickets" min="1" max="3650" value="{settings['tickets']}"></label>
-          <button class="button primary" type="submit">Сохранить сроки</button>
-        </form>
-        <section class="panel workflow-settings-card"><h2>Медиа на диске</h2><div class="stats-grid workflow-media-stats">{media_cards}</div>
-          <form class="workflow-cleanup-form" method="post" action="/admin/workflow">
-            <input type="hidden" name="csrf_token" value="{e(self.csrf_token())}"><input type="hidden" name="action" value="media_cleanup">
-            <label>Тип<select name="kind"><option value="all">Все типы</option><option value="photo">Фото</option><option value="video">Видео</option><option value="voice">Голосовые</option><option value="file">Документы</option></select></label>
-            <label>Минимальный размер, МБ<input type="number" name="min_mb" min="0" max="10240" step="1" value="0"></label>
-            <label>Старше, дней<input type="number" name="older_days" min="0" max="3650" value="0"></label>
-            <button class="button danger" type="submit">Очистить выбранное</button>
-          </form>
-        </section>
-      </section>
-      <section class="panel workflow-required-card"><h2>Обязательный комментарий при закрытии</h2><p class="muted">Выберите категории, которые нельзя закрыть без служебного комментария.</p>
-        <form method="post" action="/admin/workflow"><input type="hidden" name="csrf_token" value="{e(self.csrf_token())}"><input type="hidden" name="action" value="close_categories"><div class="workflow-check-grid">{checks or '<span class="muted">Категории не найдены</span>'}</div><button class="button primary" type="submit">Сохранить правило</button></form>
-      </section>
-      <section class="panel"><h2>Экспорт истории</h2><p>TXT, PDF и ZIP с вложениями доступны из открытого WhatsApp-чата через кнопку «Экспорт».</p></section>
-    '''
+        content = render_template(
+            "workflow/workflow_admin_page.html",
+            notice_text=f'<div class="notice">{e(notice)}</div>' if notice else '',
+            csrf_token=e(self.csrf_token()),
+            messages=settings['messages'],
+            media=settings['media'],
+            tickets=settings['tickets'],
+            media_cards=media_cards,
+            checks=checks or '<span class="muted">Категории не найдены</span>',
+        )
         handler.html_response(self.admin_layout("Рабочие настройки", content, "workflow"))
 
 

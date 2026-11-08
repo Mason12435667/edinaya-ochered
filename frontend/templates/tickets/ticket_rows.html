@@ -1,0 +1,9 @@
+<tr class="{{ strip }}" data-ticket-row data-revision="{{ revision }}" data-ticket-id="{{ id }}" data-ticket-title="{{ title }}" data-assigned-to="{{ assigned_to }}" data-ticket-status="{{ status }}">
+              <td class="priority-cell">{{ inline_priority_select }}</td>
+              <td class="ticket-number">#{{ id }}</td>
+              <td><span class="source source-{{ source }}">{{ source_label }}</span></td>
+              <td><strong>{{ sender }}</strong><small>{{ display_phone }}</small></td>
+              <td><a class="ticket-title-link" href="/ticket?id={{ id }}"><strong>{{ title }}</strong></a><small class="summary">{{ summary }}</small></td>
+              <td>{{ status_badge }}{{ shift_handoff_text }}{{ sla_badge }}<small>{{ assigned_to }}</small></td>
+              <td><time>{{ human_time }}</time></td>
+            </tr>
