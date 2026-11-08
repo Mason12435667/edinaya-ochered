@@ -26,6 +26,8 @@ MAIN_SCRIPTS = (
     "http.js", "ui.js", "app.js", "productivity.js", "workflow.js", "reliability.js",
     "chat-layout.js", "performance.js", "attachments.js", "account.js",
 )
+# Scripts of the static pages in frontend/pages.
+PAGE_SCRIPTS = ("shell.js", "groups-page.js")
 
 
 class TicketViews:
@@ -40,6 +42,47 @@ class TicketViews:
         self.local_mode = local_mode
         self.page_size = page_size
 
+    @staticmethod
+    def _nav_items(show_admin: bool) -> list[tuple[str, str, str, str]]:
+        items = [
+            ("tickets", "/", "Заявки", ""),
+            ("whatsapp", "/whatsapp", "WhatsApp", ""),
+            ("groups", "/groups", "Группы", ""),
+        ]
+        if show_admin:
+            items.append(("admin", "/admin/", "Админка", ""))
+        items.append(("logout", "/logout", "Выйти", ""))
+        return items
+
+    def _profile(self) -> dict[str, object]:
+        user = queue_auth.current_user() or {}
+        user_id = int(user.get("id", 0) or 0)
+        is_admin = str(user.get("role")) == "admin"
+        theme = str((self.auth.get_user_preferences(user_id) if user_id > 0 else {}).get("theme") or "").strip()
+        return {
+            "id": user_id,
+            "name": str(user.get("display_name") or user.get("username") or "Администратор"),
+            "username": str(user.get("username") or ""),
+            "role_label": "Администратор" if is_admin else "Сотрудник",
+            "shift_note": "Работает от имени аккаунта" if is_admin
+            else f"На смене автоматически: {employee_identity(user) or active_employee()}",
+            "theme": theme if theme in {"light", "dark", "pink"} else "",
+            "can_change_password": not user.get("legacy"),
+        }
+
+    def page_context(self, show_admin: bool) -> dict[str, object]:
+        """What a static page needs to draw its frame: see frontend/static/shell.js."""
+        profile = self._profile()
+        return {
+            "csrf_token": self.csrf_token(),
+            "show_admin": show_admin,
+            "local_mode": self.local_mode,
+            "maintenance": queue_reliability.maintenance_active(self.store),
+            "theme": profile.pop("theme"),
+            "nav": [{"key": key, "href": href, "label": label} for key, href, label, _ in self._nav_items(show_admin)],
+            "user": profile,
+        }
+
     def layout(
         self,
         title: str,
@@ -47,49 +90,33 @@ class TicketViews:
         active: str = "tickets",
         show_admin: bool = False,
     ) -> str:
-        nav_items = [
-            ("tickets", "/", "Заявки", ""),
-            ("whatsapp", "/whatsapp", "WhatsApp", ""),
-            ("groups", "/groups", "Группы", ""),
-        ]
-        auth_user = queue_auth.current_user() or {}
-        if show_admin:
-            nav_items.append(("admin", "/admin/", "Админка", ""))
-        nav_items.append(("logout", "/logout", "Выйти", ""))
+        nav_items = self._nav_items(show_admin)
+        profile = self._profile()
         nav = "".join(
             f'<a class="nav-link {"active" if key == active else ""}" href="{e(href)}"{attributes}>{e(label)}</a>'
             for key, href, label, attributes in nav_items
         )
-        current_employee = active_employee()
-        auth_name = str(auth_user.get("display_name") or auth_user.get("username") or "Администратор")
-        auth_role = "Администратор" if str(auth_user.get("role")) == "admin" else "Сотрудник"
-        user_id = int(auth_user.get("id", 0) or 0)
-        user_prefs = self.auth.get_user_preferences(user_id) if user_id > 0 else {}
-        preferred_theme = str(user_prefs.get("theme") or "").strip()
-        if preferred_theme not in {"light", "dark", "pink"}:
-            preferred_theme = ""
-        shift_note = "Работает от имени аккаунта" if str(auth_user.get("role")) == "admin" else f"На смене автоматически: {e(employee_identity(auth_user) or current_employee)}"
-        legacy_note = bool(auth_user.get("legacy"))
+        legacy_note = not profile["can_change_password"]
         password_form = "" if legacy_note else render_template(
             "tickets/profile_password_form.html",
             csrf_token=e(self.csrf_token()),
         )
         auth_profile = render_template(
             "tickets/profile_menu.html",
-            auth_name=e(auth_name),
-            auth_role=e(auth_role),
-            username=e(str(auth_user.get("username") or "")),
-            shift_note=shift_note,
+            auth_name=e(profile["name"]),
+            auth_role=e(profile["role_label"]),
+            username=e(profile["username"]),
+            shift_note=e(profile["shift_note"]),
             password_form=password_form,
         )
         return render_template(
             "tickets/layout.html",
             csrf_token=e(self.csrf_token()),
             title=e(title),
-            dumps=json.dumps(preferred_theme),
+            dumps=json.dumps(profile["theme"]),
             stylesheet_tags=stylesheet_tags(MAIN_STYLESHEETS),
             show_admin_text='1' if show_admin else '0',
-            user_id=user_id,
+            user_id=profile["id"],
             local_mode_text='<span class="local-mode-badge">WINDOWS · ТЕСТ</span>' if self.local_mode else '',
             nav=nav,
             auth_profile=auth_profile,

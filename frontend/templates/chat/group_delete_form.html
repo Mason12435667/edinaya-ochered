@@ -1,6 +1,0 @@
-<form method="post" action="/admin/groups" onsubmit="return confirm('Удалить группу из системы?')">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  <input type="hidden" name="action" value="delete">
-                  <input type="hidden" name="chat_id" value="{{ chat_id }}">
-                  <button class="button ghost" type="submit">Удалить</button>
-                </form>

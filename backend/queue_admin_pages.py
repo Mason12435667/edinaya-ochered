@@ -74,9 +74,13 @@ def _category_editor_row(suffix: str, row: dict[str, object], used_numbers: set[
     )
 
 
+def avatar_initials(name: str) -> str:
+    return ''.join(word[0] for word in name.split()[:2]) or '?'
+
+
 def avatar_html(avatars: AvatarCache, chat_id: str, name: str) -> str:
     url = avatars.url(chat_id)
-    letters = ''.join(word[0] for word in name.split()[:2]) or '?'
+    letters = avatar_initials(name)
     pic = f'<img src="{e(url)}" alt="" loading="lazy" onerror="this.remove()">' if url else ''
     return f'<span class="chat-avatar table-avatar">{e(letters)}{pic}</span>'
 

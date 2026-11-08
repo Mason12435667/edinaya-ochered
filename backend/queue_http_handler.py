@@ -26,7 +26,7 @@ import queue_reliability
 import queue_ticket_views
 import queue_workflow
 from queue_avatars import AvatarCache
-from queue_chat_views import render_groups, render_whatsapp
+from queue_chat_views import groups_page_data
 from queue_core import content_disposition_header, display_phone, log_suppressed, normalize_message, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
 from queue_menu_config import MenuConfig
 from queue_store_conversations import MENU_CONTEXT
@@ -75,7 +75,7 @@ class HttpDependencies:
 STATIC_FILES = {
     "favicon.png": "image/png",
     **{name: "text/css; charset=utf-8" for name in queue_ticket_views.MAIN_STYLESHEETS},
-    **{name: "text/javascript; charset=utf-8" for name in queue_ticket_views.MAIN_SCRIPTS},
+    **{name: "text/javascript; charset=utf-8" for name in (*queue_ticket_views.MAIN_SCRIPTS, *queue_ticket_views.PAGE_SCRIPTS)},
 }
 
 
@@ -810,12 +810,20 @@ class QueueHTTPHandlerMixin:
     def _get_ticket(self, query) -> None:
         self.html_response(self.ticket_views.render_ticket(self.query_int(query, "id"), query, self.is_admin()))
 
+    def page_response(self, name: str) -> None:
+        self.file_response(self.deps.root / "frontend" / "pages" / f"{name}.html", "text/html; charset=utf-8")
+
     def _get_whatsapp(self, query) -> None:
-        self.html_response(render_whatsapp(query, self.is_admin(), layout=self.ticket_views.layout))
+        self.page_response("whatsapp")
+
+    def _get_api_page_context(self, query) -> None:
+        self.json_response(self.ticket_views.page_context(self.is_admin()))
+
+    def _get_api_groups_page(self, query) -> None:
+        self.json_response(groups_page_data(self.is_admin(), store=self.deps.store, avatars=self.deps.avatars))
 
     def _get_groups(self, query) -> None:
-        self.html_response(render_groups(query, self.is_admin(), store=self.deps.store, avatars=self.deps.avatars, csrf_token=self.deps.csrf_token,
-                                         layout=self.ticket_views.layout))
+        self.page_response("groups")
 
     def _get_api_integration_ping(self, query) -> None:
         key = self.integration_api_key()
@@ -962,8 +970,7 @@ class QueueHTTPHandlerMixin:
         self.json_response({"rows_html": self.admin_pages.discovered_contact_rows(search_raw, 80)})
 
     def _get_admin_groups(self, query) -> None:
-        self.html_response(render_groups(query, True, store=self.deps.store, avatars=self.deps.avatars, csrf_token=self.deps.csrf_token,
-                                         layout=self.ticket_views.layout))
+        self.page_response("groups")
 
     def _get_to_admin_home(self, query) -> None:
         self.redirect("/admin/")
@@ -2097,6 +2104,8 @@ class QueueHTTPHandlerMixin:
         "/api/integration/ping": _get_api_integration_ping,
         "/api/integration/tickets": _get_api_integration_tickets,
         "/api/dashboard-data": _get_api_dashboard_data,
+        "/api/page-context": _get_api_page_context,
+        "/api/groups-page": _get_api_groups_page,
         "/api/chat-state": _get_api_chat_state,
         "/api/group-state": _get_api_group_state,
         "/api/chat-history": _get_api_chat_history,

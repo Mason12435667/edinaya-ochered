@@ -1,10 +1,34 @@
-
-      {{ notice_html }}
-      {{ auto_refresh_html }}
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="queue-csrf" content="">
+  <title>Группы WhatsApp · Единая очередь</title>
+  <meta name="theme-color" content="#112a25">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png?v=3.3.79">
+  <link rel="apple-touch-icon" href="/static/favicon.png?v=3.3.79">
+  <script>document.documentElement.dataset.theme = localStorage.getItem("queue-theme") || "light";</script>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/ui.css">
+  <link rel="stylesheet" href="/static/instruction.css">
+  <link rel="stylesheet" href="/static/global-theme.css">
+  <link rel="stylesheet" href="/static/productivity.css">
+  <link rel="stylesheet" href="/static/workflow.css">
+  <link rel="stylesheet" href="/static/notifications.css">
+  <link rel="stylesheet" href="/static/chat.css">
+  <link rel="stylesheet" href="/static/auth.css">
+  <link rel="stylesheet" href="/static/pink-theme.css">
+  <link rel="stylesheet" href="/static/polish.css">
+  <link rel="stylesheet" href="/static/user-ui.css">
+</head>
+<body data-page="groups">
+  <main class="page">
+      <div data-groups-notice></div>
       <section class="page-heading whatsapp-heading conversation-heading-compact">
         <span class="connection-badge offline" id="whatsapp-connection">Проверка подключения</span>
       </section>
-      <section class="chat-shell" data-conversation-page data-state-endpoint="/api/group-state" data-send-endpoint="/group-send" data-media-send-endpoint="/chat-media-send" data-forward-endpoint="/chat-forward" data-initial-chat-id="{{ initial_group_id }}" data-list-empty="Группы пока не добавлены" data-select-title="Выберите группу">
+      <section class="chat-shell" data-conversation-page data-state-endpoint="/api/group-state" data-send-endpoint="/group-send" data-media-send-endpoint="/chat-media-send" data-forward-endpoint="/chat-forward" data-initial-chat-id="" data-list-empty="Группы пока не добавлены" data-select-title="Выберите группу">
         <aside class="panel chat-sidebar">
           <div class="chat-sidebar-head"><h2>Группы</h2><button class="icon-button" type="button" data-chat-refresh title="Обновить">Обновить</button></div>
           <input type="search" data-chat-search placeholder="Поиск по названию группы">
@@ -36,6 +60,20 @@
           </form>
         </section>
       </section>
-      {{ admin_form }}
-      <section class="panel table-panel"><div class="section-heading"><div><h2>Все добавленные группы</h2><p>Добавлять и удалять группы может только администратор</p></div></div><div class="table-scroll"><table><thead><tr><th>Группа</th><th>Участники</th><th>Обновление</th><th></th></tr></thead><tbody>{{ table }}</tbody></table></div></section>
-    
+      <div data-groups-admin></div>
+      <section class="panel table-panel"><div class="section-heading"><div><h2>Все добавленные группы</h2><p>Добавлять и удалять группы может только администратор</p></div></div><div class="table-scroll"><table><thead><tr><th>Группа</th><th>Участники</th><th>Обновление</th><th></th></tr></thead><tbody data-groups-table></tbody></table></div></section>
+    </main>
+  <script src="/static/shell.js" defer></script>
+  <script src="/static/groups-page.js" defer></script>
+  <script src="/static/http.js" defer></script>
+  <script src="/static/ui.js" defer></script>
+  <script src="/static/app.js" defer></script>
+  <script src="/static/productivity.js" defer></script>
+  <script src="/static/workflow.js" defer></script>
+  <script src="/static/reliability.js" defer></script>
+  <script src="/static/chat-layout.js" defer></script>
+  <script src="/static/performance.js" defer></script>
+  <script src="/static/attachments.js" defer></script>
+  <script src="/static/account.js" defer></script>
+</body>
+</html>
