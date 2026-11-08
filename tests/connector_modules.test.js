@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 
 const delivery = require('../connector/queue_delivery');
-const {InboundSpool, MIN_AGE_MS} = require('../connector/queue_inbound_spool');
+const {InboundSpool, MIN_AGE_MS, isFinalRejection} = require('../connector/queue_inbound_spool');
 const largeMedia = require('../connector/queue_large_media');
 const avatars = require('../connector/queue_avatars');
 
@@ -218,9 +218,225 @@ test('drain delivers old messages in order and leaves fresh ones to the live pat
   const delivered = await spool.drain(async (p) => { sent.push(p.external_id); return {reply: 'ok'}; },
     async (p) => { replied.push(p.external_id); });
   assert.equal(delivered, 2);
-  assert.deepEqual(sent.sort(), ['old1', 'old2']);
-  assert.deepEqual(replied.sort(), ['old1', 'old2']);
+  assert.deepEqual(sent, ['old1', 'old2']);
+  assert.deepEqual(replied, ['old1', 'old2']);
   assert.deepEqual(files(), ['fresh.json']);
+});
+
+const httpError = (status) => Object.assign(new Error(`HTTP ${status}`), {httpStatus: status});
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const savedAt = (dir, name) => JSON.parse(fs.readFileSync(path.join(dir, `${name}.json`), 'utf8')).saved_at;
+
+function gate() {
+  let open;
+  const opened = new Promise((resolve) => { open = resolve; });
+  return {opened, open};
+}
+
+test('a failed recovery keeps the arrival order for the next attempt', async () => {
+  const {dir, spool, files} = tempSpool();
+  spool.enqueue({external_id: 'first'});
+  spool.enqueue({external_id: 'second'});
+  age(dir, MIN_AGE_MS + 1000);
+  await assert.rejects(spool.drain(async () => { throw httpError(503); }));
+  assert.deepEqual(files().sort(), ['first.json', 'second.json']);
+  const sent = [];
+  await spool.drain(async (p) => { sent.push(p.external_id); return {}; });
+  assert.deepEqual(sent, ['first', 'second']);
+  assert.deepEqual(files(), []);
+});
+
+test('a retry updates the record but keeps its place in the queue', async () => {
+  const {dir, spool} = tempSpool();
+  spool.enqueue({external_id: 'm', text: 'short'});
+  const before = savedAt(dir, 'm');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await assert.rejects(spool.submit({external_id: 'm', text: 'complete'}, async () => { throw httpError(503); }));
+  const record = JSON.parse(fs.readFileSync(path.join(dir, 'm.json'), 'utf8'));
+  assert.equal(record.saved_at, before);
+  assert.equal(record.payload.text, 'complete');
+});
+
+test('messages saved in the same millisecond keep their order', () => {
+  const {dir, spool} = tempSpool();
+  const {now} = Date;
+  Date.now = () => 1000;
+  try {
+    for (const id of ['a', 'b', 'c']) spool.enqueue({external_id: id});
+  } finally {
+    Date.now = now;
+  }
+  assert.ok(savedAt(dir, 'a') < savedAt(dir, 'b') && savedAt(dir, 'b') < savedAt(dir, 'c'));
+});
+
+for (const status of [400, 413, 422]) {
+  test(`HTTP ${status} is final and removes the message`, async () => {
+    const {spool, files} = tempSpool();
+    await assert.rejects(spool.submit({external_id: 'm'}, async () => { throw httpError(status); }));
+    assert.deepEqual(files(), []);
+    assert.equal(isFinalRejection(httpError(status)), true);
+  });
+}
+
+for (const status of [401, 403, 404, 408, 425, 429, 500, 503]) {
+  test(`HTTP ${status} keeps the message for a retry`, async () => {
+    const {spool, files} = tempSpool();
+    await assert.rejects(spool.submit({external_id: 'm'}, async () => { throw httpError(status); }));
+    assert.deepEqual(files(), ['m.json']);
+    assert.equal(isFinalRejection(httpError(status)), false);
+  });
+}
+
+test('a network failure keeps the message for a retry', async () => {
+  const {spool, files} = tempSpool();
+  await assert.rejects(spool.submit({external_id: 'm'}, async () => { throw new Error('ECONNREFUSED'); }));
+  assert.deepEqual(files(), ['m.json']);
+});
+
+test('one chat sends one message at a time, in order', async () => {
+  const {spool} = tempSpool();
+  const first = gate();
+  const started = [];
+  const send = async (p) => {
+    started.push(p.external_id);
+    if (p.external_id === 'first') await first.opened;
+    return {id: p.external_id};
+  };
+  const one = spool.submit({external_id: 'first', chat_id: 'c'}, send);
+  const two = spool.submit({external_id: 'second', chat_id: 'c'}, send);
+  await tick();
+  assert.deepEqual(started, ['first'], 'the second message waits');
+  first.open();
+  assert.deepEqual(await Promise.all([one, two]), [{id: 'first'}, {id: 'second'}]);
+  assert.deepEqual(started, ['first', 'second']);
+});
+
+test('a slow chat does not hold up another chat', async () => {
+  const {spool} = tempSpool();
+  const slow = gate();
+  const started = [];
+  const send = async (p) => {
+    started.push(p.external_id);
+    if (p.chat_id === 'slow') await slow.opened;
+    return {};
+  };
+  const blocked = spool.submit({external_id: 'a', chat_id: 'slow'}, send);
+  await spool.submit({external_id: 'b', chat_id: 'fast'}, send);
+  assert.deepEqual(started, ['a', 'b']);
+  slow.open();
+  await blocked;
+});
+
+test('a failed message does not block the next task of its chat forever', async () => {
+  const {spool, files} = tempSpool();
+  await assert.rejects(spool.submit({external_id: 'bad', chat_id: 'c'}, async () => { throw httpError(400); }));
+  assert.deepEqual(await spool.submit({external_id: 'next', chat_id: 'c'}, async () => ({ok: true})), {ok: true});
+  assert.deepEqual(files(), []);
+  await tick();
+  assert.equal(spool.chatLines.size, 0, 'finished chats are forgotten');
+});
+
+test('a new message cannot overtake one that failed before it', async () => {
+  const {spool, files} = tempSpool();
+  await assert.rejects(spool.submit({external_id: 'first', chat_id: 'c'}, async () => { throw httpError(503); }));
+  const sent = [];
+  const replied = [];
+  const result = await spool.submit({external_id: 'second', chat_id: 'c'},
+    async (p) => { sent.push(p.external_id); return {reply: p.external_id}; },
+    async (p, r) => { replied.push([p.external_id, r.reply]); });
+  assert.deepEqual(sent, ['first', 'second']);
+  assert.deepEqual(result, {reply: 'second'}, 'the caller gets the answer to its own message');
+  assert.deepEqual(replied, [['first', 'first']], 'only the recovered message is answered here');
+  assert.deepEqual(files(), []);
+});
+
+test('a new message stays behind an older one that still fails', async () => {
+  const {spool, files} = tempSpool();
+  await assert.rejects(spool.submit({external_id: 'first', chat_id: 'c'}, async () => { throw httpError(503); }));
+  const attempted = [];
+  await assert.rejects(spool.submit({external_id: 'second', chat_id: 'c'}, async (p) => { attempted.push(p.external_id); throw httpError(503); }));
+  assert.deepEqual(attempted, ['first'], 'the new message is not sent');
+  assert.deepEqual(files().sort(), ['first.json', 'second.json']);
+  const third = [];
+  await spool.submit({external_id: 'third', chat_id: 'c'}, async (p) => { third.push(p.external_id); return {}; });
+  assert.deepEqual(third, ['first', 'second', 'third'], 'a held message is older than the next one too');
+});
+
+test('a message left by a previous run goes before a new one of its chat', async () => {
+  const {dir, spool, files} = tempSpool();
+  spool.enqueue({external_id: 'old', chat_id: 'c'});
+  age(dir, MIN_AGE_MS + 1000);
+  const sent = [];
+  await spool.submit({external_id: 'new', chat_id: 'c'}, async (p) => { sent.push(p.external_id); return {}; });
+  assert.deepEqual(sent, ['old', 'new']);
+  assert.deepEqual(files(), []);
+});
+
+test('a fresh message of the same chat is left to its own live path', async () => {
+  const {spool, files} = tempSpool();
+  spool.enqueue({external_id: 'waiting', chat_id: 'c'}); // saved, its request is still being prepared
+  const sent = [];
+  await spool.submit({external_id: 'new', chat_id: 'c'}, async (p) => { sent.push(p.external_id); return {}; });
+  assert.deepEqual(sent, ['new']);
+  assert.deepEqual(files(), ['waiting.json']);
+});
+
+test('a message does not wait for one that arrived after it', async () => {
+  const {spool, files} = tempSpool();
+  spool.enqueue({external_id: 'earlier', chat_id: 'c'}); // saved first, its request is still being prepared
+  await assert.rejects(spool.submit({external_id: 'later', chat_id: 'c'}, async () => { throw httpError(503); }));
+  const sent = [];
+  await spool.submit({external_id: 'earlier', chat_id: 'c'}, async (p) => { sent.push(p.external_id); return {}; });
+  assert.deepEqual(sent, ['earlier']);
+  assert.deepEqual(files(), ['later.json']);
+});
+
+test('other chats are not delivered by a new message', async () => {
+  const {dir, spool, files} = tempSpool();
+  spool.enqueue({external_id: 'other', chat_id: 'x'});
+  age(dir, MIN_AGE_MS + 1000);
+  const sent = [];
+  await spool.submit({external_id: 'new', chat_id: 'c'}, async (p) => { sent.push(p.external_id); return {}; });
+  assert.deepEqual(sent, ['new']);
+  assert.deepEqual(files(), ['other.json']);
+});
+
+test('an older message rejected for good does not stop the new one', async () => {
+  const {dir, spool, files} = tempSpool();
+  spool.enqueue({external_id: 'bad', chat_id: 'c'});
+  age(dir, MIN_AGE_MS + 1000);
+  const sent = [];
+  await spool.submit({external_id: 'new', chat_id: 'c'}, async (p) => {
+    sent.push(p.external_id);
+    if (p.external_id === 'bad') throw httpError(400);
+    return {};
+  });
+  assert.deepEqual(sent, ['bad', 'new']);
+  assert.deepEqual(files(), []);
+});
+
+test('a failed reply to a recovered message does not fail the new one', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const {dir, spool, files} = tempSpool();
+  spool.enqueue({external_id: 'old', chat_id: 'c'});
+  age(dir, MIN_AGE_MS + 1000);
+  const result = await spool.submit({external_id: 'new', chat_id: 'c'}, async () => ({ok: true}), async () => { throw new Error('no reply'); });
+  assert.deepEqual(result, {ok: true});
+  assert.deepEqual(files(), []);
+});
+
+test('recovery does not resend what the live path already delivered', async () => {
+  const {dir, spool, files} = tempSpool();
+  spool.enqueue({external_id: 'old', chat_id: 'c'});
+  age(dir, MIN_AGE_MS + 1000);
+  const sent = [];
+  const send = async (p) => { sent.push(p.external_id); return {}; };
+  const live = spool.submit({external_id: 'new', chat_id: 'c'}, send);
+  const drained = spool.drain(send); // saw 'old' before the live path took it
+  await live;
+  assert.equal(await drained, 0);
+  assert.deepEqual(sent, ['old', 'new']);
+  assert.deepEqual(files(), []);
 });
 
 test('drain stops at the first retryable failure and keeps the rest', async () => {

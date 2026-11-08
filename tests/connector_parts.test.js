@@ -96,6 +96,52 @@ test('media recovered by the server is remembered and the request succeeds', asy
   }
 });
 
+async function withFetch(answers, run) {
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({url: String(url), body: JSON.parse(options.body)});
+    const status = answers.length > 1 ? answers.shift() : answers[0];
+    return {ok: status < 400, status, json: async () => (status < 400 ? {ok: true} : {error: `HTTP ${status}`})};
+  };
+  try {
+    await run();
+    return calls;
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+test('an inbound message rejected by the server is not retried', async () => {
+  const calls = await withFetch([400], () => assert.rejects(common.postJsonWithRetry('/api/whatsapp', {external_id: 'x'}), /HTTP 400/));
+  assert.equal(calls.length, 1);
+});
+
+test('rate limiting of an inbound message is retried', async () => {
+  const calls = await withFetch([429, 200], async () => {
+    assert.deepEqual(await common.postJsonWithRetry('/api/whatsapp', {external_id: 'x'}), {ok: true});
+  });
+  assert.equal(calls.length, 2);
+});
+
+test('other requests are still not retried', async () => {
+  const calls = await withFetch([503], () => assert.rejects(common.postJsonWithRetry('/api/contact-policy', {})));
+  assert.equal(calls.length, 1);
+});
+
+test('only a real bot answer to a recovered message is sent', async () => {
+  const payload = {external_id: 'x', chat_id: 'c'};
+  const calls = await withFetch([200], async () => {
+    await common.replyToRecovered(payload, {reply: 'Ответ'});
+    for (const skip of [{reply: ''}, {reply: 'a', duplicate: true}, {reply: 'a', silent: true}, {reply: 'a', manual_contact: true}]) {
+      await common.replyToRecovered(payload, skip);
+    }
+  });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.endsWith('/api/inbound-recovery-reply'));
+  assert.deepEqual(calls[0].body, {external_id: 'x', chat_id: 'c', reply: 'Ответ'});
+});
+
 test('the connector starts only from its entry point', () => {
   for (const file of FILES.filter((name) => name !== 'whatsapp_qr_connector')) {
     assert.doesNotMatch(sourceOf(file), /client\.initialize\(/, file);
