@@ -5,7 +5,7 @@
 // connector_lifecycle.js — запуск, состояние и завершение.
 
 const {
-  runtime, client, inboundSpool, postJsonOnce, postJsonWithRetry,
+  runtime, client, inboundSpool, postJsonWithRetry, replyToRecovered,
 } = require('./connector_common');
 const syncing = require('./connector_sync');
 const lifecycle = require('./connector_lifecycle');
@@ -38,10 +38,7 @@ const inboundRecoveryTimer=setInterval(async()=>{
   if(inboundRecoveryBusy || runtime.shutdownStarted || !runtime.connectorOperational)return;
   inboundRecoveryBusy=true;
   try {
-    await inboundSpool.drain(payload=>postJsonWithRetry('/api/whatsapp',payload),async(payload,result)=>{
-      if(result.reply && !result.duplicate && !result.silent && !result.manual_contact)
-        await postJsonOnce('/api/inbound-recovery-reply',{external_id:payload.external_id,chat_id:payload.chat_id,reply:result.reply});
-    });
+    await inboundSpool.drain(payload=>postJsonWithRetry('/api/whatsapp',payload),replyToRecovered);
   } catch(error){console.error('Очередь входящих требует проверки:',error.message||error);}
   finally{inboundRecoveryBusy=false;}
 },3000);

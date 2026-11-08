@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const {Client, LocalAuth} = require('whatsapp-web.js');
-const {InboundSpool} = require('./queue_inbound_spool');
+const {InboundSpool, isFinalRejection} = require('./queue_inbound_spool');
 
 
 
@@ -80,8 +80,14 @@ const MAIN_MENU_TEXT = LANGUAGE_SELECTION_TEXT;
 
 async function postJson(endpoint, payload) {
   if(endpoint==='/api/whatsapp' && payload && payload.external_id)
-    return inboundSpool.submit(payload, data=>postJsonWithRetry(endpoint,data));
+    return inboundSpool.submit(payload, data=>postJsonWithRetry(endpoint,data), replyToRecovered);
   return postJsonWithRetry(endpoint,payload);
+}
+
+// Ответ бота на сообщение, доставленное из очереди, а не живым путём.
+async function replyToRecovered(payload, result) {
+  if(result.reply && !result.duplicate && !result.silent && !result.manual_contact)
+    await postJsonOnce('/api/inbound-recovery-reply',{external_id:payload.external_id,chat_id:payload.chat_id,reply:result.reply});
 }
 
 async function postJsonWithRetry(endpoint, payload) {
@@ -89,8 +95,7 @@ async function postJsonWithRetry(endpoint, payload) {
   for (let attempt = 0; ; attempt++) {
     try { return await postJsonOnce(endpoint, payload); }
     catch (error) {
-      const status = Number(error && error.httpStatus || 0);
-      if (!retryInbound || attempt >= 3 || (status && status < 500)) throw error;
+      if (!retryInbound || attempt >= 3 || isFinalRejection(error)) throw error;
       await new Promise(resolve => setTimeout(resolve, [500, 1500, 4000][attempt]));
     }
   }
@@ -743,6 +748,7 @@ async function resolveMentionPresentation(message, sourceBody = '') {
 }
 
 module.exports = {
+  replyToRecovered,
   LANGUAGE_SELECTION_TEXT, PERF_CONTACT_COOLDOWN_MS, STARTUP_BACKFILL_BATCH,
   STARTUP_BACKFILL_MODEL_LIMIT, USER_MESSAGE_TYPES, backgroundWorkAllowed, cachedMessageObject,
   callRejectNoticeAt, chatIdAliases, cleanContactDisplayName, cleanupOutgoingTracking, client,
