@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '../static/http.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../frontend/static/http.js'), 'utf8');
 function browser(fetcher = async () => new Response('{"ok":true}', {headers:{'content-type':'application/json'}})) {
   const calls = [];
   const window = {fetch: async (...args) => { calls.push(args); return fetcher(...args); }};

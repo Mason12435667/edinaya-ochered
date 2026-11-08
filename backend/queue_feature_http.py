@@ -29,7 +29,7 @@ class FeatureRoutes:
         if parsed.path == '/api/avatar':
             self.avatars.serve(handler,value('chat_id'))
         elif parsed.path in {'/static/ui.js','/static/ui.css'}:
-            handler.file_response(self.root / parsed.path.lstrip('/'), 'text/javascript; charset=utf-8' if parsed.path.endswith('.js') else 'text/css; charset=utf-8')
+            handler.file_response(self.root / 'frontend' / parsed.path.lstrip('/'), 'text/javascript; charset=utf-8' if parsed.path.endswith('.js') else 'text/css; charset=utf-8')
         elif parsed.path == '/api/message-window':
             chat_id = valid_conversation_id(value('chat_id'))
             window = queue_features.message_window(self.store,chat_id,value('message_id'))

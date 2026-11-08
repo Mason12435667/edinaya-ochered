@@ -100,7 +100,7 @@ class ServiceTests(unittest.TestCase):
             "queue_productivity_http, queue_reliability_http, queue_workflow_http, queue_feature_http, queue_uploads, "
             "queue_chat_state, queue_ticket_views, queue_admin_pages, queue_chat_views, queue_http_handler; "
             "assert 'app' not in sys.modules"],
-            cwd=Path(__file__).resolve().parents[1], env={k:v for k,v in os.environ.items() if k != 'WEBHOOK_TOKEN'},
+            cwd=Path(__file__).resolve().parents[1] / "backend", env={k:v for k,v in os.environ.items() if k != 'WEBHOOK_TOKEN'},
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 

@@ -7,15 +7,15 @@ const os = require('os');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const delivery = require('../queue_delivery');
-const {InboundSpool, MIN_AGE_MS} = require('../queue_inbound_spool');
-const largeMedia = require('../queue_large_media');
-const avatars = require('../queue_avatars');
+const delivery = require('../connector/queue_delivery');
+const {InboundSpool, MIN_AGE_MS} = require('../connector/queue_inbound_spool');
+const largeMedia = require('../connector/queue_large_media');
+const avatars = require('../connector/queue_avatars');
 
 test('every module the connector requires loads', () => {
   // Loading (not just resolving) also catches modules that throw at import time.
   // No WhatsApp client or browser is started by requiring them.
-  const entry = path.join(ROOT, 'whatsapp_qr_connector.js');
+  const entry = path.join(ROOT, 'connector', 'whatsapp_qr_connector.js');
   const load = require('node:module').createRequire(entry);
   const source = fs.readFileSync(entry, 'utf8');
   // window.require('WAWeb…') runs inside the WhatsApp Web page, not in Node

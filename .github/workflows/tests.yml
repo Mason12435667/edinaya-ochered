@@ -26,7 +26,7 @@ jobs:
 
       - name: JavaScript syntax
         run: |
-          for file in static/*.js *.js scripts/*.js; do
+          for file in frontend/static/*.js connector/*.js *.js scripts/*.js; do
             node --check "$file"
           done
 

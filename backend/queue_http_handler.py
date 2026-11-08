@@ -715,7 +715,7 @@ class QueueHTTPHandlerMixin:
             return
         name = parsed.path[len("/static/"):]
         if parsed.path.startswith("/static/") and name in STATIC_FILES:
-            self.file_response(self.deps.root / "static" / name, STATIC_FILES[name])
+            self.file_response(self.deps.root / "frontend" / "static" / name, STATIC_FILES[name])
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -889,7 +889,7 @@ class QueueHTTPHandlerMixin:
         self.handle_chat_media(query)
 
     def _get_favicon(self, query) -> None:
-        self.file_response(self.deps.root / "static" / "favicon.png", "image/png")
+        self.file_response(self.deps.root / "frontend" / "static" / "favicon.png", "image/png")
 
     def _get_connector_state(self, query) -> None:
         self.json_response(self.chat_views.connector.snapshot())

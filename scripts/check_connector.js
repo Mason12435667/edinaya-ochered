@@ -4,7 +4,7 @@ const path = require('node:path');
 const {createRequire} = require('node:module');
 
 function check() {
-  const entry = path.join(__dirname, '..', 'whatsapp_qr_connector.js');
+  const entry = path.join(__dirname, '..', 'connector', 'whatsapp_qr_connector.js');
   const localRequire = createRequire(entry);
   const source = fs.readFileSync(entry, 'utf8');
   const dependencies = new Set([...source.matchAll(/(?<![\w.])require\(['"]([^'"]+)['"]\)/g)].map(m => m[1]));
