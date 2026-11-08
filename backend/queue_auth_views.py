@@ -1,3 +1,4 @@
+"""HTML страниц, доступных до входа: вход, регистрация, восстановление пароля, первый запуск, смена временного пароля."""
 from __future__ import annotations
 
 from typing import Any, Callable

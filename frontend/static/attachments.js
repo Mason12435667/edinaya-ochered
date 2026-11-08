@@ -1,3 +1,4 @@
+// Вложения в поле ввода чата: выбор файлов, вставка скриншотов, предпросмотр и отправка по очереди.
 (() => {
   "use strict";
   const page = document.querySelector("[data-conversation-page]");

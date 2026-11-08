@@ -1,4 +1,6 @@
 'use strict';
+// WhatsApp-коннектор: подключается к WhatsApp Web, передаёт входящие сообщения на сервер,
+// забирает из очереди исходящие и отправляет их, синхронизирует чаты, контакты и группы.
 
 const fs = require('fs');
 const avatarSync = require('./queue_avatars');

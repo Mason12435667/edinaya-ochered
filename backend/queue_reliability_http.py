@@ -1,3 +1,4 @@
+"""HTTP-адреса надёжности: данные страницы диагностики, отложенные сообщения, режим обслуживания и повтор отправки."""
 from __future__ import annotations
 
 from collections.abc import Callable

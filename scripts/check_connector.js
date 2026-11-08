@@ -1,4 +1,5 @@
 'use strict';
+// Проверяет, что все модули, которые подключает коннектор, загружаются. WhatsApp при этом не запускается.
 const fs = require('node:fs');
 const path = require('node:path');
 const {createRequire} = require('node:module');

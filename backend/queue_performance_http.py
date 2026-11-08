@@ -1,3 +1,4 @@
+"""HTTP-адреса показателей производительности и объяснения ошибок для интерфейса."""
 from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse

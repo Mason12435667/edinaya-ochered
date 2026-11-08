@@ -1,3 +1,4 @@
+"""Язык пользователя WhatsApp в текущем запросе и переводы текстов на русский и казахский."""
 from __future__ import annotations
 
 import re

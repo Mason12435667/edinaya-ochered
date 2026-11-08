@@ -1,3 +1,4 @@
+"""Обработчик HTTP-запросов: проверка входа и CSRF, таблицы маршрутов GET и POST, отдача статики и страниц, ответы JSON."""
 from __future__ import annotations
 
 import csv

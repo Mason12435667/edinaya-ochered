@@ -1,3 +1,4 @@
+"""Данные рамки страницы (меню, права, CSRF-токен) и страниц «Мой аккаунт» и «Аккаунты»."""
 from __future__ import annotations
 
 import sqlite3

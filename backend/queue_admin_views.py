@@ -1,3 +1,4 @@
+"""Вкладки админки и данные страницы «Доступ»: пользователи, сессии, запросы на сброс пароля, история входов."""
 from __future__ import annotations
 
 from typing import Any, Callable, Iterable

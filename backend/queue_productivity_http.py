@@ -1,3 +1,4 @@
+"""HTTP-адреса рабочих инструментов и данные страниц аналитики, резервных копий и напоминаний."""
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
