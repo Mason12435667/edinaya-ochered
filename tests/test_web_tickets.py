@@ -1,4 +1,4 @@
-"""Web interface: authentication, ticket list, manual tickets and status changes."""
+"""Веб-интерфейс: вход, список заявок, ручные заявки и смена статуса."""
 from __future__ import annotations
 
 import os

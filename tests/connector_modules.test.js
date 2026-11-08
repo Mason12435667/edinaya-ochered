@@ -1,5 +1,5 @@
 'use strict';
-// node --test tests/ : connector helper modules and that the connector's requires resolve.
+// node --test tests/ : вспомогательные модули коннектора и проверка, что его зависимости находятся.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');

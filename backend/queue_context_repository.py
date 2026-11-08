@@ -1,7 +1,7 @@
-"""SQLite persistence for dialog context; uses the caller's transaction.
+"""Хранение контекста диалога в SQLite; работает внутри транзакции вызывающего кода.
 
-Schema and JSON codecs stay here. Parsing, required fields, and decisions about
-creating or updating a ticket belong to queue_contextual_tickets.
+Здесь находятся схема и преобразование в JSON. Разбор сообщений, обязательные поля и решения
+о создании или изменении заявки относятся к queue_contextual_tickets.
 """
 from __future__ import annotations
 

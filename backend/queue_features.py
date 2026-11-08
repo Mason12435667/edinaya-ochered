@@ -1,6 +1,6 @@
-"""Message navigation, mention matching and shift announcements.
+"""Переход к сообщению, поиск упоминаний и объявления о смене.
 
-Independent of the HTTP server; all queries use the existing store migrations.
+Не зависит от HTTP-сервера; все запросы используют уже существующую схему хранилища.
 """
 import re
 

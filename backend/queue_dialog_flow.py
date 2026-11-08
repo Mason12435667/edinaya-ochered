@@ -1,4 +1,4 @@
-"""Durable pre-menu context and bounded, explainable clarification helpers."""
+"""Постоянный контекст до выбора в меню и ограниченные по числу, объяснимые уточнения."""
 import json
 from datetime import datetime, timedelta, timezone
 import re

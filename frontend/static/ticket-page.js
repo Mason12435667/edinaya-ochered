@@ -1,4 +1,4 @@
-// The ticket card: draws the whole page from /api/ticket-page.
+// Карточка заявки: рисует всю страницу из /api/ticket-page.
 (() => {
   "use strict";
   if (!window.queuePage) return;

@@ -1,8 +1,7 @@
-"""Bot profile: greeting and WhatsApp menu categories.
+"""Профиль бота: приветствие и категории меню WhatsApp.
 
-The profile lives in the database (setting PROFILE_SETTING) and is edited on
-/admin/categories. config/company.json only seeds the database on first start;
-after that the file is not read again.
+Профиль хранится в базе (настройка PROFILE_SETTING) и редактируется на /admin/categories.
+config/company.json заполняет базу только при первом запуске, потом файл больше не читается.
 """
 from __future__ import annotations
 

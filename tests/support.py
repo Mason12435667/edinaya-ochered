@@ -1,8 +1,7 @@
-"""Shared test server: one isolated app instance per test run.
+"""Общий тестовый сервер: один изолированный экземпляр приложения на запуск тестов.
 
-Environment is configured before ``app`` is imported because the application
-reads its configuration at import time. Every test uses its own phone number,
-so tests do not depend on each other's state in the shared database.
+Окружение настраивается до импорта ``app``, потому что приложение читает настройки при импорте.
+У каждого теста свой номер телефона, поэтому тесты не зависят от состояния друг друга в общей базе.
 """
 from __future__ import annotations
 

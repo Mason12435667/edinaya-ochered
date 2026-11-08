@@ -1,6 +1,6 @@
-"""What the chat, group and notification APIs show when stored and live data disagree.
+"""Что показывают API чатов, групп и уведомлений, когда сохранённые и текущие данные расходятся.
 
-Tests go through HTTP and the store only, so they describe behaviour, not the module layout.
+Тесты работают только через HTTP и хранилище, поэтому описывают поведение, а не устройство модулей.
 """
 import copy
 import itertools

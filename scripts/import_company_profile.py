@@ -1,13 +1,13 @@
-"""Replace the bot profile stored in the database with a company.json file.
+"""Заменяет профиль бота в базе содержимым файла company.json.
 
-After the first start the bot menu lives in the database and is edited on
-/admin/categories; config/company.json is no longer read. Use this script to
-load the file again on purpose (e.g. a new deployment template).
+После первого запуска меню бота хранится в базе и редактируется на /admin/categories, а
+config/company.json больше не читается. Этот скрипт нужен, чтобы осознанно загрузить файл заново
+(например, новый шаблон для установки).
 
     python scripts/import_company_profile.py [path/to/company.json]
 
-Uses QUEUE_DATA_DIR like the server. A running server keeps its menu in memory:
-restart it afterwards. Removed categories keep their label on old tickets.
+Использует QUEUE_DATA_DIR, как и сервер. Работающий сервер держит меню в памяти, поэтому после
+запуска скрипта его нужно перезапустить. Удалённые категории сохраняют название в старых заявках.
 """
 from __future__ import annotations
 

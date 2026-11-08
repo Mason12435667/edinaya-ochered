@@ -1,5 +1,5 @@
-// Frame of a static page: draws the header from /api/page-context. Runs first of the
-// deferred scripts, which expect the CSRF token and the header to be in place.
+// Рамка статической страницы: рисует шапку по данным /api/page-context. Выполняется первым
+// из отложенных скриптов, которым нужны CSRF-токен и готовая шапка.
 (() => {
   "use strict";
 

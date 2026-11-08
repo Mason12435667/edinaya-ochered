@@ -1,6 +1,6 @@
-"""Per-contact bot conversation state: pending menu/category and the ticket draft.
+"""Состояние диалога бота с контактом: ожидаемое меню или категория и черновик заявки.
 
-Mixed into ticketing.TicketStore, which provides connection() and the other stores' helpers.
+Подмешивается в ticketing.TicketStore, откуда берёт connection() и методы других хранилищ.
 """
 from __future__ import annotations
 

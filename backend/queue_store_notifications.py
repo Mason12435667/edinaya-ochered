@@ -1,6 +1,6 @@
-"""Unread counters and the notification feed.
+"""Счётчики непрочитанного и лента уведомлений.
 
-Mixed into ticketing.TicketStore, which provides connection() and the other stores' helpers.
+Подмешивается в ticketing.TicketStore, откуда берёт connection() и методы других хранилищ.
 """
 from __future__ import annotations
 

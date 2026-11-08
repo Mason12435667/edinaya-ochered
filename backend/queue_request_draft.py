@@ -1,4 +1,4 @@
-"""Fields of a ticket draft parsed from free-form user text, and their display labels."""
+"""Поля черновика заявки, извлечённые из свободного текста пользователя, и их подписи."""
 from __future__ import annotations
 
 import re

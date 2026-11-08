@@ -1,4 +1,4 @@
-"""CSRF protection: every signed-in POST needs the user's token."""
+"""Защита от CSRF: каждый POST вошедшего пользователя требует его токен."""
 from __future__ import annotations
 
 import http.client

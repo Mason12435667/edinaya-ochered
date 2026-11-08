@@ -1,4 +1,6 @@
-// Persistent media transport: one player per page, independent of chat rendering.
+// Основной скрипт интерфейса: список заявок, чат, уведомления и всплывающие диалоги.
+
+// Постоянный медиаплеер: один на страницу и не зависит от перерисовки чата.
 window.QueueVoice = (() => {
   const audio = new Audio(); audio.preload = "metadata";
   let panel, source, seek, clock, playButton;

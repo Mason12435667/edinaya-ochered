@@ -1,7 +1,7 @@
-"""POST flows end to end: each test checks the stored result, not only the response.
+"""POST-сценарии целиком: каждый тест проверяет сохранённый результат, а не только ответ.
 
-An expired session answers 303 to /login, which is also the success status of the
-form routes, so every request here goes through `send`/`upload`, which fail on it.
+Истёкшая сессия отвечает 303 на /login, и такой же статус означает успех формы, поэтому все
+запросы здесь идут через `send` и `upload`, которые считают это ошибкой.
 """
 import itertools
 import json

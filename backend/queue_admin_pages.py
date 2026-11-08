@@ -1,4 +1,4 @@
-"""Data for the static administration pages; frontend/static/pages.js draws them."""
+"""Данные статических страниц админки; рисует их frontend/static/pages.js."""
 from __future__ import annotations
 
 import time

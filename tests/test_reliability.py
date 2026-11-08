@@ -1,6 +1,6 @@
-"""Reliability guarantees: races, rollbacks, backups, recovery replies, profile import.
+"""Гарантии надёжности: гонки, откаты, резервные копии, ответы при восстановлении, импорт профиля.
 
-Several scenarios come from the review branch fix/review-regressions-2026-11-04.
+Часть сценариев взята из ветки проверки fix/review-regressions-2026-11-04.
 """
 from __future__ import annotations
 

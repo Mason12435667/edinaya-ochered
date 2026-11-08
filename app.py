@@ -1,4 +1,4 @@
-"""Starts the server. The service unit and the README run `python app.py` from here."""
+"""Запускает сервер. Служба и README запускают `python app.py` отсюда."""
 import runpy
 import sys
 from pathlib import Path

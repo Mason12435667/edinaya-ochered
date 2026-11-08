@@ -1,4 +1,4 @@
-"""Ticket operations with explicit dependencies, revision checks and handoff history."""
+"""Операции с заявками: явные зависимости, проверка версии и история передачи смене."""
 
 
 def initialize(store):

@@ -1,4 +1,4 @@
-"""Bot menu: one source of truth in the database, edited on /admin/categories."""
+"""Меню бота: единственный источник данных в базе, редактируется на /admin/categories."""
 from __future__ import annotations
 
 import json

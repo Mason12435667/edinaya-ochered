@@ -1,4 +1,4 @@
-"""Tolerant labels and explicit menu numbers, without guessing identifiers."""
+"""Терпимый к написанию разбор подписей и явных номеров меню, без угадывания идентификаторов."""
 import re
 
 LABEL_TYPOS = {

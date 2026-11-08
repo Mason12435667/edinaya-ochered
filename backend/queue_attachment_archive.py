@@ -1,4 +1,4 @@
-"""Preserve outgoing attachments before the delivery queue removes temporary files."""
+"""Сохраняет вложения исходящих сообщений до того, как очередь доставки удалит временные файлы."""
 import os
 import shutil
 from pathlib import Path

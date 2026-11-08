@@ -1,4 +1,4 @@
-"""Bounded, resumable chunk uploads. No whole-file base64 on the HTTP path."""
+"""Загрузка файлов ограниченными частями с возможностью продолжения. Весь файл в base64 по HTTP не передаётся."""
 import sqlite3
 import re
 import os

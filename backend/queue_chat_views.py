@@ -1,4 +1,4 @@
-"""Data for the static groups page; the page itself is frontend/pages/groups.html."""
+"""Данные статической страницы групп; сама страница лежит в frontend/pages/groups.html."""
 from __future__ import annotations
 
 import json

@@ -1,7 +1,7 @@
-"""Ticket statuses, categories and priorities, and TicketStore: the SQLite storage of the application.
+"""Статусы, категории и приоритеты заявок, а также TicketStore — хранилище приложения в SQLite.
 
-TicketStore keeps the connection, transactions and tickets; every other topic is a mixin
-in its own queue_store_* module, and the schema with its upgrades is in queue_store_schema.
+TicketStore отвечает за соединение, транзакции и заявки; каждая другая тема вынесена в
+подмешиваемый класс в своём модуле queue_store_*, а схема и её обновления — в queue_store_schema.
 """
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
 'use strict';
+// Единая обёртка над fetch: CSRF-токен, наблюдатели и копии ответов.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

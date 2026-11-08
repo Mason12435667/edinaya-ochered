@@ -1,4 +1,4 @@
-/* Shared accessible media controls and opt-in notification audio. */
+/* Общие доступные элементы управления медиа и звук уведомлений по выбору пользователя. */
 (() => {
   "use strict";
   const icons = {

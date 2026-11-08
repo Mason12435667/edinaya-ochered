@@ -1,10 +1,9 @@
-"""Recover a missing WhatsApp auto-reply after an unanswered inbound message.
+"""Восстанавливает пропущенный автоответ WhatsApp после входящего сообщения, оставшегося без ответа.
 
-The worker is deliberately conservative. It only acts when the latest visible
-message in a direct chat is an inbound user message that has remained unanswered
-for the configured grace period. Staff/manual chats, excluded contacts, groups,
-messages already linked to a ticket, and chats with a pending specialist flow are
-left untouched.
+Фоновая задача намеренно осторожна. Она действует, только если последнее видимое сообщение в
+личном чате входящее и остаётся без ответа дольше заданного времени. Чаты сотрудников и ручные
+чаты, исключённые контакты, группы, сообщения, уже связанные с заявкой, и чаты с незавершённым
+диалогом со специалистом не затрагиваются.
 """
 from __future__ import annotations
 

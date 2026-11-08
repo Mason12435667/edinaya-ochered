@@ -1,11 +1,10 @@
 'use strict';
-// Outgoing WhatsApp delivery with at-most-once semantics.
+// Отправка в WhatsApp не более одного раза.
 //
-// begin() tells the server the message is about to leave (status "sending").
-// After that a send is attempted once: an exception may happen after WhatsApp
-// already delivered the message, so it is reported as "uncertain" and never
-// retried automatically. Only errors that WhatsApp Web raises before sending
-// anything (an invalid or unknown address) move on to the next alias.
+// begin() сообщает серверу, что сообщение уходит (статус «sending»). После этого отправка
+// выполняется один раз: исключение может возникнуть уже после доставки, поэтому результат
+// отмечается как «uncertain» и автоматически не повторяется. К следующему адресу переходят
+// только при ошибках, которые WhatsApp Web выдаёт до отправки (неверный или неизвестный адрес).
 
 const PRE_SEND_ERROR = /(invalid wid|wid error|no lid for user|not a valid|isn't on whatsapp|not registered)/i;
 

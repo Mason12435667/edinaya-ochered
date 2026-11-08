@@ -1,4 +1,4 @@
-"""HTTP endpoints separated from the legacy application entrypoint."""
+"""HTTP-адреса отдельных функций: аватары, окно вокруг цитируемого сообщения и данные объявления о смене."""
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs

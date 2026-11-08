@@ -1,4 +1,4 @@
-"""Resolve group quotes by exact stanza ID within one chat, never by body/name."""
+"""Находит цитату в группе по точному stanza ID внутри одного чата, никогда не по тексту или имени."""
 import re
 
 def parse(value):

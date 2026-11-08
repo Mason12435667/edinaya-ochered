@@ -1,4 +1,4 @@
-// The ticket list page: fills the static markup from /api/dashboard-data.
+// Страница списка заявок: заполняет статическую разметку из /api/dashboard-data.
 (() => {
   "use strict";
   if (!window.queuePage) return;

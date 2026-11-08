@@ -1,4 +1,4 @@
-"""Command precedence can be checked without a database or HTTP server."""
+"""Приоритет команд можно проверить без базы и HTTP-сервера."""
 import unittest
 
 import queue_bot_texts as texts

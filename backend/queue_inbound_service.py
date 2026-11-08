@@ -1,4 +1,4 @@
-"""Transactional inbound dialog service; independent of HTTP handlers and app globals."""
+"""Обработка входящего сообщения в одной транзакции; не зависит от HTTP-обработчиков и глобальных объектов приложения."""
 from __future__ import annotations
 
 import json

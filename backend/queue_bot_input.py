@@ -1,4 +1,4 @@
-"""Pure parsing of explicit draft-completion commands."""
+"""Чистый разбор явных команд завершения черновика заявки."""
 import re
 from queue_core import normalize_message
 

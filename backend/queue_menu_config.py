@@ -1,4 +1,4 @@
-"""Persist and publish menu snapshots without modifying application globals."""
+"""Сохраняет и публикует снимки меню, не изменяя глобальные объекты приложения."""
 from __future__ import annotations
 
 import copy

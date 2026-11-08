@@ -1,4 +1,4 @@
-"""Pure bot prompts and dialog identifiers."""
+"""Тексты бота и идентификаторы диалога, без побочных эффектов."""
 import queue_user_locale
 from queue_user_locale import tr
 from queue_core import normalize_message

@@ -1,4 +1,4 @@
-"""WhatsApp bot dialog: language, profile, menu, ticket draft and creation."""
+"""Диалог бота WhatsApp: язык, профиль, меню, черновик и создание заявки."""
 from __future__ import annotations
 
 import unittest

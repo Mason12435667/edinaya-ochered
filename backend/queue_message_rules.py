@@ -1,4 +1,4 @@
-"""Text rules for incoming messages: menu commands, acknowledgements, the ticket summary."""
+"""Правила для текста входящих сообщений: команды меню, короткие подтверждения, краткое описание заявки."""
 from __future__ import annotations
 
 import re

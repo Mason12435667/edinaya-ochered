@@ -1,4 +1,4 @@
-"""Display identity only: never change WhatsApp IDs, routing or original text."""
+"""Только отображаемые имена: идентификаторы WhatsApp, маршрутизация и исходный текст не меняются."""
 import re
 import unicodedata
 

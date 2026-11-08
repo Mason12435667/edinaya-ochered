@@ -1,6 +1,6 @@
-"""WhatsApp @lid aliases of private chats and merging their rows into the @c.us chat.
+"""Псевдонимы @lid личных чатов WhatsApp и объединение их строк в чат @c.us.
 
-Mixed into ticketing.TicketStore, which provides connection() and the other stores' helpers.
+Подмешивается в ticketing.TicketStore, откуда берёт connection() и методы других хранилищ.
 """
 from __future__ import annotations
 

@@ -1,3 +1,3 @@
 'use strict';
-// Starts the connector. The service unit runs `node whatsapp_qr_connector.js` from here.
+// Запускает коннектор. Служба запускает `node whatsapp_qr_connector.js` отсюда.
 require('./connector/whatsapp_qr_connector');

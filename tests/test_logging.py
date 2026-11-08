@@ -1,4 +1,4 @@
-"""Errors that the code deliberately ignores still reach the log (queue_core.log_suppressed)."""
+"""Ошибки, которые код намеренно пропускает, всё равно попадают в журнал (queue_core.log_suppressed)."""
 from __future__ import annotations
 
 import unittest

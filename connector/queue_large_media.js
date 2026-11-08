@@ -1,7 +1,7 @@
 'use strict';
-// Files above `threshold` are sent as documents (the caller sets
-// sendMediaAsDocument). whatsapp-web.js still needs the file as base64, so the
-// limit protects the browser from oversized inline media previews.
+// Файлы больше `threshold` отправляются как документы (sendMediaAsDocument задаёт вызывающий код).
+// whatsapp-web.js всё равно нужен файл в base64, поэтому лимит защищает браузер от слишком
+// больших встроенных предпросмотров.
 
 const fs = require('fs');
 const path = require('path');

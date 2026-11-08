@@ -1,6 +1,6 @@
-"""Canonical ticket replies and transactional status changes.
+"""Стандартные ответы по заявкам и смена статуса в одной транзакции.
 
-Dependencies are supplied by app.py; no application globals are injected here.
+Зависимости передаёт app.py; глобальные объекты приложения сюда не подставляются.
 """
 from __future__ import annotations
 from dataclasses import dataclass

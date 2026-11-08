@@ -1,4 +1,4 @@
-"""ReliabilityMonitor without HTTP: alerts from its checks reach the notification feed."""
+"""ReliabilityMonitor без HTTP: тревоги его проверок попадают в ленту уведомлений."""
 import sqlite3
 import tempfile
 import unittest

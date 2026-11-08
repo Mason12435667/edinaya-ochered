@@ -1,4 +1,4 @@
-"""Database snapshot plus application media; no credentials or WhatsApp session."""
+"""Копия базы вместе с медиа приложения; без паролей и сессии WhatsApp."""
 from __future__ import annotations
 import hashlib
 import io

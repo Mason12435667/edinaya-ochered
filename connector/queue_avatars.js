@@ -1,6 +1,6 @@
 'use strict';
-// Profile photos for the chat list: fetched from WhatsApp and sent to the
-// application's /api/avatar-sync (at most once per chat per REFRESH_MS).
+// Фото профилей для списка чатов: загружаются из WhatsApp и отправляются в
+// /api/avatar-sync приложения (для одного чата не чаще раза за REFRESH_MS).
 
 const REFRESH_MS = 6 * 60 * 60 * 1000;
 const MAX_BYTES = 1024 * 1024;

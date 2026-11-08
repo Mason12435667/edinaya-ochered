@@ -1,6 +1,6 @@
-"""Saved WhatsApp contacts and groups, call permissions and manual chat mode.
+"""Сохранённые контакты и группы WhatsApp, разрешения на звонки и ручной режим чата.
 
-Mixed into ticketing.TicketStore, which provides connection() and the other stores' helpers.
+Подмешивается в ticketing.TicketStore, откуда берёт connection() и методы других хранилищ.
 """
 from __future__ import annotations
 

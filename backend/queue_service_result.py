@@ -1,4 +1,4 @@
-"""Transport-neutral result returned by connector application services."""
+"""Результат сервисов для коннектора, не привязанный к способу передачи."""
 from dataclasses import dataclass
 
 

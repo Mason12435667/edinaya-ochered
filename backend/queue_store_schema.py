@@ -1,6 +1,6 @@
-"""Database schema: tables of a new database, upgrades of an existing one, then the indexes.
+"""Схема базы: таблицы новой базы, обновление существующей, затем индексы.
 
-All three steps are idempotent and run on every start, inside TicketStore.initialize().
+Все три шага можно повторять безопасно; они выполняются при каждом запуске в TicketStore.initialize().
 """
 from __future__ import annotations
 

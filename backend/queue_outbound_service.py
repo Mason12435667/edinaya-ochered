@@ -1,4 +1,4 @@
-"""Connector delivery operations with explicit persistence and event dependencies."""
+"""Операции доставки для коннектора; хранилище и события передаются явно."""
 from __future__ import annotations
 
 import hashlib

@@ -1,4 +1,4 @@
-// Markup shared by the ticket list and the ticket card. Everything from the server is escaped here.
+// Общая разметка списка заявок и карточки заявки. Все данные сервера экранируются здесь.
 (() => {
   "use strict";
   if (!window.queuePage) return;

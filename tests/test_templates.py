@@ -1,4 +1,4 @@
-"""Templates and the code that fills them must stay in step."""
+"""Шаблоны и код, который их заполняет, должны оставаться согласованными."""
 from __future__ import annotations
 
 import ast

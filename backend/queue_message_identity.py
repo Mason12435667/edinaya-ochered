@@ -1,4 +1,4 @@
-"""Exact WhatsApp identity matching. Never infer identity from message text."""
+"""Точное сравнение идентификаторов WhatsApp. Личность никогда не определяется по тексту сообщения."""
 import re
 
 def parts(value):

@@ -1,7 +1,7 @@
-"""Page templates from frontend/templates: {{ name }} is replaced with a value.
+"""Шаблоны страниц из frontend/templates: {{ name }} заменяется значением.
 
-Values are inserted as they are, so callers escape user data before passing it.
-A value is never scanned again, so text like {{ x }} in user data stays literal.
+Значения вставляются как есть, поэтому вызывающий код сам экранирует данные пользователя.
+Повторно значения не просматриваются, поэтому текст вроде {{ x }} в данных останется буквальным.
 """
 from __future__ import annotations
 

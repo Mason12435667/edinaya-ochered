@@ -1,9 +1,9 @@
-"""Dialog routing rules, without persistence or side effects.
+"""Правила выбора действия в диалоге, без хранения и побочных эффектов.
 
-InboundService applies global category digits and completes language/profile
-gates before consulting this policy. The order below is part of the protocol:
-ticket-list input and selected-ticket follow-ups take precedence over ordinary
-commands; an unselected draft treats 8 as data, not as a menu command.
+InboundService обрабатывает глобальные номера категорий и проверки языка и профиля до обращения
+к этим правилам. Порядок ниже является частью протокола: ввод из списка заявок и дополнения к
+выбранной заявке важнее обычных команд; в черновике без выбранной заявки 8 считается данными,
+а не командой меню.
 """
 from dataclasses import dataclass
 from enum import Enum

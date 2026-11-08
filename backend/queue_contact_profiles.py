@@ -1,4 +1,4 @@
-"""Contact language/profile persistence with an explicit store dependency."""
+"""Хранение языка и профиля контакта, хранилище передаётся явно."""
 from __future__ import annotations
 import sqlite3
 import hashlib

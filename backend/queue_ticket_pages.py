@@ -1,4 +1,4 @@
-"""Data for the static ticket pages in frontend/pages; the pages draw it themselves."""
+"""Данные статических страниц заявок из frontend/pages; страницы рисуют их сами."""
 from __future__ import annotations
 
 import re

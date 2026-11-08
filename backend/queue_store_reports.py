@@ -1,6 +1,6 @@
-"""Audit log, user error reports and template error records.
+"""Журнал действий, сообщения пользователей об ошибках и записи об ошибках шаблонов.
 
-Mixed into ticketing.TicketStore, which provides connection() and the other stores' helpers.
+Подмешивается в ticketing.TicketStore, откуда берёт connection() и методы других хранилищ.
 """
 from __future__ import annotations
 

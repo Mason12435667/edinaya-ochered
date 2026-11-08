@@ -1,4 +1,4 @@
-"""Bot menu queries and localized text, derived from one configuration snapshot."""
+"""Запросы к меню бота и тексты на нужном языке, построенные из одного снимка настроек."""
 from __future__ import annotations
 
 import queue_user_locale

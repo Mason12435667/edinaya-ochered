@@ -1,4 +1,4 @@
-"""Outbound queue under failures: scheduled sends, stale claims, chat id lookups."""
+"""Очередь исходящих при сбоях: отправка по расписанию, зависшие захваты, поиск идентификатора чата."""
 from __future__ import annotations
 
 import shutil

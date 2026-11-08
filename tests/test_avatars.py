@@ -1,4 +1,4 @@
-"""AvatarCache on its own directory: what is stored, what is rejected, what the page links to."""
+"""AvatarCache в отдельной папке: что сохраняется, что отклоняется и на что ссылается страница."""
 import base64
 import tempfile
 import unittest

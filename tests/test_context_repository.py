@@ -1,4 +1,4 @@
-"""Persistence compatibility and failures across multi-write context operations."""
+"""Совместимость хранения и сбои в операциях контекста с несколькими записями."""
 import json
 import tempfile
 import unittest

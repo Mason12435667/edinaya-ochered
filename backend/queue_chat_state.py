@@ -1,4 +1,4 @@
-"""What the chat, group and notification APIs show: stored chats merged with the connector's live state."""
+"""Что показывают API чатов, групп и уведомлений: сохранённые чаты вместе с текущим состоянием коннектора."""
 from __future__ import annotations
 
 import re

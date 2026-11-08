@@ -1,5 +1,5 @@
-// The single fetch adapter: same-origin CSRF and isolated response observers.
-// Loaded before every feature script. Observers receive their own response copy.
+// Единая обёртка над fetch: CSRF-токен для своего сайта и независимые наблюдатели ответов.
+// Загружается раньше остальных скриптов. Каждый наблюдатель получает свою копию ответа.
 (() => {
   "use strict";
   if (window.QueueHTTP) return;

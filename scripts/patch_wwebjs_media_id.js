@@ -1,15 +1,15 @@
 'use strict';
 
-// whatsapp-web.js media fix, applied by `npm install` / `npm ci` (postinstall).
+// Исправление отправки медиа в whatsapp-web.js, применяется при `npm install` и `npm ci` (postinstall).
 //
-// MediaData can expose a private enumerable __x_id field. When the injected
-// sendMessage helper spreads that model into the outgoing Msg object, __x_id
-// can overwrite the valid message key and WhatsApp then throws:
-// "Data passed to getter must include an id property ... got undefined".
+// MediaData может содержать скрытое перечисляемое поле __x_id. Когда встроенный метод sendMessage
+// разворачивает эту модель в исходящий объект Msg, __x_id может перезаписать настоящий ключ
+// сообщения, и WhatsApp выдаёт ошибку:
+// «Data passed to getter must include an id property ... got undefined».
 //
-// The script is idempotent and keeps a one-time backup beside Utils.js. It stops
-// the install on an unknown library layout, so whatsapp-web.js is pinned to an
-// exact version in package.json: check this fix when updating the library.
+// Скрипт можно запускать повторно, он один раз сохраняет копию рядом с Utils.js. Установка
+// останавливается при незнакомом устройстве библиотеки, поэтому версия whatsapp-web.js закреплена
+// точно в package.json: при обновлении библиотеки проверьте это исправление.
 
 const fs = require('fs');
 const path = require('path');

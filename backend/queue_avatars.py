@@ -1,4 +1,4 @@
-"""Small local cache of profile images supplied by the authenticated connector."""
+"""Небольшой локальный кэш фотографий профилей, которые присылает коннектор после проверки токена."""
 import base64
 import hashlib
 from pathlib import Path

@@ -1,4 +1,4 @@
-"""Chunked connector media: bounded HTTP bodies, atomic publication, no outgoing send."""
+"""Приём медиа от коннектора частями: ограниченный размер запросов, атомарная публикация, без исходящей отправки."""
 import base64
 import hashlib
 import os

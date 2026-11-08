@@ -1,4 +1,4 @@
-"""Exercise application services directly, with independent stores and no HTTP server."""
+"""Прямая проверка сервисов приложения с независимыми хранилищами и без HTTP-сервера."""
 import concurrent.futures
 import itertools
 import os

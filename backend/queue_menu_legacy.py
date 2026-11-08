@@ -1,4 +1,4 @@
-"""One-time readers for menu settings written before company profiles."""
+"""Однократное чтение настроек меню, записанных до появления профилей организаций."""
 import json
 import re
 from queue_core import normalize_message

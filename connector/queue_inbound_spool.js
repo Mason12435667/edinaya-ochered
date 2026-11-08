@@ -1,10 +1,9 @@
 'use strict';
-// Durable spool for incoming WhatsApp messages.
+// Надёжная очередь входящих сообщений WhatsApp.
 //
-// A message is written to disk before the first request to the application and
-// removed only after the application answered. If the application is down or the
-// connector restarts, drain() delivers what is left; the server drops repeats by
-// external_id, so delivering a message twice is harmless.
+// Сообщение записывается на диск до первого запроса к приложению и удаляется только после его
+// ответа. Если приложение недоступно или коннектор перезапустился, drain() доставляет остаток.
+// Сервер отбрасывает повторы по external_id, поэтому двойная доставка безопасна.
 
 const fs = require('fs');
 const path = require('path');

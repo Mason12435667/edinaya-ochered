@@ -1,4 +1,4 @@
-"""Static pages: the server sends the same files to everyone and the data as JSON."""
+"""Статические страницы: сервер отдаёт всем одни и те же файлы, а данные — в JSON."""
 from __future__ import annotations
 
 import re

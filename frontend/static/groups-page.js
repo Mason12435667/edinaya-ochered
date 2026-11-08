@@ -1,4 +1,4 @@
-// The list of WhatsApp groups and its administrator forms on the static groups page.
+// Список групп WhatsApp и формы администратора на статической странице групп.
 (() => {
   "use strict";
   if (!window.queuePage) return;

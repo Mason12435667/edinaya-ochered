@@ -1,4 +1,4 @@
-"""Opening a database created by an older release upgrades it in place."""
+"""База, созданная старой версией, обновляется на месте при открытии."""
 import sqlite3
 import tempfile
 import unittest

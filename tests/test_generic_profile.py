@@ -1,4 +1,4 @@
-"""Validation of config/company.json (queue_generic_profile.read_profile)."""
+"""Проверка config/company.json (queue_generic_profile.read_profile)."""
 from __future__ import annotations
 
 import json

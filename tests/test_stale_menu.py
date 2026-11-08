@@ -1,4 +1,4 @@
-"""StaleMenuRecovery without HTTP: which unanswered chats get the menu back, and which are left alone."""
+"""StaleMenuRecovery без HTTP: каким чатам без ответа возвращается меню, а какие не затрагиваются."""
 import tempfile
 import time
 import unittest

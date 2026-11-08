@@ -1,4 +1,4 @@
-// Administration and account pages: fills the templates in static/templates with data from the API.
+// Страницы админки и аккаунта: заполняет шаблоны из static/templates данными из API.
 (() => {
   "use strict";
   if (!window.queuePage) return;
