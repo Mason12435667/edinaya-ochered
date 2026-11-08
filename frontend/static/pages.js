@@ -1,4 +1,4 @@
-// Administration pages: fills the templates in static/admin from /api/admin-page.
+// Administration and account pages: fills the templates in static/templates with data from the API.
 (() => {
   "use strict";
   if (!window.queuePage) return;
@@ -14,7 +14,7 @@
 
   // Replaces {{ name }} once; every value is escaped unless it was marked raw().
   function fill(name, values) {
-    if (!cache.has(name)) cache.set(name, getText(`/static/admin/${name}.html`).replace(/\n$/, ""));
+    if (!cache.has(name)) cache.set(name, getText(`/static/templates/${name}.html`).replace(/\n$/, ""));
     return cache.get(name).replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) => {
       if (!(key in values)) throw new Error(`Шаблон ${name}: нет значения ${key}`);
       const value = values[key];
@@ -185,6 +185,81 @@
     },
   };
 
+  const noticeText = () => noticeHtml();
+  const pairRows = (items) => orEmpty(items.map(([name, count]) => `<tr><td>${escapeHtml(name)}</td><td>${Number(count)}</td></tr>`), 2, "Нет данных");
+
+  Object.assign(PAGES, {
+    analytics: (data) => fill("analytics_page", {...data, rows: pairRows(data.by_category), rows_2: pairRows(data.by_employee)}),
+
+    backups(data) {
+      const rows = data.rows.map((row) => `<tr class="backup-row"><td><div class="backup-name"><span class="backup-icon">DB</span><strong>${escapeHtml(row.name)}</strong></div></td><td>${escapeHtml(row.size)}</td><td><span class="backup-status ${row.ok ? "ok" : "error"}"><i></i>${row.ok ? "Исправна" : "Ошибка"}</span></td><td><span class="backup-detail">${escapeHtml(row.detail)}</span></td><td>${hiddenForm("/admin/backups", {action: "restore", name: row.name}, `<button class="button compact backup-restore" ${row.ok ? "" : "disabled"}>Восстановить</button>`, " data-backup-restore-form")}</td></tr>`);
+      return fill("backups_page", {notice_text: noticeText(), csrf_token: csrf(), join: orEmpty(rows, 5, "Копий пока нет")});
+    },
+
+    reliability(data) {
+      const retry = (id, action, button) => hiddenForm("/admin/reliability", {action, message_id: id}, button, ' class="inline-form"');
+      const problems = data.problems.map((item) => `<tr><td>#${Number(item.id)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.chat_id)}</td><td>${escapeHtml(item.body)}</td><td>${escapeHtml(item.error)}</td><td>${retry(item.id, "retry", '<button class="button compact" type="submit">Повторить</button>')}${item.has_media ? retry(item.id, "retry_media", '<button class="button compact ghost" type="submit">Только файл</button>') : ""}</td></tr>`);
+      const backups = data.backups.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.size)}</td><td>${escapeHtml(item.modified)}</td><td><span class="status ${item.ok ? "status-done" : "status-invalid"}">${item.ok ? "OK" : escapeHtml(item.detail)}</span></td></tr>`);
+      const muted = (columns, text) => raw(`<tr><td colspan="${columns}" class="muted">${text}</td></tr>`);
+      return fill("reliability", {...data.values, notice_text: noticeText(), csrf_token: csrf(),
+        problem_rows: problems.length ? raw(problems.join("")) : muted(6, "Ошибочных или зависших отправок нет"),
+        backup_rows: backups.length ? raw(backups.join("")) : muted(4, "Резервные копии tickets.db не найдены в стандартных каталогах")});
+    },
+
+    workflow(data) {
+      const cards = data.media_cards.map((item) => `<article class="stat-card"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.size)}</strong><small>${Number(item.count)} файлов</small></article>`).join("");
+      const checks = data.categories.map(([key, label, checked]) => `<label class="workflow-check"><input type="checkbox" name="required_category__${escapeHtml(key)}" value="1" ${checked ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("");
+      return fill("workflow_admin", {notice_text: noticeText(), csrf_token: csrf(), messages: data.messages, media: data.media, tickets: data.tickets,
+        media_cards: raw(cards), checks: raw(checks || '<span class="muted">Категории не найдены</span>')});
+    },
+
+    shift(data) {
+      const groups = options(data.groups, data.selected, '<option value="">Не отправлять</option>').html;
+      return `<h2>Объявление о смене</h2><form method="post" class="panel manual-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf())}"><label>Группа<select name="group">${groups}</select></label><label>Текст<textarea name="text" maxlength="800" required>${escapeHtml(data.text)}</textarea></label><p>Используйте {employee} для имени сотрудника. Отправка только при изменении сотрудника на смене, не при сохранении настроек.</p><button class="button primary">Сохранить</button></form>`;
+    },
+
+    "api-keys"(data) {
+      const secret = data.new_token ? `<section class="panel api-key-secret"><h2>Скопируйте ключ сейчас</h2><p>Полный секрет больше не показывается.</p><code>${escapeHtml(data.new_token)}</code></section>` : "";
+      const rows = data.keys.map((item) => {
+        const revoke = item.enabled ? hiddenForm("/admin/api-keys", {action: "revoke", key_id: item.id}, '<button class="button ghost" type="submit">Отключить</button>') : '<span class="muted">Отключён</span>';
+        return `<tr><td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.token_prefix)}…</small></td><td>${escapeHtml(item.scope)}</td><td>${item.enabled ? "Активен" : "Отключён"}</td><td>${escapeHtml(item.last_used_at)}</td><td>${escapeHtml(item.created_by)}</td><td>${revoke}</td></tr>`;
+      });
+      const form = hiddenForm("/admin/api-keys", {action: "create"}, '<label class="wide">Название<input name="name" maxlength="80" required></label><button class="button primary" type="submit">Создать ключ</button>', ' class="manual-form"');
+      return `${noticeHtml().html}${secret}<section class="panel manual-panel"><div><p class="eyebrow">Интеграции</p><h2>Создать API-ключ</h2><p>Только read-only доступ.</p></div>${form}</section><section class="panel table-panel"><div class="section-heading"><div><h2>Ключи интеграций</h2><p>Секрет хранится только как SHA-256 хэш.</p></div></div><div class="table-scroll"><table><thead><tr><th>Название</th><th>Scope</th><th>Статус</th><th>Использован</th><th>Создал</th><th></th></tr></thead><tbody>${orEmpty(rows, 6, "API-ключей пока нет").html}</tbody></table></div></section><section class="panel history-panel"><h2>Endpoints</h2><ul><li><code>GET /api/integration/ping</code></li><li><code>GET /api/integration/tickets?limit=100&amp;status=in_progress</code></li></ul></section>`;
+    },
+
+    me(data) {
+      const ticketCards = (items, empty) => raw(items.map((item) => `<a class="my-ticket-card" href="/ticket?id=${Number(item.id)}"><span><strong>#${Number(item.id)} · ${escapeHtml(item.title)}</strong><small>${escapeHtml(item.summary)}</small></span><span class="my-ticket-meta"><span class="status status-${escapeHtml(item.status)}">${escapeHtml(item.status_label)}</span><small>${escapeHtml(item.created_at)}</small></span></a>`).join("") || `<p class="empty">${empty}</p>`);
+      const logins = data.logins.map((item) => `<tr><td>${escapeHtml(item.created_at)}</td><td><span class="auth-state ${item.success ? "is-on" : "is-off"}">${item.success ? "Успешно" : "Ошибка"}</span></td><td>${escapeHtml(item.reason)}</td><td>${escapeHtml(item.client_ip)}</td></tr>`);
+      const activity = data.activity.map((item) => `<tr><td>${escapeHtml(item.created_at)}</td><td><strong>${escapeHtml(item.action)}</strong><small>${escapeHtml(item.details)}</small></td><td>${escapeHtml(item.object)}</td></tr>`);
+      return fill("my_page", {...data,
+        ticket_cards: ticketCards(data.active, "Активных заявок нет"),
+        ticket_cards_2: ticketCards(data.done, "Выполненных заявок пока нет"),
+        login_table: orEmpty(logins, 4, "История входов пока пуста"),
+        activity_table: orEmpty(activity, 3, "Действий аккаунта пока нет")});
+    },
+
+    accounts(data) {
+      const notice = query.get("notice");
+      const cards = data.accounts.map((item) => fill("account_card", {role: item.role, display_name: item.display_name, username: item.username,
+        action: raw(item.active ? '<span class="status-badge done">Текущий аккаунт</span>' : fill("account_switch_form", {csrf_token: csrf(), slot: item.slot}))}));
+      return fill("account_switcher", {
+        registration_enabled_text: raw(data.registration_enabled ? '<a class="button ghost" href="/register">Создать новый аккаунт</a>' : ""),
+        notice_html: raw(notice ? `<div class="panel"><strong>${escapeHtml(notice)}</strong></div>` : ""),
+        join: raw(cards.join("") || '<div class="panel empty">Сохранённых аккаунтов нет</div>')});
+    },
+
+    reminders(data) {
+      const cards = data.rows.map((item) => `<article class="panel reminder-card"><div><strong>Заявка #${Number(item.ticket_id)}</strong><time>${escapeHtml(item.due)}</time></div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.note)}</p><div><a class="button compact" href="/ticket?id=${Number(item.ticket_id)}">Открыть</a><button class="button compact ghost" data-reminder-done="${Number(item.id)}">Выполнено</button></div></article>`).join("");
+      return `<section class="page-heading"><div><p class="eyebrow">Заявки</p><h1>Напоминания</h1><p>Запланированные напоминания сотрудников</p></div></section><section class="reminder-grid">${cards || '<p class="muted">Активных напоминаний нет</p>'}</section>`;
+    },
+
+    recent(data) {
+      const cards = data.rows.map((item) => `<a class="workflow-recent-card" href="${escapeHtml(item.href)}"><span class="workflow-recent-icon">${item.group ? "Г" : "Л"}</span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.last_message)}</small></span>${item.unread ? `<b>${Number(item.unread)}</b>` : ""}</a>`).join("");
+      return `<section class="page-heading"><div><p class="eyebrow">WhatsApp</p><h1>Недавние чаты</h1><p>Последние открытые диалоги текущего сотрудника</p></div></section><section class="workflow-recent-grid">${cards || '<div class="panel empty">Откройте несколько чатов, и они появятся здесь.</div>'}</section>`;
+    },
+  });
+
   const HEADING = `<section class="page-heading admin-heading">
         <div><p class="eyebrow">Управление системой</p><h1>Админка</h1><p>Сотрудники, контакты, группы и настройки обращений</p></div>
       </section>`;
@@ -193,10 +268,11 @@
     return `<nav class="admin-tabs">${items.map((item) => `<a class="admin-tab ${item.key === active ? "active" : ""}" href="${escapeHtml(item.href)}">${escapeHtml(item.label)}</a>`).join("")}</nav>`;
   }
 
-  const page = location.pathname.replace(/^\/admin\/?/, "") || "home";
-  const data = getJson(`/api/admin-page?page=${encodeURIComponent(page)}&${location.search.slice(1)}`);
+  const isAdmin = location.pathname.startsWith("/admin");
+  const page = isAdmin ? (location.pathname.replace(/^\/admin\/?/, "") || "home") : location.pathname.slice(1);
+  const data = getJson(`/api/${isAdmin ? "admin" : "app"}-page?page=${encodeURIComponent(page)}&${location.search.slice(1)}`);
   if (!data) return;
   document.title = `${data.title} · Единая очередь`;
   const content = PAGES[page](data);
-  main.innerHTML = HEADING + tabs(data.tabs, data.active) + (content instanceof Raw ? content.html : content);
+  main.innerHTML = (isAdmin ? HEADING + tabs(data.tabs, data.active) : "") + (content instanceof Raw ? content.html : content);
 })();

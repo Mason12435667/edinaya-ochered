@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 import unittest
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
@@ -128,7 +129,7 @@ class BackupsPageTests(unittest.TestCase):
     def test_unwritable_backup_dir_does_not_break_the_page(self):
         with mock.patch.object(queue_productivity, "backup_dir", side_effect=PermissionError("no access")):
             with self.assertLogs("queue", "WARNING"):
-                response = get("/admin/backups", admin_cookie())
+                response = get("/api/admin-page?page=backups", admin_cookie())
         self.assertEqual(response.status, 200)
 
 
@@ -143,7 +144,7 @@ class ContactsPageTests(unittest.TestCase):
 
 class StaticFilesTests(unittest.TestCase):
     def test_every_layout_asset_is_served(self):
-        page = get("/me", admin_cookie()).text
+        page = (Path(__file__).resolve().parents[1] / "frontend/pages/admin.html").read_text(encoding="utf-8").replace('.css"', '.css?v=1"').replace('.js"', '.js?v=1"')
         assets = re.findall(r'/static/([\w.-]+)\?v=', page)
         self.assertGreaterEqual(len(assets), 20)
         for name in assets:

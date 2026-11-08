@@ -13,10 +13,6 @@ import unittest
 from tests import support
 from tests.support import WhatsAppUser, admin_cookie, csrf_token, get, post_form
 
-PAGES = [
-    "/admin/api-keys", "/admin/reliability", "/admin/workflow", "/admin/backups", "/admin/shift",
-]
-
 
 def tickets_titled(title: str) -> int:
     with support.app.STORE.connection() as connection:
@@ -106,22 +102,14 @@ class CsrfTests(unittest.TestCase):
         self.assertTrue(reply.get("language_required"))
 
     def test_every_post_form_carries_the_token(self):
-        cookie = admin_cookie()
-        token = csrf_token(cookie)
+        templates = Path(__file__).resolve().parents[1] / "frontend" / "static" / "templates"
         missing = []
-        for page in PAGES:
-            response = get(page, cookie)
-            if response.status != 200:
-                missing.append(f"{page}: HTTP {response.status} (page not checked)")
-                continue
-            for form in re.findall(r"<form\b[^>]*>.*?</form>", response.text, re.S | re.I):
+        for page in sorted(templates.glob("*.html")):
+            for form in re.findall(r"<form[^>]*>.*?</form>", page.read_text(encoding="utf-8"), re.S | re.I):
                 opening = form[:form.index(">") + 1]
-                if not re.search(r'method=["\']?post', opening, re.I):
-                    continue
-                if not re.search(rf"""name=["']csrf_token["'] value=["']{token}["']""", form):
-                    action = re.search(r'action=["\']([^"\']*)', opening)
-                    missing.append(f"{page}: form action={action.group(1) if action else '?'}")
-        self.assertEqual(sorted(set(missing)), [])
+                if re.search(r"""method=["']?post""", opening, re.I) and 'name="csrf_token" value="{{ csrf_token }}"' not in form:
+                    missing.append(f"{page.name}: {opening}")
+        self.assertEqual(missing, [])
 
 
 if __name__ == "__main__":

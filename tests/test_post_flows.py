@@ -227,9 +227,9 @@ class ProductivityTests(FlowTestCase):
     def test_backup_created_from_the_page_is_listed(self):
         response = self.send("/admin/backups", {"action": "create"})
         self.assertIn("/admin/backups?notice=", response.location)
-        page = get("/admin/backups", self.admin)
-        self.assertEqual(page.status, 200)
-        self.assertIn("Исправна", page.text)
+        self.assertEqual(get("/admin/backups", self.admin).status, 200)
+        rows = get("/api/admin-page?page=backups", self.admin).json()["rows"]
+        self.assertTrue(any(row["ok"] for row in rows))
 
 
 class UploadTests(FlowTestCase):

@@ -1087,7 +1087,6 @@ display_names = CHAT_VIEWS.display_names
 
 TICKET_VIEWS = TicketViews(STORE, AUTH, csrf_token=csrf_token, categories=CATEGORIES,
                            local_mode=LOCAL_MODE, page_size=PAGE_SIZE)
-layout = TICKET_VIEWS.layout
 TICKET_PAGES = TicketPages(STORE, categories=CATEGORIES, page_size=PAGE_SIZE)
 
 
@@ -1122,10 +1121,6 @@ def admin_users_data() -> dict[str, object]:
 
 def admin_tabs(active: str) -> str:
     return queue_admin_views.admin_tabs(active, escape=e)
-
-
-def admin_layout(title: str, content: str, active: str) -> str:
-    return queue_admin_views.admin_layout(title, content, active, layout_func=layout, escape=e)
 
 
 # ---------------------------------------------------------------------------
@@ -1231,23 +1226,22 @@ INBOUND_SERVICE = InboundService(InboundDependencies(
 ATTACHMENTS = AttachmentArchive(STORE, MEDIA_DIR, OUTBOUND_MEDIA_DIR, UPLOADS.root)
 OUTBOUND_SERVICE = OutboundService(STORE, ATTACHMENTS, queue_realtime, global_auto_reply_enabled)
 STALE_MENU = StaleMenuRecovery(STORE, MENU, CONTACTS, queue_realtime, global_auto_reply_enabled)
-PRODUCTIVITY_ROUTES = ProductivityRoutes(STORE, DATA_DIR, DATABASE_PATH, csrf_token=csrf_token, layout=layout,
-                                         admin_layout=admin_layout, category_items=active_ticket_category_items,
+PRODUCTIVITY_ROUTES = ProductivityRoutes(STORE, DATA_DIR, DATABASE_PATH,
+                                         category_items=active_ticket_category_items,
                                          active_employee=active_employee)
-WORKFLOW_ROUTES = WorkflowRoutes(STORE, csrf_token=csrf_token, layout=layout, admin_layout=admin_layout,
+WORKFLOW_ROUTES = WorkflowRoutes(STORE,
                                  category_items=active_ticket_category_items,
                                  employees=EMPLOYEES, work_actor=work_actor,
                                  update_ticket_status=update_ticket_status, events=queue_realtime)
-RELIABILITY_ROUTES = ReliabilityRoutes(STORE, RELIABILITY, csrf_token=csrf_token, admin_layout=admin_layout,
+RELIABILITY_ROUTES = ReliabilityRoutes(STORE, RELIABILITY,
                                        max_media_bytes=MAX_MEDIA_BYTES, active_employee=active_employee,
                                        chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, avatars=AVATARS)
-FEATURE_ROUTES = FeatureRoutes(STORE, AVATARS, ROOT, decorate_chat_messages=decorate_chat_messages,
-                               csrf_token=csrf_token, admin_layout=admin_layout)
+FEATURE_ROUTES = FeatureRoutes(STORE, AVATARS, ROOT, decorate_chat_messages=decorate_chat_messages)
 UPLOAD_ROUTES = queue_uploads.UploadRoutes(UPLOADS, work_actor)
 ADMIN_PAGES = AdminPages(AdminPageDependencies(
     store=STORE, auth=AUTH, menu=MENU, menu_config=MENU_CONFIG, contacts=CONTACTS, tickets=TICKET_SERVICE,
     reporting=REPORTING, runtime=RUNTIME, avatars=AVATARS, employees=EMPLOYEES, max_employees=MAX_EMPLOYEES,
-    local_mode=LOCAL_MODE, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, csrf_token=csrf_token, admin_layout=admin_layout, categories=CATEGORIES,
+    local_mode=LOCAL_MODE, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, categories=CATEGORIES,
 ))
 HTTP_DEPENDENCIES = queue_http_handler.HttpDependencies(
     store=STORE, auth=AUTH, root=ROOT, media_dir=MEDIA_DIR, monitor_log_path=MONITOR_LOG_PATH, avatars=AVATARS,

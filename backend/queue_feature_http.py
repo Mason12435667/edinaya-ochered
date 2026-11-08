@@ -5,7 +5,7 @@ from urllib.parse import urlparse, parse_qs
 
 import queue_features
 from queue_avatars import AvatarCache
-from queue_core import e, valid_conversation_id
+from queue_core import valid_conversation_id
 from ticketing import TicketStore
 
 
@@ -13,14 +13,11 @@ class FeatureRoutes:
     """Avatars, the quoted-message window, the shift announcement page."""
 
     def __init__(self, store: TicketStore, avatars: AvatarCache, root: Path, *,
-                 decorate_chat_messages: Callable[[str, list], list], csrf_token: Callable[[], str],
-                 admin_layout: Callable[[str, str, str], str]):
+                 decorate_chat_messages: Callable[[str, list], list]):
         self.store = store
         self.avatars = avatars
         self.root = root
         self.decorate_chat_messages = decorate_chat_messages
-        self.csrf_token = csrf_token
-        self.admin_layout = admin_layout
 
     def get(self, handler):
         parsed = urlparse(handler.path)
@@ -40,14 +37,18 @@ class FeatureRoutes:
                 handler.json_response(window)
         elif parsed.path == '/admin/shift':
             if not handler.require_admin(): return True
-            selected = self.store.get_setting('shift_announcement_group','')
-            options = '<option value="">Не отправлять</option>' + ''.join(f'<option value="{e(g["chat_id"])}" {"selected" if selected==g["chat_id"] else ""}>{e(g["name"])}</option>' for g in self.store.list_whatsapp_groups())
-            text = self.store.get_setting('shift_announcement_text','На смене: {employee}. По рабочим вопросам обращайтесь в поддержку.')
-            content = f'<h2>Объявление о смене</h2><form method="post" class="panel manual-form"><input type="hidden" name="csrf_token" value="{e(self.csrf_token())}"><label>Группа<select name="group">{options}</select></label><label>Текст<textarea name="text" maxlength="800" required>{e(text)}</textarea></label><p>Используйте {{employee}} для имени сотрудника. Отправка только при изменении сотрудника на смене, не при сохранении настроек.</p><button class="button primary">Сохранить</button></form>'
-            handler.html_response(self.admin_layout('Объявление о смене',content,'shift'))
+            handler.page_response('admin')
         else:
             return False
         return True
+
+    def shift_data(self):
+        return {
+            'title': 'Объявление о смене', 'active': 'shift',
+            'selected': self.store.get_setting('shift_announcement_group', ''),
+            'text': self.store.get_setting('shift_announcement_text', 'На смене: {employee}. По рабочим вопросам обращайтесь в поддержку.'),
+            'groups': [[str(g['chat_id']), str(g['name'])] for g in self.store.list_whatsapp_groups()],
+        }
 
     def post(self, handler):
         # CSRF is checked once for every signed-in POST in QueueHTTPHandlerMixin.do_POST.

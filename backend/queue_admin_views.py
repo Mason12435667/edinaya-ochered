@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Iterable
-from queue_templates import render_template
 
 
 ADMIN_TABS = [
@@ -23,25 +22,6 @@ ADMIN_TABS = [
     ("reliability", "/admin/reliability", "Надёжность"),
     ("system", "/admin/system", "Система"),
 ]
-
-
-def admin_tabs(active: str, *, escape: Callable[[Any], str]) -> str:
-    return '<nav class="admin-tabs">' + "".join(
-        f'<a class="admin-tab {"active" if key == active else ""}" href="{href}">{escape(label)}</a>'
-        for key, href, label in ADMIN_TABS
-    ) + "</nav>"
-
-
-def admin_layout(
-    title: str,
-    content: str,
-    active: str,
-    *,
-    layout_func: Callable[..., str],
-    escape: Callable[[Any], str],
-) -> str:
-    heading = render_template("admin/layout.html")
-    return layout_func(title, heading + admin_tabs(active, escape=escape) + content, "admin", True)
 
 
 LOGIN_REASONS = {

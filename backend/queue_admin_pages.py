@@ -1,7 +1,7 @@
 """Data for the static administration pages; frontend/static/admin-page.js draws them."""
 from __future__ import annotations
 
-from collections.abc import Callable
+import time
 from dataclasses import dataclass
 from threading import Lock
 from urllib.parse import quote
@@ -15,7 +15,7 @@ from queue_bot_menu import BotMenu
 from queue_bot_texts import language_selection_text_v3, v3_duplicate_reply, v3_missing_fields_reply
 from queue_chat_state import flexible_contact_match
 from queue_contact_profiles import ContactProfiles
-from queue_core import display_phone, e, human_bytes, human_time, normalize_message, normalize_phone, valid_chat_id
+from queue_core import display_phone, human_bytes, human_time, normalize_message, normalize_phone, valid_chat_id
 from queue_menu_config import MenuConfig
 from queue_reporting import ReportingService
 from queue_runtime import RuntimeServices
@@ -23,6 +23,9 @@ from queue_ticket_service import TicketService
 from queue_user_locale import tr
 from queue_work_context import assignment_names, monitor_log_entries, system_status_snapshot, work_actor
 from ticketing import PRIORITIES, STATUSES, TicketStore
+
+# A secret waits this long for its creator to see the page after the redirect.
+NEW_API_KEY_TTL_SECONDS = 300
 
 ERROR_REPORT_STATUS_LABELS = {
     "new": "Новая",
@@ -81,14 +84,14 @@ class AdminPageDependencies:
     local_mode: bool
     chat_lock: Lock
     chat_state: dict[str, object]
-    csrf_token: Callable[[], str]
-    admin_layout: Callable[[str, str, str], str]
     categories: dict[str, str]
 
 
 class AdminPages:
     def __init__(self, deps: AdminPageDependencies):
         self.deps = deps
+        self._new_api_keys: dict[int, tuple[str, float]] = {}
+        self._new_api_keys_lock = Lock()
 
     def page_data(self, page: str, query: dict[str, list[str]]) -> dict[str, object] | None:
         builder = {
@@ -228,8 +231,8 @@ class AdminPages:
         return {
             "title": "Dashboard руководителя", "active": "manager",
             "filters": self._analytics_filters(query, "/admin/manager"),
-            "total": data["total"], "open": data["open"], "avg_first": data["avg_first"],
-            "avg_resolution": data["avg_resolution"], "handoffs": data["handoffs"],
+            "total": data["total"], "open": data["open"], "avg_first": str(data["avg_first"]),  # JSON would turn 0.0 into 0
+            "avg_resolution": str(data["avg_resolution"]), "handoffs": data["handoffs"],
             "categories": [[name, count] for name, count in list(data["by_category"].items())[:8]],
             "employees": [{"name": name, "open": vals["open"], "done": vals["done"], "total": vals["total"]} for name, vals in employees],
         }
@@ -426,15 +429,27 @@ class AdminPages:
             "found": self.discovered_contacts(search, 80),
         }
 
-    def render_admin_api_keys(self, query: dict[str, list[str]], *, new_token: str = "", notice: str = "") -> str:
-        notice = notice or str(query.get("notice", [""])[0] or "")
-        notice_html = f'<div class="notice">{e(notice)}</div>' if notice else ''
-        token_html = f'<section class="panel api-key-secret"><h2>Скопируйте ключ сейчас</h2><p>Полный секрет больше не показывается.</p><code>{e(new_token)}</code></section>' if new_token else ''
-        rows = []
-        for item in self.deps.auth.list_api_keys(200):
-            enabled = bool(item.get("enabled"))
-            revoke = f'<form method="post" action="/admin/api-keys"><input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}"><input type="hidden" name="action" value="revoke"><input type="hidden" name="key_id" value="{int(item.get("id",0) or 0)}"><button class="button ghost" type="submit">Отключить</button></form>' if enabled else '<span class="muted">Отключён</span>'
-            rows.append(f'<tr><td><strong>{e(str(item.get("name") or ""))}</strong><small>{e(str(item.get("token_prefix") or ""))}…</small></td><td>{e(str(item.get("scope") or "read"))}</td><td>{"Активен" if enabled else "Отключён"}</td><td>{e(human_time(str(item.get("last_used_at") or "")) or "—")}</td><td>{e(str(item.get("created_by_name") or "—"))}</td><td>{revoke}</td></tr>')
-        table = ''.join(rows) or '<tr><td colspan="6" class="empty">API-ключей пока нет</td></tr>'
-        content = f'''{notice_html}{token_html}<section class="panel manual-panel"><div><p class="eyebrow">Интеграции</p><h2>Создать API-ключ</h2><p>Только read-only доступ.</p></div><form method="post" action="/admin/api-keys" class="manual-form"><input type="hidden" name="csrf_token" value="{e(self.deps.csrf_token())}"><input type="hidden" name="action" value="create"><label class="wide">Название<input name="name" maxlength="80" required></label><button class="button primary" type="submit">Создать ключ</button></form></section><section class="panel table-panel"><div class="section-heading"><div><h2>Ключи интеграций</h2><p>Секрет хранится только как SHA-256 хэш.</p></div></div><div class="table-scroll"><table><thead><tr><th>Название</th><th>Scope</th><th>Статус</th><th>Использован</th><th>Создал</th><th></th></tr></thead><tbody>{table}</tbody></table></div></section><section class="panel history-panel"><h2>Endpoints</h2><ul><li><code>GET /api/integration/ping</code></li><li><code>GET /api/integration/tickets?limit=100&amp;status=in_progress</code></li></ul></section>'''
-        return self.deps.admin_layout("API-ключи", content, "api_keys")
+    def remember_new_api_key(self, user_id: int, token: str) -> None:
+        """Keeps a new secret on the server until its creator's next page load."""
+        with self._new_api_keys_lock:
+            self._new_api_keys[user_id] = (token, time.monotonic() + NEW_API_KEY_TTL_SECONDS)
+
+    def _take_new_api_key(self, user_id: int) -> str:
+        with self._new_api_keys_lock:
+            token, expires = self._new_api_keys.pop(user_id, ("", 0.0))
+        return token if time.monotonic() < expires else ""
+
+    def api_keys_data(self, user_id: int) -> dict[str, object]:
+        return {
+            "title": "API-ключи", "active": "api_keys",
+            "new_token": self._take_new_api_key(user_id),
+            "keys": [{
+                "id": int(item.get("id", 0) or 0),
+                "name": str(item.get("name") or ""),
+                "token_prefix": str(item.get("token_prefix") or ""),
+                "scope": str(item.get("scope") or "read"),
+                "enabled": bool(item.get("enabled")),
+                "last_used_at": human_time(str(item.get("last_used_at") or "")) or "—",
+                "created_by": str(item.get("created_by_name") or "—"),
+            } for item in self.deps.auth.list_api_keys(200)],
+        }

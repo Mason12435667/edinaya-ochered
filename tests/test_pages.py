@@ -166,7 +166,9 @@ class TicketPageDataTests(unittest.TestCase):
         self.assertIn(get("/api/ticket-page?id=1").status, (302, 303, 401))
 
 
-ADMIN_PAGES = ("home", "users", "employees", "manual", "menu", "categories", "errors", "error", "contacts", "audit", "manager", "system")
+ADMIN_PAGES = ("home", "users", "employees", "manual", "menu", "categories", "errors", "error", "contacts", "audit", "manager", "system",
+               "analytics", "backups", "reliability", "workflow", "shift", "api-keys")
+APP_PAGES = ("me", "accounts", "reminders", "recent")
 
 
 class AdminPagesTests(unittest.TestCase):
@@ -203,10 +205,78 @@ class AdminPagesTests(unittest.TestCase):
                 self.assertNotRegex(get(f"/api/admin-page?page={page}", admin_cookie()).text, r"<(tr|td|form|option|section|div)[ >]")
 
     def test_templates_are_served_but_not_outside_the_folder(self):
-        self.assertEqual(get("/static/admin/home.html").status, 200)
-        self.assertEqual(get("/static/admin/../app.js").status, 404)
-        self.assertEqual(get("/static/admin/nope.html").status, 404)
+        self.assertEqual(get("/static/templates/home.html").status, 200)
+        self.assertEqual(get("/static/templates/../app.js").status, 404)
+        self.assertEqual(get("/static/templates/nope.html").status, 404)
 
     def test_missing_error_report(self):
         self.assertFalse(get("/api/admin-page?page=error&id=999999", admin_cookie()).json()["found"])
 
+    def test_remaining_admin_addresses_are_the_static_page(self):
+        body = (PAGES / "admin.html").read_bytes()
+        for path in ("/admin/analytics", "/admin/backups", "/admin/reliability", "/admin/workflow", "/admin/shift", "/admin/api-keys"):
+            with self.subTest(path=path):
+                self.assertEqual(get(path, admin_cookie()).body, body)
+
+
+class AverageTimeTests(unittest.TestCase):
+    def test_average_minutes_are_strings_so_json_keeps_the_decimal(self):
+        # A float such as 0.0 would reach the page as 0.
+        analytics = get("/api/admin-page?page=analytics", admin_cookie()).json()
+        manager = get("/api/admin-page?page=manager", admin_cookie()).json()
+        for value in (analytics["avg_first_minutes"], analytics["avg_solution_minutes"], manager["avg_first"], manager["avg_resolution"]):
+            self.assertIsInstance(value, str)
+
+
+class AppPagesTests(unittest.TestCase):
+    def test_addresses_are_the_static_page(self):
+        body = (PAGES / "app.html").read_bytes()
+        for page in APP_PAGES:
+            with self.subTest(page=page):
+                self.assertEqual(get(f"/{page}", second_user_cookie()).body, body)
+
+    def test_data_is_available_to_employees_without_markup(self):
+        for page in APP_PAGES:
+            with self.subTest(page=page):
+                response = get(f"/api/app-page?page={page}", second_user_cookie())
+                self.assertEqual(response.status, 200)
+                self.assertNotRegex(response.text, r"<(tr|td|form|option|section|div|article)[ >]")
+
+    def test_sign_in_is_required(self):
+        for page in APP_PAGES:
+            with self.subTest(page=page):
+                self.assertNotEqual(get(f"/api/app-page?page={page}").status, 200)
+
+    def test_unknown_page(self):
+        self.assertEqual(get("/api/app-page?page=nope", admin_cookie()).status, 404)
+
+
+class ApiKeySecretTests(unittest.TestCase):
+    def create(self, name):
+        return support.post_form("/admin/api-keys", {"action": "create", "name": name}, admin_cookie())
+
+    def test_secret_is_shown_once_and_never_in_the_address(self):
+        response = self.create("Интеграция")
+        self.assertIn(response.status, (302, 303))
+        first = get("/api/admin-page?page=api-keys", admin_cookie()).json()
+        self.assertTrue(first["new_token"])
+        self.assertNotIn(first["new_token"], response.location)
+        self.assertEqual(get("/api/admin-page?page=api-keys", admin_cookie()).json()["new_token"], "")
+
+    def test_listing_never_contains_the_secret(self):
+        self.create("Вторая интеграция")
+        data = get("/api/admin-page?page=api-keys", admin_cookie())
+        token = data.json()["new_token"]
+        listing = get("/api/admin-page?page=api-keys", admin_cookie())
+        self.assertNotIn(token, listing.text)
+
+    def test_expired_secret_is_not_shown(self):
+        self.create("Просроченная")
+        pages = support.app.ADMIN_PAGES
+        with pages._new_api_keys_lock:
+            for user_id, (token, _) in list(pages._new_api_keys.items()):
+                pages._new_api_keys[user_id] = (token, 0.0)
+        self.assertEqual(get("/api/admin-page?page=api-keys", admin_cookie()).json()["new_token"], "")
+
+    def test_employee_cannot_read_the_page(self):
+        self.assertNotEqual(get("/api/admin-page?page=api-keys", second_user_cookie()).status, 200)

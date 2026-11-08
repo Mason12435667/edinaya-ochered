@@ -77,8 +77,8 @@ STATIC_FILES = {
     "favicon.png": "image/png",
     **{name: "text/css; charset=utf-8" for name in queue_ticket_views.MAIN_STYLESHEETS},
     **{name: "text/javascript; charset=utf-8" for name in (*queue_ticket_views.MAIN_SCRIPTS, *queue_ticket_views.PAGE_SCRIPTS)},
-    **{f"admin/{path.name}": "text/html; charset=utf-8"
-       for path in (Path(__file__).resolve().parents[1] / "frontend" / "static" / "admin").glob("*.html")},
+    **{f"templates/{path.name}": "text/html; charset=utf-8"
+       for path in (Path(__file__).resolve().parents[1] / "frontend" / "static" / "templates").glob("*.html")},
 }
 
 
@@ -766,8 +766,7 @@ class QueueHTTPHandlerMixin:
             self.html_response(self.deps.render_login(query))
 
     def _get_accounts(self, query) -> None:
-        sessions = self.saved_account_sessions(touch=False)
-        self.html_response(self.ticket_views.render_account_switcher(query, self.is_admin(), sessions, self.current_auth_slot()))
+        self.page_response("app")
 
     def _get_register(self, query) -> None:
         status = HTTPStatus.OK if queue_auth.self_registration_enabled() else HTTPStatus.FORBIDDEN
@@ -796,7 +795,7 @@ class QueueHTTPHandlerMixin:
             self.redirect("/")
 
     def _get_me(self, query) -> None:
-        self.html_response(self.ticket_views.render_my_page(query, self.is_admin()))
+        self.page_response("app")
 
     def _get_dashboard(self, query) -> None:
         self.page_response("tickets")
@@ -818,6 +817,19 @@ class QueueHTTPHandlerMixin:
 
     def _get_whatsapp(self, query) -> None:
         self.page_response("whatsapp")
+
+    def _get_api_app_page(self, query) -> None:
+        page = query.get("page", [""])[0]
+        providers = {
+            "me": self.ticket_views.my_page_data,
+            "accounts": lambda: self.ticket_views.accounts_data(self.saved_account_sessions(touch=False), self.current_auth_slot()),
+            "reminders": self.productivity_routes.reminders_data,
+            "recent": self.workflow_routes.recent_data,
+        }
+        if page not in providers:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        self.json_response(providers[page]())
 
     def _get_api_page_context(self, query) -> None:
         self.json_response(self.ticket_views.page_context(self.is_admin()))
@@ -945,7 +957,7 @@ class QueueHTTPHandlerMixin:
         self.page_response("admin")
 
     def _get_admin_api_keys(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_api_keys(query))
+        self.page_response("admin")
 
     def _get_admin_tickets_export(self, query) -> None:
         rows = self.deps.final_ticket_filter(query)
@@ -974,7 +986,16 @@ class QueueHTTPHandlerMixin:
 
     def _get_api_admin_page(self, query) -> None:
         page = query.get("page", [""])[0]
-        data = self.deps.admin_users_data() if page == "users" else self.admin_pages.page_data(page, query)
+        providers = {
+            "users": self.deps.admin_users_data,
+            "analytics": self.productivity_routes.analytics_data,
+            "backups": self.productivity_routes.backups_data,
+            "reliability": self.reliability_routes.page_data,
+            "workflow": self.workflow_routes.admin_data,
+            "shift": self.feature_routes.shift_data,
+            "api-keys": lambda: self.admin_pages.api_keys_data(int((self.effective_user() or {}).get("id", 0) or 0)),
+        }
+        data = providers[page]() if page in providers else self.admin_pages.page_data(page, query)
         if data is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -1175,12 +1196,14 @@ class QueueHTTPHandlerMixin:
         if form is None: return
         action=str(form.get("action") or "").strip().lower(); actor=self.effective_user() or {}
         if action == "create":
-            ok,message,token=self.deps.auth.create_api_key(actor,form.get("name",""),"read"); self.html_response(self.admin_pages.render_admin_api_keys({},new_token=token if ok else "",notice=message),HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST); return
+            ok,message,token=self.deps.auth.create_api_key(actor,form.get("name",""),"read")
+            if ok: self.admin_pages.remember_new_api_key(int(actor.get("id",0) or 0),token)
+            self.redirect("/admin/api-keys?notice="+quote(message)); return
         if action == "revoke":
             try: key_id=int(form.get("key_id",0) or 0)
             except ValueError: key_id=0
             ok,message=self.deps.auth.revoke_api_key(actor,key_id); self.redirect("/admin/api-keys?notice="+quote(message)); return
-        self.html_response(self.admin_pages.render_admin_api_keys({},notice="Неизвестное действие"),HTTPStatus.BAD_REQUEST); return
+        self.redirect("/admin/api-keys?notice="+quote("Неизвестное действие"))
 
     def _post_api_system_warning_action(self, parsed) -> None:
         # POST /api/system-warning-action
@@ -2117,6 +2140,7 @@ class QueueHTTPHandlerMixin:
         "/api/dashboard-data": _get_api_dashboard_data,
         "/api/ticket-page": _get_api_ticket_page,
         "/api/page-context": _get_api_page_context,
+        "/api/app-page": _get_api_app_page,
         "/api/groups-page": _get_api_groups_page,
         "/api/chat-state": _get_api_chat_state,
         "/api/group-state": _get_api_group_state,

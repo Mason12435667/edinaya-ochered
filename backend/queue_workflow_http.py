@@ -7,9 +7,8 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import queue_workflow as qw
-from queue_core import e, human_bytes, log_suppressed
+from queue_core import human_bytes, log_suppressed
 from ticketing import TicketStore
-from queue_templates import render_template
 
 
 def _value(query, key, default=""):
@@ -41,69 +40,42 @@ def _human_bytes(value: int) -> str:
 class WorkflowRoutes:
     """Recent chats, workflow settings, ticket quick actions, bulk edits and chat export."""
 
-    def __init__(self, store: TicketStore, *, csrf_token: Callable[[], str], layout: Callable[..., str],
-                 admin_layout: Callable[[str, str, str], str],
+    def __init__(self, store: TicketStore, *,
                  category_items: Callable[[], Iterable[tuple[str, str]]],
                  employees: list[str], work_actor: Callable[[], str],
                  update_ticket_status: Callable[..., tuple[bool, str]], events: Any):
         self.store = store
-        self.csrf_token = csrf_token
-        self.layout = layout
-        self.admin_layout = admin_layout
         self.category_items = category_items
         self.employees = employees  # app.py edits this list in place
         self.work_actor = work_actor
         self.update_ticket_status = update_ticket_status
         self.events = events
 
-    def _recent_page(self, handler):
-        rows = qw.recent_chats(self.store, self.work_actor(), 30)
-        cards = []
-        for row in rows:
+    def recent_data(self):
+        rows = []
+        for row in qw.recent_chats(self.store, self.work_actor(), 30):
             chat_id = str(row.get("chat_id") or "")
             group = chat_id.endswith("@g.us")
-            href = ("/groups" if group else "/whatsapp") + "?" + urlencode({"chat_id": chat_id})
-            unread = int(row.get("unread_count") or 0)
-            cards.append(
-                f'<a class="workflow-recent-card" href="{e(href)}">'
-                f'<span class="workflow-recent-icon">{"Г" if group else "Л"}</span>'
-                f'<span><strong>{e(row.get("name") or chat_id)}</strong><small>{e(row.get("last_message") or "Нет текстового превью")}</small></span>'
-                f'{f"<b>{unread}</b>" if unread else ""}</a>'
-            )
-        content = f'''
-      <section class="page-heading"><div><p class="eyebrow">WhatsApp</p><h1>Недавние чаты</h1><p>Последние открытые диалоги текущего сотрудника</p></div></section>
-      <section class="workflow-recent-grid">{"".join(cards) or '<div class="panel empty">Откройте несколько чатов, и они появятся здесь.</div>'}</section>
-    '''
-        handler.html_response(self.layout("Недавние чаты", content, "recent", handler.is_admin()))
+            rows.append({
+                "href": ("/groups" if group else "/whatsapp") + "?" + urlencode({"chat_id": chat_id}),
+                "group": group,
+                "name": str(row.get("name") or chat_id),
+                "last_message": str(row.get("last_message") or "Нет текстового превью"),
+                "unread": int(row.get("unread_count") or 0),
+            })
+        return {"title": "Недавние чаты", "rows": rows}
 
-
-    def _workflow_admin_page(self, handler, query):
-        if not handler.require_admin():
-            return
-        notice = _value(query, "notice")
+    def admin_data(self):
         settings = qw.retention_settings(self.store)
         stats = qw.media_stats(self.store)
         required = set(qw.required_close_categories(self.store))
-        checks = ''.join(
-            f'<label class="workflow-check"><input type="checkbox" name="required_category__{e(key)}" value="1" {"checked" if key in required else ""}><span>{e(label)}</span></label>'
-            for key, label in self.category_items()
-        )
-        media_cards = ''.join(
-            f'<article class="stat-card"><span>{label}</span><strong>{_human_bytes(stats[kind]["bytes"])}</strong><small>{stats[kind]["count"]} файлов</small></article>'
-            for kind, label in (("photo","Фото"),("video","Видео"),("voice","Голосовые"),("file","Документы"))
-        )
-        content = render_template(
-            "workflow/workflow_admin_page.html",
-            notice_text=f'<div class="notice">{e(notice)}</div>' if notice else '',
-            csrf_token=e(self.csrf_token()),
-            messages=settings['messages'],
-            media=settings['media'],
-            tickets=settings['tickets'],
-            media_cards=media_cards,
-            checks=checks or '<span class="muted">Категории не найдены</span>',
-        )
-        handler.html_response(self.admin_layout("Рабочие настройки", content, "workflow"))
-
+        return {
+            "title": "Рабочие настройки", "active": "workflow",
+            "messages": settings["messages"], "media": settings["media"], "tickets": settings["tickets"],
+            "media_cards": [{"label": label, "size": _human_bytes(stats[kind]["bytes"]), "count": stats[kind]["count"]}
+                            for kind, label in (("photo", "Фото"), ("video", "Видео"), ("voice", "Голосовые"), ("file", "Документы"))],
+            "categories": [[str(key), str(label), key in required] for key, label in self.category_items()],
+        }
 
     def _ticket_details(self, ticket_id: int):
         ticket = self.store.get_ticket(ticket_id)
@@ -123,9 +95,10 @@ class WorkflowRoutes:
     def get(self, handler):
         parsed = urlparse(handler.path); query = parse_qs(parsed.query); path = parsed.path
         if path == "/recent":
-            self._recent_page(handler)
+            handler.page_response("app")
         elif path == "/admin/workflow":
-            self._workflow_admin_page(handler, query)
+            if handler.require_admin():
+                handler.page_response("admin")
         elif path == "/api/workflow-state":
             chat_id = _value(query, "chat_id")[:120]
             client_id = _value(query, "client_id")[:120]

@@ -118,10 +118,10 @@ class AdminCategoriesTests(unittest.TestCase):
 
     def test_new_category_from_the_page_reaches_the_bot(self):
         # field names are taken from the frontend, not from the test helper
-        template = get("/static/admin/category_editor_row.html").text
+        template = get("/static/templates/category_editor_row.html").text
         for name in ("label_ru_{{ suffix }}", "number_{{ suffix }}"):
             self.assertIn(f'name="{name}"', template)
-        self.assertIn('name="req_${name}_', (Path(__file__).parents[1] / "frontend/static/admin-page.js").read_text(encoding="utf-8"))
+        self.assertIn('name="req_${name}_', (Path(__file__).parents[1] / "frontend/static/pages.js").read_text(encoding="utf-8"))
         form = form_for(self.original, number_new="3", label_ru_new="Доступ к 1С", label_kz_new="1С қолжетімділігі")
         post_form("/admin/categories", form, self.cookie)
         self.assertIn("3. Доступ к 1С", WhatsAppUser().register_profile()["reply"])
