@@ -54,6 +54,7 @@ from queue_inbound_service import InboundDependencies, InboundService
 from queue_attachment_archive import AttachmentArchive
 from queue_outbound_service import OutboundService
 from queue_chat_state import ChatViews, ConnectorState
+from queue_ticket_pages import TicketPages
 from queue_ticket_views import TicketViews
 from queue_admin_pages import AdminPageDependencies, AdminPages
 from queue_stale_menu import StaleMenuRecovery
@@ -1040,16 +1041,12 @@ audit_admin_form_submission = queue_work_context.audit_admin_form_submission
 monitor_log_entries = queue_work_context.monitor_log_entries
 system_status_snapshot = queue_work_context.system_status_snapshot
 ticket_sla_state = queue_work_context.ticket_sla_state
-sla_badge = queue_work_context.sla_badge
 status_badge = queue_work_context.status_badge
 priority_badge = queue_work_context.priority_badge
 employee_options = queue_work_context.employee_options
 category_options = queue_work_context.category_options
 priority_options = queue_work_context.priority_options
-inline_priority_select = queue_work_context.inline_priority_select
-render_ticket_rows = queue_work_context.render_ticket_rows
 query_page = queue_work_context.query_page
-render_pagination = queue_work_context.render_pagination
 
 
 EMPLOYEES = load_employee_names()
@@ -1091,6 +1088,7 @@ display_names = CHAT_VIEWS.display_names
 TICKET_VIEWS = TicketViews(STORE, AUTH, csrf_token=csrf_token, categories=CATEGORIES,
                            local_mode=LOCAL_MODE, page_size=PAGE_SIZE)
 layout = TICKET_VIEWS.layout
+TICKET_PAGES = TicketPages(STORE, categories=CATEGORIES, page_size=PAGE_SIZE)
 
 
 
@@ -1280,6 +1278,7 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
     upload_routes = UPLOAD_ROUTES
     chat_views = CHAT_VIEWS
     ticket_views = TICKET_VIEWS
+    ticket_pages = TICKET_PAGES
     admin_pages = ADMIN_PAGES
     deps = HTTP_DEPENDENCIES
     server_version = "UnifiedQueue/1.00.1"

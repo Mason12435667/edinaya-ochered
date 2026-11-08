@@ -14,7 +14,6 @@ import queue_auth
 import queue_features
 from queue_core import directory_size, display_phone, e, human_time, log_suppressed, normalize_message, parse_iso_datetime
 from ticketing import TicketStore
-from queue_templates import render_template
 
 PAGE_SIZE = 25
 
@@ -260,23 +259,20 @@ def ticket_sla_state(ticket: dict[str, object]) -> dict[str, object]:
     }
 
 
-def sla_badge(ticket: dict[str, object]) -> str:
+def sla_view(ticket: dict[str, object]) -> dict[str, object] | None:
     state = ticket_sla_state(ticket)
     if not state.get("active"):
-        return ""
+        return None
     remaining = int(state.get("remaining_seconds", 0) or 0)
     overdue = bool(state.get("overdue"))
-    warning = bool(state.get("warning"))
-    seconds = abs(remaining)
-    hours, rest = divmod(seconds, 3600)
+    hours, rest = divmod(abs(remaining), 3600)
     minutes = rest // 60
     short = f"{hours}ч {minutes}м" if hours else f"{minutes}м"
-    label = f"SLA просрочен {short}" if overdue else f"SLA {short}"
-    cls = "sla-overdue" if overdue else "sla-warning" if warning else "sla-ok"
-    return (
-        f'<span class="sla-badge {cls}" data-sla-deadline="{int(state.get("due_epoch",0) or 0)}" '
-        f'data-sla-active="1">{e(label)}</span>'
-    )
+    return {
+        "class": "sla-overdue" if overdue else "sla-warning" if state.get("warning") else "sla-ok",
+        "due_epoch": int(state.get("due_epoch", 0) or 0),
+        "label": f"SLA просрочен {short}" if overdue else f"SLA {short}",
+    }
 
 
 def status_badge(status: str) -> str:
@@ -313,47 +309,27 @@ def priority_options(selected: str = "", include_all: bool = False) -> str:
     )
 
 
-def inline_priority_select(ticket_id: int, selected: str) -> str:
-    return (
-        f'<select class="priority-select priority-select-{e(selected)}" '
-        f'data-quick-priority data-ticket-id="{ticket_id}" '
-        f'aria-label="Приоритет заявки #{ticket_id}">'
-        f'{priority_options(selected)}</select>'
-    )
-
-
-def render_ticket_rows(tickets: list[dict[str, object]]) -> str:
-    rows: list[str] = []
-    for ticket in tickets:
-        source_label = {
-            "whatsapp": "WhatsApp",
-            "manual": "Вручную",
-            "admin_manual": "Вручную",
-        }.get(str(ticket["source"]), "Вручную")
-        sla = ticket_sla_state(ticket)
-        row_sla_class = " sla-row-overdue" if sla.get("overdue") else " sla-row-warning" if sla.get("warning") else ""
-        rows.append(
-            render_template(
-                "tickets/ticket_rows.html",
-                strip=row_sla_class.strip(),
-                revision=int(ticket.get('revision',0)),
-                id=ticket['id'],
-                title=e(ticket['title']),
-                assigned_to=e(ticket['assigned_to']),
-                status=e(ticket['status']),
-                inline_priority_select=inline_priority_select(int(ticket['id']), str(ticket['priority'])),
-                source=e(ticket['source']),
-                source_label=e(source_label),
-                sender=e(ticket['sender']),
-                display_phone=e(display_phone(str(ticket['phone']))),
-                summary=e(ticket['summary']),
-                status_badge=status_badge(str(ticket['status'])),
-                shift_handoff_text='<span class="handoff-badge">Следующая смена</span>' if int(ticket.get('shift_handoff', 0) or 0) else '',
-                sla_badge=sla_badge(ticket),
-                human_time=e(human_time(str(ticket['created_at']))),
-            )
-        )
-    return "".join(rows) or '<tr><td colspan="7" class="empty">Заявок пока нет. Запусти WhatsApp QR-коннектор или добавь заявку вручную.</td></tr>'
+def ticket_row_data(ticket: dict[str, object]) -> dict[str, object]:
+    sla = ticket_sla_state(ticket)
+    status = str(ticket["status"])
+    return {
+        "id": int(ticket["id"]),
+        "revision": int(ticket.get("revision", 0)),
+        "title": str(ticket["title"]),
+        "summary": str(ticket["summary"]),
+        "status": status,
+        "status_label": _deps.statuses.get(status, status),
+        "priority": str(ticket["priority"]),
+        "source": str(ticket["source"]),
+        "source_label": {"whatsapp": "WhatsApp", "manual": "Вручную", "admin_manual": "Вручную"}.get(str(ticket["source"]), "Вручную"),
+        "sender": str(ticket["sender"]),
+        "phone": display_phone(str(ticket["phone"])),
+        "assigned_to": str(ticket["assigned_to"]),
+        "created_at": human_time(str(ticket["created_at"])),
+        "shift_handoff": bool(int(ticket.get("shift_handoff", 0) or 0)),
+        "sla": sla_view(ticket),
+        "row_class": "sla-row-overdue" if sla.get("overdue") else "sla-row-warning" if sla.get("warning") else "",
+    }
 
 
 def query_page(query: dict[str, list[str]]) -> int:
@@ -363,16 +339,14 @@ def query_page(query: dict[str, list[str]]) -> int:
         return 1
 
 
-def render_pagination(
+def pagination_data(
     query: dict[str, list[str]],
     total: int,
     page: int,
     page_size: int = PAGE_SIZE,
-) -> str:
+) -> dict[str, object]:
     pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, page), pages)
-    if pages <= 1:
-        return f'<span class="pagination-total">Всего заявок: {total}</span>'
 
     def page_url(number: int) -> str:
         values = {
@@ -385,30 +359,18 @@ def render_pagination(
         encoded = urlencode(values)
         return f"/?{encoded}" if encoded else "/"
 
-    visible = sorted({1, pages, *range(max(1, page - 2), min(pages, page + 2) + 1)})
-    links: list[str] = []
+    items: list[dict[str, object]] = []
     previous = 0
-    for number in visible:
+    for number in sorted({1, pages, *range(max(1, page - 2), min(pages, page + 2) + 1)}):
         if previous and number - previous > 1:
-            links.append('<span class="pagination-gap">…</span>')
-        current = " current" if number == page else ""
-        links.append(
-            f'<a class="pagination-link{current}" href="{e(page_url(number))}">{number}</a>'
-        )
+            items.append({"gap": True})
+        items.append({"number": number, "url": page_url(number), "current": number == page})
         previous = number
-    prev_link = (
-        f'<a class="pagination-link" href="{e(page_url(page - 1))}">Назад</a>'
-        if page > 1
-        else '<span class="pagination-link disabled">Назад</span>'
-    )
-    next_link = (
-        f'<a class="pagination-link" href="{e(page_url(page + 1))}">Вперёд</a>'
-        if page < pages
-        else '<span class="pagination-link disabled">Вперёд</span>'
-    )
-    return (
-        f'<span class="pagination-total">Страница {page} из {pages} · заявок {total}</span>'
-        f'<div class="pagination-links">{prev_link}{"".join(links)}{next_link}</div>'
-    )
-
-
+    return {
+        "total": total,
+        "page": page,
+        "pages": pages,
+        "items": items,
+        "prev_url": page_url(page - 1) if page > 1 else "",
+        "next_url": page_url(page + 1) if page < pages else "",
+    }

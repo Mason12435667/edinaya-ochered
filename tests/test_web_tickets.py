@@ -143,7 +143,7 @@ class ContactsPageTests(unittest.TestCase):
 
 class StaticFilesTests(unittest.TestCase):
     def test_every_layout_asset_is_served(self):
-        page = get("/", admin_cookie()).text
+        page = get("/me", admin_cookie()).text
         assets = re.findall(r'/static/([\w.-]+)\?v=', page)
         self.assertGreaterEqual(len(assets), 20)
         for name in assets:
@@ -173,13 +173,13 @@ class TicketWebTests(unittest.TestCase):
         ticket_id = user.say("Готово")["ticket_id"]
 
         cookie = admin_cookie()
-        page = get(f"/ticket?id={ticket_id}", cookie)
-        self.assertEqual(page.status, 200)
-        self.assertIn("Сломалась клавиатура в приёмной", page.text)
+        self.assertEqual(get(f"/ticket?id={ticket_id}", cookie).status, 200)
+        page = get(f"/api/ticket-page?id={ticket_id}", cookie).json()
+        self.assertIn("Сломалась клавиатура в приёмной", page["original_text"])
 
-        listing = get("/", cookie)
-        self.assertEqual(listing.status, 200)
-        self.assertIn("Сломалась клавиатура в приёмной", listing.text)
+        self.assertEqual(get("/", cookie).status, 200)
+        rows = get("/api/dashboard-data", cookie).json()["rows"]
+        self.assertTrue(any("Сломалась клавиатура в приёмной" in row["summary"] or "Сломалась клавиатура в приёмной" in row["title"] for row in rows))
 
     def test_manual_ticket_creation(self):
         cookie = admin_cookie()

@@ -30,7 +30,7 @@ from queue_chat_views import groups_page_data
 from queue_core import content_disposition_header, display_phone, log_suppressed, normalize_message, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
 from queue_menu_config import MenuConfig
 from queue_store_conversations import MENU_CONTEXT
-from queue_work_context import activate_employee_shift, active_employee, assignment_names, audit_admin_form_submission, query_page, render_pagination, render_ticket_rows, work_actor
+from queue_work_context import activate_employee_shift, active_employee, assignment_names, audit_admin_form_submission, work_actor
 from ticketing import STATUSES, TicketStore
 
 @dataclass(frozen=True)
@@ -796,7 +796,7 @@ class QueueHTTPHandlerMixin:
         self.html_response(self.ticket_views.render_my_page(query, self.is_admin()))
 
     def _get_dashboard(self, query) -> None:
-        self.html_response(self.ticket_views.render_dashboard(query, self.is_admin()))
+        self.page_response("tickets")
 
     def _get_admin_login(self, query) -> None:
         if self.authenticated_user().casefold() != self.deps.admin_user:
@@ -808,7 +808,7 @@ class QueueHTTPHandlerMixin:
         self.end_admin_session()
 
     def _get_ticket(self, query) -> None:
-        self.html_response(self.ticket_views.render_ticket(self.query_int(query, "id"), query, self.is_admin()))
+        self.page_response("ticket")
 
     def page_response(self, name: str) -> None:
         self.file_response(self.deps.root / "frontend" / "pages" / f"{name}.html", "text/html; charset=utf-8")
@@ -855,7 +855,10 @@ class QueueHTTPHandlerMixin:
         self.json_response({"ok":True,"count":len(public_rows),"tickets":public_rows})
 
     def _get_api_dashboard_data(self, query) -> None:
-        self.handle_dashboard_data(query)
+        self.json_response(self.ticket_pages.dashboard(query))
+
+    def _get_api_ticket_page(self, query) -> None:
+        self.json_response(self.ticket_pages.ticket(self.query_int(query, "id"), self.is_admin()))
 
     def _get_api_chat_state(self, query) -> None:
         state = self.chat_views.chat_state_snapshot(
@@ -2104,6 +2107,7 @@ class QueueHTTPHandlerMixin:
         "/api/integration/ping": _get_api_integration_ping,
         "/api/integration/tickets": _get_api_integration_tickets,
         "/api/dashboard-data": _get_api_dashboard_data,
+        "/api/ticket-page": _get_api_ticket_page,
         "/api/page-context": _get_api_page_context,
         "/api/groups-page": _get_api_groups_page,
         "/api/chat-state": _get_api_chat_state,
@@ -2203,31 +2207,6 @@ class QueueHTTPHandlerMixin:
         "/chat-action": _post_chat_action,
         "/manual": _post_manual,
     }
-
-    def handle_dashboard_data(self, query: dict[str, list[str]]) -> None:
-        status = query.get("status", [""])[0]
-        category = query.get("category", [""])[0]
-        priority = query.get("priority", [""])[0]
-        search = query.get("q", [""])[0]
-        view = query.get("view", [""])[0]
-        if view not in {"", "mine", "handoff", "open", "urgent"}:
-            view = ""
-        employee = work_actor()
-        total = self.deps.store.count_tickets(status, category, priority, search, view, employee)
-        pages = max(1, (total + self.deps.page_size - 1) // self.deps.page_size)
-        page = min(query_page(query), pages)
-        tickets = self.deps.store.list_tickets(
-            status, category, priority, search, self.deps.page_size, (page - 1) * self.deps.page_size, view, employee
-        )
-        self.json_response(
-            {
-                "version": self.deps.store.dashboard_version(),
-                "rows_html": render_ticket_rows(tickets),
-                "counts": self.deps.store.counts(),
-                "pagination_html": render_pagination(query, total, page),
-            }
-        )
-
 
     def read_body(self, max_bytes: int) -> bytes | None:
         """The whole request body, read from the socket at most once (the CSRF check

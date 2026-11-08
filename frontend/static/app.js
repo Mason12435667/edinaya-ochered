@@ -234,8 +234,8 @@ window.QueueVoice = (() => {
       if (!response.ok) throw new Error("Ошибка автообновления");
       const data = await response.json();
       if (force || data.version !== dashboard.dataset.dashboardVersion) {
-        tableBody.innerHTML = data.rows_html;
-        if (pagination) pagination.innerHTML = data.pagination_html || "";
+        tableBody.innerHTML = window.QueueTickets.rows(data.rows, data.options.priorities);
+        if (pagination) pagination.innerHTML = window.QueueTickets.pagination(data.pagination);
         Object.entries(data.counts || {}).forEach(([status, amount]) => {
           const counter = document.querySelector(`[data-count-status="${status}"]`);
           if (counter) counter.textContent = amount;

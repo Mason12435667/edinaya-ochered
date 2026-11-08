@@ -117,7 +117,7 @@ _csrf_tokens: dict[str, str] = {}
 def csrf_token(cookie: str) -> str:
     """The token a signed-in browser gets in <meta name="queue-csrf">."""
     if cookie not in _csrf_tokens:
-        match = re.search(r'<meta name="queue-csrf" content="([^"]+)"', get("/", cookie).text)
+        match = re.search(r'"csrf_token": ?"([^"]+)"', get("/api/page-context", cookie).text)
         if not match:
             raise AssertionError("no queue-csrf meta tag on /")
         _csrf_tokens[cookie] = match.group(1)

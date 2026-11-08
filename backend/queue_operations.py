@@ -1,5 +1,4 @@
 """Ticket operations with explicit dependencies, revision checks and handoff history."""
-import html
 
 
 def initialize(store):
@@ -21,7 +20,7 @@ def initialize(store):
         ''')
 
 
-def notification_panel(store,ticket_id):
+def notification_status(store,ticket_id):
     with store.connection() as db:
         row=db.execute('''SELECT n.*,o.status AS delivery,o.last_error,o.provider_id FROM ticket_notifications n
           LEFT JOIN outbound_messages o ON o.id=n.message_id WHERE n.ticket_id=? ORDER BY n.id DESC LIMIT 1''',(ticket_id,)).fetchone()
@@ -32,12 +31,12 @@ def notification_panel(store,ticket_id):
         label=states.get(row['delivery'],'Не поставлено в очередь')
         detail=row['last_error'] or row['reason'] or ''
         if row['message_id'] and row['delivery'] is None: label='Запись отправки удалена по сроку хранения'
-    return '<section class="panel"><h2>Уведомление пользователю</h2><strong>'+html.escape(label)+'</strong><p>'+html.escape(detail)+'</p><small>«Отправлено» не означает, что сообщение прочитано</small></section>'
+    return {'label':label,'detail':detail}
 
 
 def handoff_history(store,ticket_id):
     with store.connection() as db:rows=db.execute('SELECT * FROM ticket_handoffs WHERE ticket_id=? ORDER BY id DESC LIMIT 10',(ticket_id,)).fetchall()
-    return ''.join('<p><strong>'+html.escape(r['actor'])+'</strong>: '+html.escape(r['note'])+'<br><small>'+html.escape('Принял: '+r['accepted_by'] if r['accepted_by'] else 'Ожидает принятия')+'</small></p>' for r in rows)
+    return [{'actor':r['actor'],'note':r['note'],'accepted_by':r['accepted_by']} for r in rows]
 
 
 class Conflict(ValueError):pass

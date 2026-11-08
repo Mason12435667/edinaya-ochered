@@ -1,41 +1,66 @@
-
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="queue-csrf" content="">
+  <title>Заявки · Единая очередь</title>
+  <meta name="theme-color" content="#112a25">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png?v=3.3.79">
+  <link rel="apple-touch-icon" href="/static/favicon.png?v=3.3.79">
+  <script>document.documentElement.dataset.theme = localStorage.getItem("queue-theme") || "light";</script>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/ui.css">
+  <link rel="stylesheet" href="/static/instruction.css">
+  <link rel="stylesheet" href="/static/global-theme.css">
+  <link rel="stylesheet" href="/static/productivity.css">
+  <link rel="stylesheet" href="/static/workflow.css">
+  <link rel="stylesheet" href="/static/notifications.css">
+  <link rel="stylesheet" href="/static/chat.css">
+  <link rel="stylesheet" href="/static/auth.css">
+  <link rel="stylesheet" href="/static/pink-theme.css">
+  <link rel="stylesheet" href="/static/polish.css">
+  <link rel="stylesheet" href="/static/user-ui.css">
+</head>
+<body data-page="tickets">
+  <main class="page">
       <section class="page-heading">
         <div><p class="eyebrow">Service Desk</p><h1>Заявки</h1><p>WhatsApp-запросы и ручные заявки в одной очереди</p></div>
         <a class="button primary" href="/whatsapp">Открыть WhatsApp</a>
       </section>
-      {{ notice_html }}
-      <section class="metrics">{{ cards }}</section>
-      <section class="smart-shift-panel"><div><strong>Текущая смена: {{ current_employee }}</strong>{{ shift_note }}</div><div class="shift-metrics">{{ shift_cards }}</div></section>
-      {{ handoff_board }}
+      <div data-page-notice></div>
+      <section class="metrics"></section>
+      <section class="smart-shift-panel"></section>
+      <div data-handoff-board></div>
       <section class="panel filters-panel">
         <form class="filters" method="get" action="/" data-dashboard-filter-form>
-          <input type="hidden" name="view" value="{{ selected_view }}">
-          <input type="search" name="q" value="{{ search }}" placeholder="№ заявки, ФИО, телефон, подразделение, текст..." data-live-ticket-search autocomplete="off">
-          <select name="status">{{ status_options }}</select>
-          <select name="category">{{ category_options }}</select>
-          <select name="priority">{{ priority_options }}</select>
-          <input type="number" name="no_answer_minutes" value="{{ no_answer_minutes }}" min="0" max="10080" step="5" placeholder="Без ответа > N мин" title="Показать заявки без первого ответа дольше N минут">
+          <input type="hidden" name="view">
+          <input type="search" name="q" placeholder="№ заявки, ФИО, телефон, подразделение, текст..." data-live-ticket-search autocomplete="off">
+          <select name="status"></select>
+          <select name="category"></select>
+          <select name="priority"></select>
+          <input type="number" name="no_answer_minutes" min="0" max="10080" step="5" placeholder="Без ответа > N мин" title="Показать заявки без первого ответа дольше N минут">
           <button class="button" type="submit">Применить</button>
           <a class="button ghost" href="/">Сбросить</a>
         </form>
       </section>
-      <section class="panel table-panel" data-dashboard data-dashboard-version="{{ dashboard_version }}">
+      <section class="panel table-panel" data-dashboard>
         <div class="table-hint"><span>Приоритет меняется в левом столбце. Правой кнопкой мыши по заявке можно быстро изменить статус.</span><span id="auto-refresh-state">Автообновление включено</span></div>
         <div class="table-scroll"><table>
           <thead><tr><th>Приоритет</th><th>№</th><th>Источник</th><th>Отправитель</th><th>Запрос</th><th>Статус</th><th>Время</th></tr></thead>
-          <tbody id="ticket-table-body">{{ table_body }}</tbody>
+          <tbody id="ticket-table-body"></tbody>
         </table></div>
-        <div class="pagination" id="ticket-pagination">{{ render_pagination }}</div>
+        <div class="pagination" id="ticket-pagination"></div>
       </section>
       <section class="panel manual-panel">
         <div><p class="eyebrow">Ручная заявка</p><h2>Быстро добавить запрос</h2><p>Для обращений, поступивших по телефону, почте или из других каналов</p></div>
         <form class="manual-form" method="post" action="/manual">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="csrf_token">
           <label>Тип запроса<input name="title" value="" placeholder="Например, сброс пароля" required></label>
           <label>Номер / идентификатор<input name="reference" placeholder="Например, 784512"></label>
           <label class="wide">Комментарий<textarea name="comment" rows="2" placeholder="Дополнительная информация"></textarea></label>
-          <label>Приоритет<select name="priority">{{ priority_options_2 }}</select></label>
-          <label>Сотрудник<select name="employee">{{ employee_options }}</select></label>
+          <label>Приоритет<select name="priority"></select></label>
+          <label>Сотрудник<select name="employee"></select></label>
           <label>Начальный статус<select name="status"><option value="new">Не сделано</option><option value="done">Сделано</option></select></label>
           <button class="button primary" type="submit">Добавить</button>
         </form>
@@ -48,4 +73,19 @@
         <button type="button" data-quick-status="invalid"><span class="context-dot dot-invalid"></span>Недействительная</button>
         <button type="button" data-quick-handoff="1"><span class="context-dot dot-handoff"></span>Передать следующей смене</button>
       </div>
-    
+    </main>
+  <script src="/static/shell.js" defer></script>
+  <script src="/static/ticket-render.js" defer></script>
+  <script src="/static/dashboard-page.js" defer></script>
+  <script src="/static/http.js" defer></script>
+  <script src="/static/ui.js" defer></script>
+  <script src="/static/app.js" defer></script>
+  <script src="/static/productivity.js" defer></script>
+  <script src="/static/workflow.js" defer></script>
+  <script src="/static/reliability.js" defer></script>
+  <script src="/static/chat-layout.js" defer></script>
+  <script src="/static/performance.js" defer></script>
+  <script src="/static/attachments.js" defer></script>
+  <script src="/static/account.js" defer></script>
+</body>
+</html>

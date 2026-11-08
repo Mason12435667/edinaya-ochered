@@ -2,9 +2,8 @@
 (() => {
   "use strict";
   if (!window.queuePage) return;
-  const {context, getJson} = window.queuePage;
+  const {context, getJson, escapeHtml} = window.queuePage;
   const query = new URLSearchParams(location.search);
-  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 
   function adminForm(action, button, chatId = "") {
     const chat = chatId ? `<input type="hidden" name="chat_id" value="${escapeHtml(chatId)}">` : "";

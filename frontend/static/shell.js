@@ -12,7 +12,7 @@
     request.open("GET", url, false);
     request.send();
     const finalUrl = new URL(request.responseURL || "/login", location.href);
-    if (finalUrl.pathname !== url || request.status !== 200) {
+    if (finalUrl.pathname !== new URL(url, location.href).pathname || request.status !== 200) {
       if (finalUrl.pathname === "/login") finalUrl.search = `?next=${encodeURIComponent(location.pathname + location.search)}`;
       location.replace(finalUrl.href);
       return null;
@@ -77,11 +77,12 @@
     document.body.dataset.authUserId = String(context.user.id);
     document.querySelector("main.page").insertAdjacentHTML("beforebegin", header(context, document.body.dataset.page));
     document.querySelector("main.page").insertAdjacentHTML("afterend", "<footer>Единая очередь · рабочая система обработки заявок</footer>");
-    document.querySelector("[data-conversation-page]").dataset.initialChatId = initialChatId();
+    const conversation = document.querySelector("[data-conversation-page]");
+    if (conversation) conversation.dataset.initialChatId = initialChatId();
   }
 
   const context = getJson("/api/page-context");
   if (!context) return;
-  window.queuePage = Object.freeze({context, getJson});
+  window.queuePage = Object.freeze({context, getJson, escapeHtml});
   drawFrame(context);
 })();
