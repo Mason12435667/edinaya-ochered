@@ -136,9 +136,9 @@ class ContactsPageTests(unittest.TestCase):
     def test_page_with_a_saved_contact_renders(self):
         cookie = admin_cookie()
         post_form("/admin/contacts", {"action": "save", "name": "Контакт для теста", "phone": "+7 701 555 00 11"}, cookie)
-        response = get("/admin/contacts", cookie)
-        self.assertEqual(response.status, 200)
-        self.assertIn("Контакт для теста", response.text)
+        self.assertEqual(get("/admin/contacts", cookie).status, 200)
+        data = get("/api/admin-page?page=contacts", cookie).json()
+        self.assertIn("Контакт для теста", [item["name"] for item in data["contacts"]])
 
 
 class StaticFilesTests(unittest.TestCase):

@@ -23,6 +23,7 @@ import queue_inbound_media
 import queue_performance_http
 import queue_realtime
 import queue_reliability
+import queue_admin_views
 import queue_ticket_views
 import queue_workflow
 from queue_avatars import AvatarCache
@@ -64,7 +65,7 @@ class HttpDependencies:
     render_forgot_password: Callable[..., str]
     render_local_setup: Callable[..., str]
     render_account: Callable[..., str]
-    render_admin_users: Callable[..., str]
+    admin_users_data: Callable[[], dict[str, object]]
     final_ticket_filter: Callable[..., list]
     update_ticket_status: Callable[..., tuple]
     set_chat_favorite: Callable[[str, bool], tuple[bool, str]]
@@ -76,6 +77,8 @@ STATIC_FILES = {
     "favicon.png": "image/png",
     **{name: "text/css; charset=utf-8" for name in queue_ticket_views.MAIN_STYLESHEETS},
     **{name: "text/javascript; charset=utf-8" for name in (*queue_ticket_views.MAIN_SCRIPTS, *queue_ticket_views.PAGE_SCRIPTS)},
+    **{f"admin/{path.name}": "text/html; charset=utf-8"
+       for path in (Path(__file__).resolve().parents[1] / "frontend" / "static" / "admin").glob("*.html")},
 }
 
 
@@ -909,40 +912,37 @@ class QueueHTTPHandlerMixin:
         self.json_response({"status": "ok"})
 
     def _get_admin_home(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_home())
+        self.page_response("admin")
 
     def _get_admin_users(self, query) -> None:
-        self.html_response(self.deps.render_admin_users(query))
+        self.page_response("admin")
 
     def _get_admin_employees(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_employees(query))
+        self.page_response("admin")
 
     def _get_admin_manual(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_manual(query))
+        self.page_response("admin")
 
     def _get_admin_menu(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_menu(query))
+        self.page_response("admin")
 
     def _get_admin_categories(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_categories(query))
+        self.page_response("admin")
 
     def _get_admin_errors(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_errors(query))
+        self.page_response("admin")
 
     def _get_admin_error(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_error(self.query_int(query, "id"), query))
+        self.page_response("admin")
 
     def _get_admin_contacts(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_contacts(query))
+        self.page_response("admin")
 
     def _get_admin_audit(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_audit(query))
-
-    def _get_admin_analytics(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_analytics_final(query))
+        self.page_response("admin")
 
     def _get_admin_manager(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_manager_dashboard(query))
+        self.page_response("admin")
 
     def _get_admin_api_keys(self, query) -> None:
         self.html_response(self.admin_pages.render_admin_api_keys(query))
@@ -966,11 +966,19 @@ class QueueHTTPHandlerMixin:
         self.csv_bytes_response(("﻿" + stream.getvalue()).encode("utf-8"), "tickets.csv")
 
     def _get_admin_system(self, query) -> None:
-        self.html_response(self.admin_pages.render_admin_system(query))
+        self.page_response("admin")
 
     def _get_api_admin_contact_search(self, query) -> None:
         search_raw = query.get("q", [""])[0]
-        self.json_response({"rows_html": self.admin_pages.discovered_contact_rows(search_raw, 80)})
+        self.json_response({"rows": self.admin_pages.discovered_contacts(search_raw, 80)})
+
+    def _get_api_admin_page(self, query) -> None:
+        page = query.get("page", [""])[0]
+        data = self.deps.admin_users_data() if page == "users" else self.admin_pages.page_data(page, query)
+        if data is None:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        self.json_response({**data, "tabs": [{"key": key, "href": href, "label": label} for key, href, label in queue_admin_views.ADMIN_TABS]})
 
     def _get_admin_groups(self, query) -> None:
         self.page_response("groups")
@@ -2076,12 +2084,12 @@ class QueueHTTPHandlerMixin:
         "/admin/error": _get_admin_error,
         "/admin/contacts": _get_admin_contacts,
         "/admin/audit": _get_admin_audit,
-        "/admin/analytics": _get_admin_analytics,
         "/admin/manager": _get_admin_manager,
         "/admin/api-keys": _get_admin_api_keys,
         "/admin/tickets-export.csv": _get_admin_tickets_export,
         "/admin/system": _get_admin_system,
         "/api/admin/contact-search": _get_api_admin_contact_search,
+        "/api/admin-page": _get_api_admin_page,
         "/admin/groups": _get_admin_groups,
         "/admin/whatsapp": _get_to_admin_home,
         "/api/admin/connector-state": _get_connector_state,

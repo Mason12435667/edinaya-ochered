@@ -164,3 +164,49 @@ class TicketPageDataTests(unittest.TestCase):
 
     def test_data_requires_sign_in(self):
         self.assertIn(get("/api/ticket-page?id=1").status, (302, 303, 401))
+
+
+ADMIN_PAGES = ("home", "users", "employees", "manual", "menu", "categories", "errors", "error", "contacts", "audit", "manager", "system")
+
+
+class AdminPagesTests(unittest.TestCase):
+    def test_admin_addresses_are_the_static_page(self):
+        body = (PAGES / "admin.html").read_bytes()
+        for path in ("/admin/", "/admin", "/admin/users", "/admin/system", "/admin/error?id=1"):
+            with self.subTest(path=path):
+                self.assertEqual(get(path, admin_cookie()).body, body)
+
+    def test_employee_is_kept_out(self):
+        cookie = second_user_cookie()
+        for path in ("/admin/users", "/api/admin-page?page=users", "/api/admin-page?page=system"):
+            with self.subTest(path=path):
+                response = get(path, cookie)
+                self.assertNotEqual(response.status, 200)
+                self.assertNotIn("session_hash", response.text)
+
+    def test_anonymous_is_kept_out(self):
+        self.assertNotEqual(get("/api/admin-page?page=users").status, 200)
+
+    def test_every_page_has_data_and_tabs(self):
+        for page in ADMIN_PAGES:
+            with self.subTest(page=page):
+                data = get(f"/api/admin-page?page={page}", admin_cookie()).json()
+                self.assertTrue(data["title"])
+                self.assertIn("users", [tab["key"] for tab in data["tabs"]])
+
+    def test_unknown_page(self):
+        self.assertEqual(get("/api/admin-page?page=nope", admin_cookie()).status, 404)
+
+    def test_data_holds_no_markup(self):
+        for page in ADMIN_PAGES:
+            with self.subTest(page=page):
+                self.assertNotRegex(get(f"/api/admin-page?page={page}", admin_cookie()).text, r"<(tr|td|form|option|section|div)[ >]")
+
+    def test_templates_are_served_but_not_outside_the_folder(self):
+        self.assertEqual(get("/static/admin/home.html").status, 200)
+        self.assertEqual(get("/static/admin/../app.js").status, 404)
+        self.assertEqual(get("/static/admin/nope.html").status, 404)
+
+    def test_missing_error_report(self):
+        self.assertFalse(get("/api/admin-page?page=error&id=999999", admin_cookie()).json()["found"])
+

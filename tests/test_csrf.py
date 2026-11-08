@@ -14,10 +14,7 @@ from tests import support
 from tests.support import WhatsAppUser, admin_cookie, csrf_token, get, post_form
 
 PAGES = [
-    "/admin/", "/admin/users", "/admin/employees", "/admin/manual", "/admin/menu", "/admin/categories",
-    "/admin/errors", "/admin/contacts", "/admin/audit", "/admin/analytics", "/admin/manager",
-    "/admin/api-keys", "/admin/system", "/admin/reliability", "/admin/workflow",
-    "/admin/backups", "/admin/shift",
+    "/admin/api-keys", "/admin/reliability", "/admin/workflow", "/admin/backups", "/admin/shift",
 ]
 
 

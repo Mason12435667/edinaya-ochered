@@ -22,7 +22,7 @@ MAIN_SCRIPTS = (
     "chat-layout.js", "performance.js", "attachments.js", "account.js",
 )
 # Scripts of the static pages in frontend/pages.
-PAGE_SCRIPTS = ("shell.js", "groups-page.js", "ticket-render.js", "dashboard-page.js", "ticket-page.js")
+PAGE_SCRIPTS = ("shell.js", "groups-page.js", "ticket-render.js", "dashboard-page.js", "ticket-page.js", "admin-page.js")
 
 
 class TicketViews:

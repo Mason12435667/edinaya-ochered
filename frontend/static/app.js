@@ -281,7 +281,7 @@ window.QueueVoice = (() => {
         if (!response.ok) throw new Error("Не удалось выполнить поиск");
         const data = await response.json();
         if (requestId !== contactRequest) return;
-        contactSearchResults.innerHTML = data.rows_html || "";
+        contactSearchResults.innerHTML = window.QueueAdmin.contactRows(data.rows);
         const params = new URLSearchParams(window.location.search);
         if (q) params.set("q", q); else params.delete("q");
         const query = params.toString();

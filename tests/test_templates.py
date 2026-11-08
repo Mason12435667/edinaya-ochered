@@ -27,7 +27,7 @@ def placeholders(name):
 class TemplateTests(unittest.TestCase):
     def test_every_call_passes_exactly_the_values_its_template_uses(self):
         calls = list(template_calls())
-        self.assertGreater(len(calls), 30)
+        self.assertGreater(len(calls), 15)
         for filename, call in calls:
             name = call.args[0].value
             with self.subTest(template=name, file=filename):

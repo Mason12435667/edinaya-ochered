@@ -1116,11 +1116,8 @@ def render_account(query: dict[str, list[str]]) -> str:
     return queue_auth_views.render_account(query, user=queue_auth.current_user(), escape=e, csrf_token=csrf_token())
 
 
-def render_admin_users(query: dict[str, list[str]]) -> str:
-    return queue_admin_views.render_admin_users(
-        query, auth=AUTH, employees=EMPLOYEES, csrf_token=csrf_token(),
-        escape=e, human_time=human_time, admin_layout_func=admin_layout,
-    )
+def admin_users_data() -> dict[str, object]:
+    return queue_admin_views.admin_users_data(auth=AUTH, employees=EMPLOYEES, human_time=human_time)
 
 
 def admin_tabs(active: str) -> str:
@@ -1250,7 +1247,7 @@ UPLOAD_ROUTES = queue_uploads.UploadRoutes(UPLOADS, work_actor)
 ADMIN_PAGES = AdminPages(AdminPageDependencies(
     store=STORE, auth=AUTH, menu=MENU, menu_config=MENU_CONFIG, contacts=CONTACTS, tickets=TICKET_SERVICE,
     reporting=REPORTING, runtime=RUNTIME, avatars=AVATARS, employees=EMPLOYEES, max_employees=MAX_EMPLOYEES,
-    local_mode=LOCAL_MODE, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, csrf_token=csrf_token, admin_layout=admin_layout,
+    local_mode=LOCAL_MODE, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE, csrf_token=csrf_token, admin_layout=admin_layout, categories=CATEGORIES,
 ))
 HTTP_DEPENDENCIES = queue_http_handler.HttpDependencies(
     store=STORE, auth=AUTH, root=ROOT, media_dir=MEDIA_DIR, monitor_log_path=MONITOR_LOG_PATH, avatars=AVATARS,
@@ -1261,7 +1258,7 @@ HTTP_DEPENDENCIES = queue_http_handler.HttpDependencies(
     admin_session_max_age=ADMIN_SESSION_MAX_AGE, auth_session_cookie=AUTH_SESSION_COOKIE,
     auth_session_max_age=AUTH_SESSION_MAX_AGE, csrf_token=csrf_token, csrf_token_valid=csrf_token_valid,
     render_login=render_login, render_register=render_register, render_forgot_password=render_forgot_password,
-    render_local_setup=render_local_setup, render_account=render_account, render_admin_users=render_admin_users,
+    render_local_setup=render_local_setup, render_account=render_account, admin_users_data=admin_users_data,
     final_ticket_filter=_final_ticket_filter, update_ticket_status=update_ticket_status,
     set_chat_favorite=set_chat_favorite, create_scheduled_backup=create_scheduled_backup,
 )

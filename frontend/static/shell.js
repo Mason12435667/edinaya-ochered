@@ -7,6 +7,14 @@
   // scripts after it must already listen for the answer: with deferred scripts they
   // all run before any response arrives. Waiting for the context asynchronously and
   // loading them afterwards loses that order.
+  function getText(url) {
+    const request = new XMLHttpRequest();
+    request.open("GET", url, false);
+    request.send();
+    if (request.status !== 200) throw new Error(`Не загрузился ${url}`);
+    return request.responseText;
+  }
+
   function getJson(url) {
     const request = new XMLHttpRequest();
     request.open("GET", url, false);
@@ -83,6 +91,6 @@
 
   const context = getJson("/api/page-context");
   if (!context) return;
-  window.queuePage = Object.freeze({context, getJson, escapeHtml});
+  window.queuePage = Object.freeze({context, getJson, getText, escapeHtml});
   drawFrame(context);
 })();

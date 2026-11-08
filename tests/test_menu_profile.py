@@ -78,10 +78,10 @@ class AdminCategoriesTests(unittest.TestCase):
         app.apply_bot_profile(qgp.save_profile(app.STORE, self.original))
 
     def test_page_shows_the_stored_profile(self):
-        page = get("/admin/categories", self.cookie)
-        self.assertEqual(page.status, 200)
+        self.assertEqual(get("/admin/categories", self.cookie).status, 200)
+        data = get("/api/admin-page?page=categories", self.cookie).text
         for row in self.original["categories"]:
-            self.assertIn(row["label_ru"], page.text)
+            self.assertIn(row["label_ru"], data)
 
     def test_edit_changes_the_bot_menu_immediately(self):
         changes = {"label_ru_2": "Принтеры и сканеры", "greeting_ru": "Здравствуйте, это ИТ-отдел"}
@@ -117,10 +117,11 @@ class AdminCategoriesTests(unittest.TestCase):
         self.assertEqual(app.CATEGORIES[key], self.original["categories"][1]["label_ru"])
 
     def test_new_category_from_the_page_reaches_the_bot(self):
-        # field names are taken from the rendered page, not from the test helper
-        page = get("/admin/categories", self.cookie).text
-        for name in ("label_ru_new", "number_new", "req_reference_new"):
-            self.assertIn(f'name="{name}"', page)
+        # field names are taken from the frontend, not from the test helper
+        template = get("/static/admin/category_editor_row.html").text
+        for name in ("label_ru_{{ suffix }}", "number_{{ suffix }}"):
+            self.assertIn(f'name="{name}"', template)
+        self.assertIn('name="req_${name}_', (Path(__file__).parents[1] / "frontend/static/admin-page.js").read_text(encoding="utf-8"))
         form = form_for(self.original, number_new="3", label_ru_new="Доступ к 1С", label_kz_new="1С қолжетімділігі")
         post_form("/admin/categories", form, self.cookie)
         self.assertIn("3. Доступ к 1С", WhatsAppUser().register_profile()["reply"])
