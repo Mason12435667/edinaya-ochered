@@ -44,6 +44,12 @@ class StaticPageTests(unittest.TestCase):
                 self.assertNotIn("{{", text)
                 self.assertIn('<meta name="queue-csrf" content="">', text)
 
+    def test_scripts_add_no_style_elements(self):
+        # The Content-Security-Policy has style-src 'self': the browser drops such elements.
+        for script in (PROJECT / "frontend" / "static").glob("*.js"):
+            with self.subTest(script=script.name):
+                self.assertNotRegex(script.read_text(encoding="utf-8"), r"createElement\(\s*['\"]style['\"]")
+
     def test_page_assets_are_served_in_the_layout_order(self):
         for page in PAGES.glob("*.html"):
             text = page.read_text(encoding="utf-8")

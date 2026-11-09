@@ -300,3 +300,18 @@ tbody tr { transition: background .14s ease; }
   .admin-flow-note { display: block; margin-top: 4px; text-align: left; }
   .admin-flow-message { font-size: 12.5px; padding: 10px; }
 }
+
+/* Compact chat banners and the forward toolbar. */
+.conversation-lock-banner { padding: 6px 10px !important; margin: 4px 0 !important; min-height: 0 !important; gap: 8px !important; align-items: center !important; }
+.conversation-lock-banner > div:first-child { display: flex !important; flex: 1 1 auto !important; flex-wrap: wrap !important; align-items: baseline !important; gap: 2px 9px !important; min-width: 0 !important; }
+.conversation-lock-banner > div:first-child strong, .conversation-lock-banner > div:first-child span { margin: 0 !important; line-height: 1.25 !important; }
+.conversation-lock-actions { display: flex !important; flex: 0 1 auto !important; flex-wrap: nowrap !important; align-items: center !important; gap: 6px !important; margin: 0 !important; }
+.conversation-lock-actions .lock-transfer-select { width: auto !important; max-width: min(240px, 32vw) !important; min-height: 32px !important; }
+.conversation-lock-actions .button { min-height: 32px !important; padding: 5px 10px !important; white-space: nowrap !important; }
+[data-forward-toolbar] { display: flex !important; flex-wrap: wrap !important; align-items: center !important; gap: 6px !important; padding: 6px 10px !important; min-height: 0 !important; overflow: visible !important; }
+.chat-forward-toolbar-repair > [data-forward-target], .chat-forward-toolbar-repair > [data-forward-cancel], .chat-forward-toolbar-repair > [data-forward-send] { display: inline-flex !important; visibility: visible !important; opacity: 1 !important; position: static !important; }
+[data-forward-toolbar][hidden] { display: none !important; }
+[data-forward-toolbar] [data-forward-count] { font-size: 12px !important; line-height: 1.2 !important; }
+[data-forward-toolbar] select, [data-forward-toolbar] button { min-height: 32px !important; padding: 5px 9px !important; }
+[data-forward-toolbar] select { max-width: min(300px, 48vw) !important; }
+@media (max-width: 700px) { .conversation-lock-banner { align-items: flex-start !important; flex-direction: column !important; } .conversation-lock-actions { width: 100% !important; flex-wrap: wrap !important; } .conversation-lock-actions .lock-transfer-select { flex: 1 1 160px !important; max-width: 100% !important; } }

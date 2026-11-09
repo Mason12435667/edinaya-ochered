@@ -25,8 +25,9 @@ async function waitForValue(read, timeoutMs, intervalMs = 50) {
 
 // Finds our message among recent rows of the WhatsApp message store. A sent
 // message may be stored under the @lid of a chat we addressed as @c.us, so a row
-// from an unknown @lid still counts. Two equal candidates cannot be told apart:
-// the answer is null and the send stays uncertain.
+// also counts when its @lid resolves to one of our addresses (row.phone). A row
+// that cannot be tied to this chat never counts: it may be another person's. Two
+// equal candidates cannot be told apart. In both cases the send stays uncertain.
 function findSentMessage(rows, {text, hasMedia = false, since, aliases, isKnown}) {
   const found = (rows || []).filter((row) => row && row.id && row.fromMe
     && Number(row.timestamp || 0) >= since
@@ -34,7 +35,7 @@ function findSentMessage(rows, {text, hasMedia = false, since, aliases, isKnown}
     && (text ? row.text === text : hasMedia)
     && !isKnown(row));
   const exact = found.filter((row) => aliases.has(row.remote));
-  const pool = exact.length ? exact : found.filter((row) => String(row.remote || '').endsWith('@lid'));
+  const pool = exact.length ? exact : found.filter((row) => aliases.has(row.phone));
   return pool.length === 1 ? pool[0] : null;
 }
 
@@ -90,6 +91,8 @@ async function resendAsForward({client, type, hasMedia, download, target, text, 
     if (!content) throw new Error('Не удалось загрузить вложение для пересылки');
     if (text) options.caption = text;
     if (type === 'document') options.sendMediaAsDocument = true;
+    if (type === 'ptt') options.sendAudioAsVoice = true;
+    if (type === 'sticker') options.sendMediaAsSticker = true;
   }
   if (!content) throw new Error('В сообщении нет текста для пересылки');
   return sendOnce({client, recipient: target, content, options, begin: async () => true, confirm});

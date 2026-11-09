@@ -17,7 +17,7 @@ const {
   runtime, cachedMessageObject, callRejectNoticeAt, chatIdAliases, client, inboundFloodState,
   incomingText, isBridgePressureError, lidToPhone, mediaDebug, messageAcknowledgements, messageText,
   normalizeMessageIdObject, postJson, rememberInternalOutgoingMessage, rememberMessageObject,
-  serializedId,
+  resolveDirectPhoneId, serializedId,
 } = require('./connector_common');
 const receiving = require('./connector_receive');
 const whatsappActions = require('./connector_actions');
@@ -202,7 +202,9 @@ async function confirmSentMessage(recipients, body, hasMedia, since) {
   }
   const text = normalizeAutoReplyBody138(body);
   const row = await delivery.waitForValue(async () => delivery.findSentMessage(
-    (await readOwnMessagesSince(since)).map((item) => ({...item, text: normalizeAutoReplyBody138(item.text)})),
+    await Promise.all((await readOwnMessagesSince(since)).map(async (item) => ({
+      ...item, text: normalizeAutoReplyBody138(item.text), phone: await resolveDirectPhoneId(item.remote),
+    }))),
     {text, hasMedia, since, aliases, isKnown: (item) => confirmedSentIds.has(item.id)},
   ), SENT_LOOKUP_TIMEOUT_MS, SENT_LOOKUP_INTERVAL_MS);
   if (!row) {
