@@ -112,12 +112,14 @@ test('findSentMessage finds a message stored under the @lid of a @c.us chat', ()
   const lookup = (extra = {}) => ({
     text: 'hi', since: 100, aliases: new Set(['1@c.us']), isKnown: () => false, ...extra,
   });
-  const row = {id: 'true_9@lid_A', fromMe: true, timestamp: 101, type: 'chat', text: 'hi', remote: '9@lid'};
+  const row = {id: 'true_9@lid_A', fromMe: true, timestamp: 101, type: 'chat', text: 'hi', remote: '9@lid', phone: '1@c.us'};
   const inChat = {...row, remote: '1@c.us'};
-  assert.equal(delivery.findSentMessage([row], lookup()), row, 'unknown @lid of the chat');
+  assert.equal(delivery.findSentMessage([row], lookup()), row, '@lid of the chat');
   assert.equal(delivery.findSentMessage([row, inChat], lookup()), inChat, 'a known address wins');
   assert.equal(delivery.findSentMessage([row, {...row, remote: '8@lid'}], lookup()), null, 'ambiguous');
-  assert.equal(delivery.findSentMessage([{...row, remote: '2@c.us'}], lookup()), null, 'another chat');
+  assert.equal(delivery.findSentMessage([{...row, remote: '2@c.us', phone: '2@c.us'}], lookup()), null, 'another chat');
+  assert.equal(delivery.findSentMessage([{...row, phone: '2@c.us'}], lookup()), null, '@lid of another chat');
+  assert.equal(delivery.findSentMessage([{...row, phone: ''}], lookup()), null, '@lid that cannot be tied to the chat');
   assert.equal(delivery.findSentMessage([{...row, timestamp: 99}], lookup()), null, 'too old');
   assert.equal(delivery.findSentMessage([{...row, text: 'other'}], lookup()), null, 'other text');
   assert.equal(delivery.findSentMessage([{...row, fromMe: false}], lookup()), null, 'not ours');
@@ -128,8 +130,9 @@ test('findSentMessage finds a message stored under the @lid of a @c.us chat', ()
 
 test('findSentMessage tells media from text', () => {
   const lookup = (extra = {}) => ({text: '', hasMedia: true, since: 100, aliases: new Set(['1@c.us']), isKnown: () => false, ...extra});
-  const photo = {id: 'true_9@lid_B', fromMe: true, timestamp: 101, type: 'image', text: '', remote: '9@lid'};
+  const photo = {id: 'true_9@lid_B', fromMe: true, timestamp: 101, type: 'image', text: '', remote: '9@lid', phone: '1@c.us'};
   assert.equal(delivery.findSentMessage([photo], lookup()), photo, 'no caption');
+  assert.equal(delivery.findSentMessage([{...photo, phone: '2@c.us'}], lookup()), null, 'a photo sent to another chat');
   assert.equal(delivery.findSentMessage([{...photo, text: 'cap'}], lookup({text: 'cap'})).type, 'image', 'caption');
   assert.equal(delivery.findSentMessage([{...photo, type: 'chat'}], lookup()), null, 'text is not media');
   assert.equal(delivery.findSentMessage([photo], lookup({text: 'cap'})), null, 'other caption');
@@ -163,6 +166,15 @@ test('media is downloaded and resent with its caption', async () => {
   assert.equal(sent[0].options.caption, 'cap');
   assert.equal(sent[0].options.sendMediaAsDocument, true);
 });
+
+for (const [type, option] of [['ptt', 'sendAudioAsVoice'], ['sticker', 'sendMediaAsSticker']]) {
+  test(`a resent ${type} keeps its kind`, async () => {
+    const sent = [];
+    const client = fakeClient((target, content, options) => { sent.push(options); return {id: 'ok'}; });
+    await delivery.resendAsForward({client, hasMedia: true, type, download: async () => ({}), target: 'a@c.us', text: ''});
+    assert.equal(sent[0][option], true);
+  });
+}
 
 test('nothing is sent when there is no content to forward', async () => {
   const client = fakeClient(() => ({id: 'ok'}));

@@ -240,6 +240,13 @@ def merge_chat_alias_rows(store: TicketStore, state: dict[str, object]) -> None:
 
 
 class QueueHTTPHandlerMixin:
+    def handle_one_request(self) -> None:
+        # A browser leaving the page closes its pending long poll: not a server error.
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
+
     def end_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")

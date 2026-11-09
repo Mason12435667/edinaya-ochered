@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 import queue_core
+import queue_http_handler
 
 
 def fail(where: str, error: Exception) -> None:
@@ -44,6 +45,31 @@ class LogSuppressedTests(unittest.TestCase):
             fail("tests.a", TypeError())
             fail("tests.b", ValueError())
         self.assertEqual(len(logs.records), 3)
+
+
+class ClientDisconnectTests(unittest.TestCase):
+    @staticmethod
+    def handler_raising(error: Exception):
+        class Base:
+            def handle_one_request(self):
+                raise error
+
+        class Handler(queue_http_handler.QueueHTTPHandlerMixin, Base):
+            close_connection = False
+
+        return Handler()
+
+    def test_client_leaving_only_closes_the_connection(self):
+        for error in (BrokenPipeError(), ConnectionResetError(), ConnectionAbortedError()):
+            with self.subTest(type(error).__name__):
+                handler = self.handler_raising(error)
+                handler.handle_one_request()
+                self.assertTrue(handler.close_connection)
+
+    def test_other_errors_still_reach_the_log(self):
+        for error in (ValueError("boom"), ConnectionRefusedError()):
+            with self.subTest(type(error).__name__), self.assertRaises(type(error)):
+                self.handler_raising(error).handle_one_request()
 
 
 if __name__ == "__main__":
