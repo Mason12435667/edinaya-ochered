@@ -928,6 +928,10 @@ class QueueHTTPHandlerMixin:
     def _get_connector_state(self, query) -> None:
         self.json_response(self.chat_views.connector.snapshot())
 
+    def _get_health_connector(self, query) -> None:
+        # Open without signing in: whoever scans the QR code links a phone to the work WhatsApp.
+        self.json_response({**self.chat_views.connector.snapshot(), "qr_data_url": ""})
+
     def _get_health(self, query) -> None:
         self.json_response({"status": "ok"})
 
@@ -2158,7 +2162,7 @@ class QueueHTTPHandlerMixin:
         "/api/conversation-users": _get_api_conversation_users,
         "/api/chat-media": _get_api_chat_media,
         "/favicon.ico": _get_favicon,
-        "/health/connector": _get_connector_state,
+        "/health/connector": _get_health_connector,
         "/health": _get_health,
     }
 

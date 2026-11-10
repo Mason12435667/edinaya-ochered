@@ -366,14 +366,10 @@ async function sendAutomaticReplyNow138(recipients, result) {
     return null;
   }
 
-  // Menu navigation and language selection are explicit user actions. They must
-  // get one response for every distinct inbound message, even when the reply text
-  // is identical to something sent a few seconds ago.
-  const sourceMenuChoice = String(result._source_menu_choice138 || '').trim();
-  const explicitMenuNavigation = /^[0-8]$/.test(sourceMenuChoice);
-  const explicitLanguageFlow = Boolean(result.language_required);
-  const explicitDraftFinish = Boolean(result._source_finish_command138);
-  const priorityInteraction = explicitMenuNavigation || explicitLanguageFlow || explicitDraftFinish;
+  // Menu navigation, a language digit and the finish command are explicit user
+  // actions. They must get one response for every distinct inbound message, even
+  // when the reply text is identical to something sent a few seconds ago.
+  const priorityInteraction = delivery.isDeliberateStep(result._source_menu_choice138, result._source_finish_command138);
 
   const missingSignature = Array.isArray(result.missing_fields)
     ? result.missing_fields.map((value) => String(value || '').trim()).filter(Boolean).sort().join(',')
@@ -461,7 +457,7 @@ async function sendAutomaticReplyNow138(recipients, result) {
         ? `${distinctReminderText}\n\n${plainMenuText}`
         : plainMenuText;
       const textMessage = await sendToUser(targets, combinedText);
-      const textChatId = serializedId(textMessage && textMessage.to) || primaryTarget;
+      const textChatId = delivery.replyChatId(primaryTarget, serializedId(textMessage && textMessage.to));
       await receiving.publishLiveMessage(textChatId, 'Система', textMessage, true, combinedText).catch(() => {});
       result.delivered_reply = combinedText;
       autoReplyCooldowns.set(cooldownKey, Date.now());
@@ -472,7 +468,7 @@ async function sendAutomaticReplyNow138(recipients, result) {
 
     const deliveredReply = String(result.reply);
     const textMessage = await sendToUser(targets, deliveredReply);
-    const replyChatId = serializedId(textMessage && textMessage.to) || primaryTarget;
+    const replyChatId = delivery.replyChatId(primaryTarget, serializedId(textMessage && textMessage.to));
     await receiving.publishLiveMessage(replyChatId, 'Система', textMessage, true, deliveredReply).catch(() => {});
     result.delivered_reply = deliveredReply;
     if (cooldown) autoReplyCooldowns.set(cooldownKey, Date.now());

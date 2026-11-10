@@ -39,6 +39,21 @@ function findSentMessage(rows, {text, hasMedia = false, since, aliases, isKnown}
   return pool.length === 1 ? pool[0] : null;
 }
 
+// The chat an automatic reply is saved under. WhatsApp Web may report the sent
+// message under an @lid the server has never seen. Saved there, the reply lands in
+// a separate chat and the user's own chat looks unanswered.
+function replyChatId(addressed, sentTo) {
+  if (String(addressed || '').endsWith('@c.us')) return addressed;
+  return sentTo || addressed;
+}
+
+// A menu digit or the finish command is a deliberate step and always gets its
+// answer. Free text is not: until a language is chosen, every message would
+// otherwise get the same greeting again.
+function isDeliberateStep(menuChoice, finishCommand) {
+  return /^[0-8]$/.test(String(menuChoice || '').trim()) || Boolean(finishCommand);
+}
+
 // confirm(target) is asked when whatsapp-web.js returned nothing: the message may
 // already be in the chat. It only looks for the message and never sends again.
 async function sendOnce({client, recipient, aliases = [], content, options = {}, begin, confirm}) {
@@ -131,4 +146,4 @@ function editError(result) {
   return reasons[result && result.reason] || 'Не удалось изменить сообщение в WhatsApp';
 }
 
-module.exports = {isForwardUnavailable, resendAsForward, waitForValue, findSentMessage, sendOnce, editInPage, editError, PRE_SEND_ERROR};
+module.exports = {replyChatId, isDeliberateStep, isForwardUnavailable, resendAsForward, waitForValue, findSentMessage, sendOnce, editInPage, editError, PRE_SEND_ERROR};
