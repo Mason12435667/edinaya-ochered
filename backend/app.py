@@ -1290,6 +1290,7 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
     def do_POST(self):
         if self._generic_domain_path():
             self.send_error(HTTPStatus.NOT_FOUND)
+            self.discard_unread_body()
             return
         return super().do_POST()
 
