@@ -79,6 +79,17 @@ class AccessTests(FlowTestCase):
         for _ in range(300):
             self.assertIn(post_form("/admin/workflow", {"field": "x" * 2000}).status, (302, 303))
 
+    def test_refusals_that_never_read_the_body_are_answered_too(self):
+        refusals = (
+            ("/register", {}, 403),  # self-registration is off
+            ("/api/chat-read", {"Host": "evil.example.com"}, 421),
+        )
+        for path, headers, status in refusals:
+            with self.subTest(path=path):
+                for _ in range(300):
+                    response = support.request("POST", path, b"x" * 2000, {"Content-Type": "application/octet-stream", **headers})
+                    self.assertEqual(response.status, status)
+
     def test_missing_csrf_token_is_refused(self):
         for path in self.MUTATIONS:
             with self.subTest(path=path):

@@ -85,6 +85,33 @@ STATIC_FILES = {
 
 # Largest request body read just to refuse it; anything bigger is left unread.
 MAX_UNREAD_BODY = 64 * 1024
+UNREAD_BODY_SECONDS = 2
+
+
+class _CountedBody:
+    """The request body stream, counting what the routes have read from it."""
+
+    def __init__(self, raw):
+        self.raw = raw
+        self.count = 0
+
+    def read(self, size=-1):
+        data = self.raw.read(size)
+        self.count += len(data)
+        return data
+
+    def readline(self, size=-1):
+        data = self.raw.readline(size)
+        self.count += len(data)
+        return data
+
+    def readinto(self, buffer):
+        size = self.raw.readinto(buffer) or 0
+        self.count += size
+        return size
+
+    def __getattr__(self, name):
+        return getattr(self.raw, name)
 
 # The bookmarks live in existing app_settings; no new SQLite schema or media changes.
 _BOOKMARKS_LOCK = threading.RLock()
@@ -422,8 +449,6 @@ class QueueHTTPHandlerMixin:
             target = quote(self.path if self.path.startswith("/") else "/")
             self.redirect(f"/login?next={target}")
             return False
-        # Closing with the body unread resets the connection before the client reads this answer.
-        self.read_body(MAX_UNREAD_BODY)
         if self.path.startswith("/api/") or self.headers.get("X-Requested-With") == "fetch" or self.path.startswith("/chat"):
             self.json_response({"error": "authentication_required"}, HTTPStatus.UNAUTHORIZED)
         else:
@@ -1020,6 +1045,31 @@ class QueueHTTPHandlerMixin:
         self.redirect("/admin/")
 
     def do_POST(self) -> None:
+        body = _CountedBody(self.rfile)
+        self.rfile = body
+        try:
+            self._route_post()
+        finally:
+            self.rfile = body.raw
+            self.discard_unread_body(body.count)
+
+    def discard_unread_body(self, consumed: int = 0) -> None:
+        """Read what a refusing route left of the request body. Closing with it unread
+        resets the connection before the client reads the answer."""
+        try:
+            left = int(self.headers.get("Content-Length", "0")) - consumed
+            if 0 < left <= MAX_UNREAD_BODY:
+                # the answer is already sent: never wait long for bytes that may not come
+                waited = self.connection.gettimeout()
+                self.connection.settimeout(UNREAD_BODY_SECONDS)
+                try:
+                    self.rfile.read(left)
+                finally:
+                    self.connection.settimeout(waited)
+        except (ValueError, OSError):
+            pass
+
+    def _route_post(self) -> None:
         queue_auth.clear_current_user()
         self._body_cache = None
         if not self.request_host_allowed():
