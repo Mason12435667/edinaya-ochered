@@ -397,23 +397,25 @@ async function forwardByResend(message, target, actor) {
   const type = String(message.type || '');
   const hasMedia = Boolean(message.hasMedia) || ['image', 'video', 'audio', 'ptt', 'document', 'sticker'].includes(type);
   const since = sending.sendStartSeconds();
+  let media = null;
   const outcome = await delivery.resendAsForward({
     client, type, hasMedia, target, text,
-    download: () => downloadForResend(message),
+    download: async () => (media = await downloadForResend(message)),
     confirm: () => sending.confirmSentMessage([target], text, hasMedia, since),
   });
   if (outcome.status !== 'sent') throw new Error(outcome.error);
   rememberForwardedMessage(outcome.message);
-  if (hasMedia) return; // reserve sync saves it together with the attachment
-  const id = rememberInternalOutgoingMessage(outcome.message);
-  await postJson('/api/chat-messages-sync', {
-    chat_id: target,
-    append: true,
-    messages: [{
-      id, from_me: true, sender: actor, body: text, type: 'chat', ack: 1, notify: false, forwarded: true,
-      timestamp: Number(outcome.message.timestamp || Math.floor(Date.now() / 1000)),
-    }],
+  const item = delivery.forwardedCopyItem({
+    id: normalizeMessageIdObject(outcome.message) || serializedId(outcome.message.id),
+    actor, body: text || (hasMedia ? messageText({type, mimetype: media && media.mimetype}) : ''),
+    type: hasMedia ? type : 'chat', timestamp: outcome.message.timestamp, media,
   });
+  const saved = await delivery.savedAfterSend(
+    () => postJson('/api/chat-messages-sync', {chat_id: target, append: true, messages: [item]}),
+    (error) => console.warn('Пересланная копия отправлена, но не сохранена в истории:', (error && error.message) || error),
+  );
+  // Unsaved, the copy stays visible to the reserve sync, which saves it later.
+  if (saved) rememberInternalOutgoingMessage(outcome.message);
 }
 
 async function deleteMessageReliably(messageKey, chatId, hint, initialMessage) {
