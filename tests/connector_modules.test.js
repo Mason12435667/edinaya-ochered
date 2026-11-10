@@ -139,6 +139,21 @@ test('findSentMessage tells media from text', () => {
   assert.equal(delivery.findSentMessage([photo], lookup({text: 'hi', hasMedia: false})), null, 'media is not text');
 });
 
+test('an automatic reply is saved under the chat it was addressed to', () => {
+  assert.equal(delivery.replyChatId('1@c.us', '9@lid'), '1@c.us', 'WhatsApp reported an unknown @lid');
+  assert.equal(delivery.replyChatId('1@c.us', ''), '1@c.us');
+  assert.equal(delivery.replyChatId('9@lid', '1@c.us'), '1@c.us', 'the phone was learned from the sent message');
+  assert.equal(delivery.replyChatId('9@lid', ''), '9@lid');
+});
+
+test('only a digit or the finish command bypasses the repeat protection', () => {
+  assert.equal(delivery.isDeliberateStep('1', false), true);
+  assert.equal(delivery.isDeliberateStep('', true), true);
+  assert.equal(delivery.isDeliberateStep('', false), false, 'free text before a language is chosen');
+  assert.equal(delivery.isDeliberateStep('9', false), false);
+  assert.equal(delivery.isDeliberateStep(undefined, undefined), false);
+});
+
 test('only a missing forward module allows a resend', () => {
   assert.ok(delivery.isForwardUnavailable(new Error("Cannot read properties of undefined (reading 'forwardMessages')")));
   assert.equal(delivery.isForwardUnavailable(new Error('Protocol error: Target closed')), false);

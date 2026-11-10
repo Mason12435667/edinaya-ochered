@@ -344,11 +344,20 @@ class ConnectorStateTests(ChatStateTestCase):
         state = self.health()
         self.assertEqual((state["connected"], state["status"]), (True, "ready"))
 
+    def admin_state(self):
+        return get("/api/admin/connector-state", self.cookie).json()
+
     def test_qr_code_is_returned_only_while_waiting_for_a_scan(self):
         self.live(connected=False, connector_status="qr", qr_data_url="data:image/png;base64,AA", updated_at="")
-        self.assertEqual(self.health()["qr_data_url"], "data:image/png;base64,AA")
+        self.assertEqual(self.admin_state()["qr_data_url"], "data:image/png;base64,AA")
         self.live(connector_status="ready", updated_at=seconds_ago(1))
-        self.assertEqual(self.health()["qr_data_url"], "")
+        self.assertEqual(self.admin_state()["qr_data_url"], "")
+
+    def test_qr_code_is_not_shown_without_signing_in(self):
+        self.live(connected=False, connector_status="qr", qr_data_url="data:image/png;base64,AA", updated_at="")
+        state = self.health()
+        self.assertEqual((state["status"], state["qr_data_url"]), ("qr", ""))
+        self.assertIn(get("/api/admin/connector-state").status, (302, 303, 401, 403))
 
 
 class NotificationTests(ChatStateTestCase):
