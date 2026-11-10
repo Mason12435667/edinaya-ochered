@@ -113,6 +113,34 @@ async function resendAsForward({client, type, hasMedia, download, target, text, 
   return sendOnce({client, recipient: target, content, options, begin: async () => true, confirm});
 }
 
+// The chat-history record of a copy sent by resendAsForward(). It is built from
+// what was sent, not from a later WhatsApp event: that event can be taken for
+// another message of ours and skipped, and the copy would never reach the site.
+function forwardedCopyItem({id, actor, body, type, timestamp, media}) {
+  const item = {
+    id, from_me: true, sender: actor, body: String(body || ''), type: type || 'chat', ack: 1, notify: false,
+    forwarded: true, timestamp: Number(timestamp || Math.floor(Date.now() / 1000)),
+  };
+  if (media && media.data) {
+    item.media_mime = String(media.mimetype || '').slice(0, 120);
+    item.media_name = String(media.filename || `WhatsApp ${item.type}`).slice(0, 180);
+    item.media_base64 = String(media.data);
+  }
+  return item;
+}
+
+// Runs save() for a message that has already left. A failure is reported and
+// swallowed: failing the action would make the employee send the message again.
+async function savedAfterSend(save, report) {
+  try {
+    await save();
+    return true;
+  } catch (error) {
+    report(error);
+    return false;
+  }
+}
+
 // Runs inside the WhatsApp Web page (client.pupPage.evaluate), so it may only use
 // browser globals. Mirrors whatsapp-web.js Message.edit() with feature checks.
 async function editInPage(messageKey, body, aliases) {
@@ -146,4 +174,4 @@ function editError(result) {
   return reasons[result && result.reason] || 'Не удалось изменить сообщение в WhatsApp';
 }
 
-module.exports = {replyChatId, isDeliberateStep, isForwardUnavailable, resendAsForward, waitForValue, findSentMessage, sendOnce, editInPage, editError, PRE_SEND_ERROR};
+module.exports = {forwardedCopyItem, savedAfterSend, replyChatId, isDeliberateStep, isForwardUnavailable, resendAsForward, waitForValue, findSentMessage, sendOnce, editInPage, editError, PRE_SEND_ERROR};

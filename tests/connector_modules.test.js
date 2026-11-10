@@ -154,6 +154,29 @@ test('only a digit or the finish command bypasses the repeat protection', () => 
   assert.equal(delivery.isDeliberateStep(undefined, undefined), false);
 });
 
+test('a forwarded copy is recorded with its attachment', () => {
+  const text = delivery.forwardedCopyItem({id: 'true_1@c.us_A', actor: 'Анна', body: 'hi', timestamp: 50});
+  assert.deepEqual(text, {
+    id: 'true_1@c.us_A', from_me: true, sender: 'Анна', body: 'hi', type: 'chat', ack: 1, notify: false,
+    forwarded: true, timestamp: 50,
+  });
+  const photo = delivery.forwardedCopyItem({
+    id: 'true_1@c.us_B', actor: 'Анна', body: '', type: 'image', timestamp: 51,
+    media: {mimetype: 'image/png', data: 'QUJD', filename: ''},
+  });
+  assert.equal(photo.media_base64, 'QUJD');
+  assert.equal(photo.media_mime, 'image/png');
+  assert.equal(photo.media_name, 'WhatsApp image');
+  assert.equal(photo.forwarded, true);
+});
+
+test('a failure to save a sent message is reported but does not fail the action', async () => {
+  const reported = [];
+  assert.equal(await delivery.savedAfterSend(async () => {}, (error) => reported.push(error)), true);
+  assert.equal(await delivery.savedAfterSend(async () => { throw new Error('HTTP 503'); }, (error) => reported.push(error.message)), false);
+  assert.deepEqual(reported, ['HTTP 503']);
+});
+
 test('only a missing forward module allows a resend', () => {
   assert.ok(delivery.isForwardUnavailable(new Error("Cannot read properties of undefined (reading 'forwardMessages')")));
   assert.equal(delivery.isForwardUnavailable(new Error('Protocol error: Target closed')), false);
