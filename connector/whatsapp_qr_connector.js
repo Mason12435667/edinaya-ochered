@@ -1,7 +1,8 @@
 'use strict';
 // WhatsApp-коннектор, точка входа. Подключает части и запускает WhatsApp Web:
 // connector_common.js — общая основа, connector_send.js — отправка, connector_receive.js — приём,
-// connector_sync.js — синхронизация, connector_actions.js — удаление и пересылка,
+// connector_media.js — вложения, connector_calls.js — звонки, connector_recovery.js — пропущенные
+// входящие, connector_sync.js — синхронизация, connector_actions.js — удаление и пересылка,
 // connector_lifecycle.js — запуск, состояние и завершение.
 
 const {
@@ -11,6 +12,9 @@ const syncing = require('./connector_sync');
 const lifecycle = require('./connector_lifecycle');
 require('./connector_send');
 require('./connector_receive');
+require('./connector_media');
+require('./connector_calls');
+require('./connector_recovery');
 require('./connector_actions');
 
 process.on('SIGINT', () => { void lifecycle.gracefulShutdown('SIGINT'); });

@@ -17,6 +17,8 @@ const {
   rememberMessageObject, resolveDirectPhoneId, resolveGroupSenderInfo, safeWhatsAppBody, serializedId,
 } = require('./connector_common');
 const receiving = require('./connector_receive');
+const downloading = require('./connector_media');
+const recovering = require('./connector_recovery');
 
 let heartbeatErrorReported = false;
 let lastGroupRefreshRequest = '';
@@ -806,10 +808,10 @@ async function retryOutgoingMediaProbe() {
               };
           item.sender = 'Рабочий WhatsApp';
 
-          if (message) await receiving.attachMediaToItem(message, item);
+          if (message) await downloading.attachMediaToItem(message, item);
           if (!item.media_base64 && !item.media_too_large) {
-            const direct = await receiving.downloadMediaDirectById(messageId);
-            receiving.applyMediaResult(item, direct, message || { type: messageType });
+            const direct = await downloading.downloadMediaDirectById(messageId);
+            downloading.applyMediaResult(item, direct, message || { type: messageType });
           }
 
           if (item.media_base64 || item.media_too_large) {
@@ -870,7 +872,7 @@ async function runFastSync() {
   runtime.fastSyncBusy = true;
   try {
     // Critical lane: missed inbound messages always go first.
-    await receiving.reconcileRecentInbound();
+    await recovering.reconcileRecentInbound();
 
     // Optional/background lane.
     if (!backgroundWorkAllowed()) return;
@@ -884,7 +886,7 @@ async function runFastSync() {
 
     if (now - lastMediaRecoveryAt >= BACKGROUND_MEDIA_INTERVAL_MS) {
       lastMediaRecoveryAt = now;
-      await receiving.retryPendingMedia();
+      await downloading.retryPendingMedia();
       if (!backgroundWorkAllowed()) return;
       await retryOutgoingMediaProbe();
     }

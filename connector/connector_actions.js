@@ -13,7 +13,7 @@ const {
   rememberMessageObject, serializedId,
 } = require('./connector_common');
 const sending = require('./connector_send');
-const receiving = require('./connector_receive');
+const downloading = require('./connector_media');
 
 function messageMatchesActionHint(message, hint) {
   if (!message || !hint || typeof hint !== 'object') return false;
@@ -392,7 +392,7 @@ const RESEND_DOWNLOAD_PAUSE_MS = 2000;
 async function downloadForResend(message) {
   const id = normalizeMessageIdObject(message);
   const media = await delivery.retried(async () => {
-    const found = await receiving.downloadMediaDirectById(id, RESEND_DOWNLOAD_MS)
+    const found = await downloading.downloadMediaDirectById(id, RESEND_DOWNLOAD_MS)
       || await Promise.resolve().then(() => message.downloadMedia()).catch(() => null);
     return found && found.data ? found : null;
   }, RESEND_DOWNLOAD_ATTEMPTS, RESEND_DOWNLOAD_PAUSE_MS);

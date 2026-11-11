@@ -315,6 +315,7 @@ const internalOutgoingStanzaIds = new Map();
 // не только для события message_create, но и для резервной проверки коллекции
 // WhatsApp Web, если браузер пропустил live-событие.
 const reconciledOutgoingIds = new Map();
+const reconciledInboundIds = new Map();
 // WhatsApp обычно помечает пересланные сообщения через isForwarded/forwardingScore.
 // Для сообщений, пересланных прямо из «Единой очереди», дополнительно запоминаем
 // точный ID результата forward(), чтобы метка «Переслано» не потерялась даже
@@ -758,7 +759,7 @@ module.exports = {
   messageMentionIds, messageText, normalizeMessageIdObject, noteBrowserPressure,
   noteHotInboundPriority, outgoingMediaProbe, ownMentionIds, participantDisplayById,
   pendingMediaMessages, persistedAcknowledgements, postJson, postJsonOnce, postJsonWithRetry,
-  prettyPhoneFromId, recentMessageObjects, reconciledOutgoingIds, rememberForwardedMessage,
+  prettyPhoneFromId, recentMessageObjects, reconciledInboundIds, reconciledOutgoingIds, rememberForwardedMessage,
   rememberInternalOutgoingMessage, rememberMessageObject, resolveDirectPhoneId,
   resolveGroupSenderInfo, resolveMentionPresentation, resolveParticipantIdentity, resolvePhoneId,
   runtime, safeWhatsAppBody, serializedId,

@@ -15,7 +15,7 @@ const {
   postJson,
 } = require('./connector_common');
 const sending = require('./connector_send');
-const receiving = require('./connector_receive');
+const calling = require('./connector_calls');
 const syncing = require('./connector_sync');
 
 let outboundTimer = null;
@@ -122,7 +122,7 @@ async function restartAfterStuckBridge(reason) {
   if (performanceTimer) clearInterval(performanceTimer);
   if (bridgeWatchdogTimer) clearInterval(bridgeWatchdogTimer);
   stopReadyFallback();
-  receiving.stopIncomingCallPolling();
+  calling.stopIncomingCallPolling();
   try {
     await syncing.publishConnectorState('connecting');
   } catch (_) {}
@@ -253,7 +253,7 @@ async function activateConnector(source = 'ready') {
     setTimeout(() => { void checkBridgeHealth(); }, 3000);
   }
   setTimeout(() => {
-    if (!runtime.shutdownStarted && runtime.connectorOperational) receiving.startIncomingCallPolling();
+    if (!runtime.shutdownStarted && runtime.connectorOperational) calling.startIncomingCallPolling();
   }, STARTUP_LIVE_ONLY_MS + 3000);
 }
 
@@ -387,7 +387,7 @@ client.on('disconnected', (reason) => {
   bridgeFailureCount = 0;
   bridgeRecoveryStartedAt = 0;
   stopReadyFallback();
-  receiving.stopIncomingCallPolling();
+  calling.stopIncomingCallPolling();
   console.error('WhatsApp отключил сессию:', reason);
   console.error('Запусти коннектор снова и при необходимости отсканируй новый QR.');
   postJson('/api/chat-list-sync', { connected: false }).catch(() => {});
@@ -406,7 +406,7 @@ async function gracefulShutdown(signal) {
   if (performanceTimer) clearInterval(performanceTimer);
   if (bridgeWatchdogTimer) clearInterval(bridgeWatchdogTimer);
   stopReadyFallback();
-  receiving.stopIncomingCallPolling();
+  calling.stopIncomingCallPolling();
 
   const timeout = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   try {
