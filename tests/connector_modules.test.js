@@ -154,6 +154,33 @@ test('only a digit or the finish command bypasses the repeat protection', () => 
   assert.equal(delivery.isDeliberateStep(undefined, undefined), false);
 });
 
+test('a location is resent as a location, not as text', async () => {
+  const sent = [];
+  const client = fakeClient((target, content, options) => { sent.push({content, options}); return {id: 'ok'}; });
+  const location = {latitude: 43.2, longitude: 76.9};
+  const outcome = await delivery.resendAsForward({client, type: 'location', location, target: 'a@c.us', text: ''});
+  assert.equal(outcome.status, 'sent');
+  assert.equal(sent[0].content, location);
+  assert.deepEqual(sent[0].options, {extra: {isForwarded: true, forwardingScore: 1}});
+  await assert.rejects(delivery.resendAsForward({client, type: 'location', target: 'a@c.us', text: ''}), /координат/);
+  assert.equal(sent.length, 1);
+});
+
+test('several contacts in one message are refused with a clear reason', async () => {
+  const client = fakeClient(() => ({id: 'ok'}));
+  await assert.rejects(delivery.resendAsForward({client, type: 'multi_vcard', target: 'a@c.us', text: 'x'}), /по одному/);
+  assert.deepEqual(client.calls, []);
+});
+
+test('retried stops at the first result and gives up after the last attempt', async () => {
+  let calls = 0;
+  assert.equal(await delivery.retried(async () => (++calls === 2 ? 'media' : null), 3, 1), 'media');
+  assert.equal(calls, 2);
+  calls = 0;
+  assert.equal(await delivery.retried(async () => { calls += 1; return null; }, 3, 1), null);
+  assert.equal(calls, 3);
+});
+
 test('a forwarded copy is recorded with its attachment', () => {
   const text = delivery.forwardedCopyItem({id: 'true_1@c.us_A', actor: 'Анна', body: 'hi', timestamp: 50});
   assert.deepEqual(text, {

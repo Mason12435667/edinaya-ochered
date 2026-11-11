@@ -382,33 +382,44 @@ async function directForwardInWhatsApp(messageKey, sourceChatId, targetChatId, h
   }, String(messageKey || ''), aliases, String(targetChatId || ''), payload);
 }
 
+const RESEND_DOWNLOAD_MS = 20000; // a video needs longer than the 8 seconds given to background downloads
+const RESEND_DOWNLOAD_ATTEMPTS = 2;
+const RESEND_DOWNLOAD_PAUSE_MS = 2000;
+
 // Message.downloadMedia() fails with a short error on current WhatsApp Web, so the
-// direct download goes first, as attachMediaToItem() ends up doing.
+// direct download goes first, as attachMediaToItem() ends up doing. The direct
+// download refuses to start while another one is running, hence the second attempt.
 async function downloadForResend(message) {
   const id = normalizeMessageIdObject(message);
-  const media = await receiving.downloadMediaDirectById(id)
-    || await Promise.resolve().then(() => message.downloadMedia()).catch(() => null);
-  if (!media || !media.data) return null;
+  const media = await delivery.retried(async () => {
+    const found = await receiving.downloadMediaDirectById(id, RESEND_DOWNLOAD_MS)
+      || await Promise.resolve().then(() => message.downloadMedia()).catch(() => null);
+    return found && found.data ? found : null;
+  }, RESEND_DOWNLOAD_ATTEMPTS, RESEND_DOWNLOAD_PAUSE_MS);
+  if (!media) return null;
   return new MessageMedia(media.mimetype, media.data, media.filename || null, media.filesize || undefined);
 }
+
+const RESEND_BODY = {location: '[Геолокация]', vcard: '[Контакт]'};
 
 async function forwardByResend(message, target, actor) {
   const text = String(incomingText(message) || '').trim();
   const type = String(message.type || '');
   const hasMedia = Boolean(message.hasMedia) || ['image', 'video', 'audio', 'ptt', 'document', 'sticker'].includes(type);
+  const special = type in RESEND_BODY; // sent as its own kind of message, without text to compare
   const since = sending.sendStartSeconds();
   let media = null;
   const outcome = await delivery.resendAsForward({
-    client, type, hasMedia, target, text,
+    client, type, hasMedia, target, text, location: message.location,
     download: async () => (media = await downloadForResend(message)),
-    confirm: () => sending.confirmSentMessage([target], text, hasMedia, since),
+    confirm: () => sending.confirmSentMessage([target], special ? '' : text, hasMedia || special, since),
   });
   if (outcome.status !== 'sent') throw new Error(outcome.error);
   rememberForwardedMessage(outcome.message);
   const item = delivery.forwardedCopyItem({
     id: normalizeMessageIdObject(outcome.message) || serializedId(outcome.message.id),
-    actor, body: text || (hasMedia ? messageText({type, mimetype: media && media.mimetype}) : ''),
-    type: hasMedia ? type : 'chat', timestamp: outcome.message.timestamp, media,
+    actor, body: RESEND_BODY[type] || text || (hasMedia ? messageText({type, mimetype: media && media.mimetype}) : ''),
+    type: hasMedia || special ? type : 'chat', timestamp: outcome.message.timestamp, media,
   });
   const saved = await delivery.savedAfterSend(
     () => postJson('/api/chat-messages-sync', {chat_id: target, append: true, messages: [item]}),
