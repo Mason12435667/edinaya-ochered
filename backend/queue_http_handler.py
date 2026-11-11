@@ -75,6 +75,8 @@ STATIC_FILES = {
     **{f"templates/{path.name}": "text/html; charset=utf-8"
        for path in (Path(__file__).resolve().parents[1] / "frontend" / "static" / "templates").glob("*.html")},
 }
+# Served names that are several files sent as one, in this order.
+STATIC_BUNDLES = {"app.js": tuple(f"app/{name}" for name in queue_ticket_views.APP_SCRIPT_PARTS)}
 
 
 class _CountedBody:
@@ -177,7 +179,9 @@ class QueueHTTPHandlerMixin(ChatRoutes, AdminRoutes, TicketRoutes, SessionRoutes
             return
         name = parsed.path[len("/static/"):]
         if parsed.path.startswith("/static/") and name in STATIC_FILES:
-            self.file_response(self.deps.root / "frontend" / "static" / name, STATIC_FILES[name])
+            folder = self.deps.root / "frontend" / "static"
+            parts = STATIC_BUNDLES.get(name, (name,))
+            self.uncached_response(b"".join((folder / part).read_bytes() for part in parts), STATIC_FILES[name])
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 

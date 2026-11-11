@@ -8,7 +8,7 @@ from queue_templates import render_template
 
 
 # Bump on every change to static/; appended as ?v= to bust browser caches.
-ASSET_VERSION = "143.4"
+ASSET_VERSION = "143.5"
 
 AUTH_STYLESHEETS = ("auth.css", "pink-theme.css", "polish.css")
 

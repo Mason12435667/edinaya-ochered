@@ -46,9 +46,19 @@ class StaticPageTests(unittest.TestCase):
 
     def test_scripts_add_no_style_elements(self):
         # The Content-Security-Policy has style-src 'self': the browser drops such elements.
-        for script in (PROJECT / "frontend" / "static").glob("*.js"):
+        for script in (PROJECT / "frontend" / "static").rglob("*.js"):
             with self.subTest(script=script.name):
                 self.assertNotRegex(script.read_text(encoding="utf-8"), r"createElement\(\s*['\"]style['\"]")
+
+    def test_app_script_is_its_parts_joined_in_the_listed_order(self):
+        # One request on purpose: the scripts after app.js must be listening before its first chat data arrives.
+        folder = PROJECT / "frontend" / "static" / "app"
+        self.assertEqual(sorted(path.name for path in folder.iterdir()), sorted(queue_ticket_views.APP_SCRIPT_PARTS))
+        response = get("/static/app.js")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.body, b"".join((folder / name).read_bytes() for name in queue_ticket_views.APP_SCRIPT_PARTS))
+        self.assertEqual(queue_ticket_views.APP_SCRIPT_PARTS[-1], "main.js", "main.js starts the other parts")
+        self.assertEqual(get("/static/app/main.js").status, 404)
 
     def test_page_assets_are_served_in_the_layout_order(self):
         for page in PAGES.glob("*.html"):

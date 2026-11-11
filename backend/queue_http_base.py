@@ -171,7 +171,9 @@ class HttpBase:
             return 0
 
     def file_response(self, path: Path, content_type: str) -> None:
-        body = path.read_bytes()
+        self.uncached_response(path.read_bytes(), content_type)
+
+    def uncached_response(self, body: bytes, content_type: str) -> None:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))

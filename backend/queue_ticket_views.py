@@ -19,6 +19,11 @@ MAIN_SCRIPTS = (
     "http.js", "ui.js", "app.js", "productivity.js", "workflow.js", "reliability.js",
     "chat-layout.js", "performance.js", "attachments.js", "account.js",
 )
+# app.js is sent as these files of frontend/static/app joined in this order. One request instead of
+# six: the scripts listed after app.js must be listening before its first chat data arrives.
+APP_SCRIPT_PARTS = (
+    "voice-player.js", "common.js", "media-lightbox.js", "conversation.js", "notification-center.js", "main.js",
+)
 # Scripts of the static pages in frontend/pages.
 PAGE_SCRIPTS = ("shell.js", "groups-page.js", "ticket-render.js", "dashboard-page.js", "ticket-page.js", "pages.js")
 
