@@ -14,7 +14,6 @@ import sqlite3
 import secrets
 import threading
 import webbrowser
-import sys
 import queue_message_identity
 import queue_bot_texts
 import queue_features
@@ -66,9 +65,6 @@ from queue_feature_http import FeatureRoutes
 
 # Public release from CHANGELOG.md; reported by /api/integration/ping.
 APP_VERSION = "v143"
-
-# Modules split out of app.py read shared services and settings as app.NAME.
-queue_whatsapp_handlers.bind(sys.modules[__name__])
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1257,6 +1253,16 @@ HTTP_DEPENDENCIES = queue_http_handler.HttpDependencies(
     final_ticket_filter=_final_ticket_filter, update_ticket_status=update_ticket_status,
     set_chat_favorite=set_chat_favorite, create_scheduled_backup=create_scheduled_backup,
 )
+WHATSAPP_DEPENDENCIES = queue_whatsapp_handlers.WhatsAppDependencies(
+    store=STORE, attachments=ATTACHMENTS, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE,
+    read_marked_at=READ_MARKED_AT, media_dir=MEDIA_DIR, max_media_bytes=MAX_MEDIA_BYTES,
+    get_contact_language=get_contact_language, decorate_chat_messages=decorate_chat_messages,
+    mention_only_message=mention_only_message, same_whatsapp_message_identity=same_whatsapp_message_identity,
+    scrub_deleted_whatsapp_message=scrub_deleted_whatsapp_message, save_media_payload=save_media_payload,
+    save_outbound_media=save_outbound_media, save_outbound_media_stream=save_outbound_media_stream,
+    preserved_system_outgoing_media=preserved_system_outgoing_media,
+    reconcile_uncertain_system_outgoing_media=reconcile_uncertain_system_outgoing_media,
+)
 
 # Connector/chat handlers (queue_whatsapp_handlers) and core HTTP routing
 # (queue_http_handler) live in dedicated mixins.
@@ -1273,6 +1279,7 @@ class TicketHandler(queue_whatsapp_handlers.WhatsAppHandlerMixin, queue_http_han
     ticket_pages = TICKET_PAGES
     admin_pages = ADMIN_PAGES
     deps = HTTP_DEPENDENCIES
+    whatsapp = WHATSAPP_DEPENDENCIES
     server_version = "UnifiedQueue/1.00.1"
 
     def _generic_domain_path(self):
