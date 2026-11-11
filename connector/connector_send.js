@@ -178,7 +178,8 @@ function readOwnMessagesSince(since) {
       if (typeof value.$1 === 'string') return value.$1;
       return value.user && value.server ? `${value.user}@${value.server}` : '';
     };
-    return window.require('WAWebCollections').Msg.getModelsArray()
+    // a message sent a moment ago is among the newest; the whole collection can be large
+    return window.require('WAWebCollections').Msg.getModelsArray().slice(-600)
       .filter((m) => m && m.id && m.id.fromMe && Number(m.t || 0) >= cutoff)
       .map((m) => ({
         id: widText(m.id),
@@ -201,14 +202,14 @@ async function confirmSentMessage(recipients, body, hasMedia, since) {
     for (const alias of (chatIdAliases.get(recipient) || [])) aliases.add(alias);
   }
   const text = normalizeAutoReplyBody138(body);
+  let own = [];
   const row = await delivery.waitForValue(async () => delivery.findSentMessage(
-    await Promise.all((await readOwnMessagesSince(since)).map(async (item) => ({
+    await Promise.all((own = await readOwnMessagesSince(since)).map(async (item) => ({
       ...item, text: normalizeAutoReplyBody138(item.text), phone: await resolveDirectPhoneId(item.remote),
     }))),
     {text, hasMedia, since, aliases, isKnown: (item) => confirmedSentIds.has(item.id)},
   ), SENT_LOOKUP_TIMEOUT_MS, SENT_LOOKUP_INTERVAL_MS);
   if (!row) {
-    const own = await readOwnMessagesSince(since).catch(() => []);
     console.warn(`Отправка не подтверждена: своих сообщений с начала отправки ${own.length}, адреса: ${[...aliases].length}`);
     return null;
   }

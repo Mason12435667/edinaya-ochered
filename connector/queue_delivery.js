@@ -98,10 +98,15 @@ function isForwardUnavailable(error) {
 
 // Sends a copy of the message marked as forwarded. Use it only when
 // isForwardUnavailable(): after any other error the original may have gone out.
-async function resendAsForward({client, type, hasMedia, download, target, text, confirm}) {
+async function resendAsForward({client, type, hasMedia, download, location, target, text, confirm}) {
   const options = {extra: {isForwarded: true, forwardingScore: 1}};
   let content = text;
-  if (hasMedia) {
+  if (type === 'multi_vcard') throw new Error('Несколько контактов одним сообщением переслать нельзя. Перешлите их по одному');
+  if (type === 'location') {
+    // whatsapp-web.js sends its Location object as a location, not as text
+    if (!location) throw new Error('В сообщении нет координат для пересылки');
+    content = location;
+  } else if (hasMedia) {
     content = await download();
     if (!content) throw new Error('Не удалось загрузить вложение для пересылки');
     if (text) options.caption = text;
@@ -111,6 +116,15 @@ async function resendAsForward({client, type, hasMedia, download, target, text, 
   }
   if (!content) throw new Error('В сообщении нет текста для пересылки');
   return sendOnce({client, recipient: target, content, options, begin: async () => true, confirm});
+}
+
+// Calls tryOnce() until it returns something, at most `attempts` times, pausing between calls.
+async function retried(tryOnce, attempts, pauseMs) {
+  for (let attempt = 1; ; attempt += 1) {
+    const value = await tryOnce();
+    if (value || attempt >= attempts) return value || null;
+    await new Promise((resolve) => setTimeout(resolve, pauseMs));
+  }
 }
 
 // The chat-history record of a copy sent by resendAsForward(). It is built from
@@ -174,4 +188,4 @@ function editError(result) {
   return reasons[result && result.reason] || 'Не удалось изменить сообщение в WhatsApp';
 }
 
-module.exports = {forwardedCopyItem, savedAfterSend, replyChatId, isDeliberateStep, isForwardUnavailable, resendAsForward, waitForValue, findSentMessage, sendOnce, editInPage, editError, PRE_SEND_ERROR};
+module.exports = {retried, forwardedCopyItem, savedAfterSend, replyChatId, isDeliberateStep, isForwardUnavailable, resendAsForward, waitForValue, findSentMessage, sendOnce, editInPage, editError, PRE_SEND_ERROR};

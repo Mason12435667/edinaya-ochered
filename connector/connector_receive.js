@@ -307,7 +307,7 @@ function reportDirectMediaFailure(reason) {
   }
   console.warn('[media116] direct recovery:', label);
 }
-async function downloadMediaDirectById(messageId) {
+async function downloadMediaDirectById(messageId, timeoutMs = 8000) {
   const mid = String(messageId || '').trim();
   if (!mid || directMediaEvaluation || runtime.shutdownStarted || !client.pupPage) return null;
   let evaluation = null;
@@ -484,7 +484,7 @@ async function downloadMediaDirectById(messageId) {
     });
     const result = await Promise.race([
       evaluation,
-      new Promise((resolve) => setTimeout(() => resolve({__media_error:'direct-evaluation-timeout'}), 8000)),
+      new Promise((resolve) => setTimeout(() => resolve({__media_error:'direct-evaluation-timeout'}), timeoutMs)),
     ]);
     if (result && result.__media_error) {
       reportDirectMediaFailure(result.__media_error);
