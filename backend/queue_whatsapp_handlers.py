@@ -5,10 +5,12 @@ import sqlite3
 import json
 import re
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any
+from threading import Lock
 from queue_inbound_service import InboundService
 from queue_outbound_service import OutboundService
 
@@ -18,22 +20,39 @@ import queue_realtime
 import queue_reliability
 import queue_uploads
 import queue_workflow
+from queue_attachment_archive import AttachmentArchive
 from queue_chat_state import dedupe_whatsapp_messages, whatsapp_display_name
 from queue_core import content_disposition_header, log_suppressed, normalize_message, normalize_phone, valid_chat_id, valid_conversation_id, valid_group_id
 from queue_work_context import work_actor
-
-# Application module (app.py): shared services, settings and helpers it defines.
-app: Any = None
+from ticketing import TicketStore
 
 
-def bind(app_module: Any) -> None:
-    global app
-    app = app_module
+@dataclass(frozen=True)
+class WhatsAppDependencies:
+    """What the connector and chat handlers use from app.py; the handler class holds it as `whatsapp`."""
+    store: TicketStore
+    attachments: AttachmentArchive
+    chat_lock: Lock
+    chat_state: dict[str, object]  # changed in place under chat_lock, never replaced
+    read_marked_at: dict[str, float]
+    media_dir: Path
+    max_media_bytes: int
+    get_contact_language: Callable[..., str]
+    decorate_chat_messages: Callable[[str, list[dict[str, object]]], list[dict[str, object]]]
+    mention_only_message: Callable[[dict[str, object]], bool]
+    same_whatsapp_message_identity: Callable[[str, str], bool]
+    scrub_deleted_whatsapp_message: Callable[..., tuple[str, int]]
+    save_media_payload: Callable[..., str]
+    save_outbound_media: Callable[..., str]
+    save_outbound_media_stream: Callable[..., str]
+    preserved_system_outgoing_media: Callable[..., dict[str, str]]
+    reconcile_uncertain_system_outgoing_media: Callable[..., dict[str, str]]
 
 
 class WhatsAppHandlerMixin:
     inbound_service: InboundService
     outbound_service: OutboundService
+    whatsapp: WhatsAppDependencies
 
     def handle_api_message(self) -> None:
         payload = self.read_authorized_json(18_000_000)
@@ -73,7 +92,7 @@ class WhatsAppHandlerMixin:
                 chat_id = valid_chat_id(str(item.get("id", "")))
                 if not chat_id:
                     continue
-                chat_id = app.STORE.canonical_whatsapp_chat_id(chat_id)
+                chat_id = self.whatsapp.store.canonical_whatsapp_chat_id(chat_id)
                 try:
                     timestamp = int(item.get("timestamp", 0))
                     unread = max(0, int(item.get("unread_count", 0)))
@@ -115,12 +134,12 @@ class WhatsAppHandlerMixin:
             deduped_chats[cid] = merged
         cleaned = list(deduped_chats.values())
 
-        with app.CHAT_LOCK:
-            app.CHAT_STATE["connected"] = bool(payload.get("connected", True))
-            app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+        with self.whatsapp.chat_lock:
+            self.whatsapp.chat_state["connected"] = bool(payload.get("connected", True))
+            self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
             if cleaned or isinstance(raw_chats, list):
-                app.CHAT_STATE["chats"] = cleaned
-        app.STORE.upsert_whatsapp_chats(cleaned)
+                self.whatsapp.chat_state["chats"] = cleaned
+        self.whatsapp.store.upsert_whatsapp_chats(cleaned)
         if isinstance(raw_chats, list):
             queue_realtime.notify("chat-list")
         self.json_response({"updated": True, "chats": len(cleaned)})
@@ -146,13 +165,13 @@ class WhatsAppHandlerMixin:
                 "state": str(row.get("state", "") or "")[:32],
                 "updated_at": now,
             }
-        with app.CHAT_LOCK:
-            presence_map = app.CHAT_STATE.get("presence")
+        with self.whatsapp.chat_lock:
+            presence_map = self.whatsapp.chat_state.get("presence")
             if not isinstance(presence_map, dict):
                 presence_map = {}
-                app.CHAT_STATE["presence"] = presence_map
+                self.whatsapp.chat_state["presence"] = presence_map
             presence_map.update(cleaned)
-            app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.json_response({"updated": True, "items": len(cleaned)})
 
     def handle_group_participants_sync(self) -> None:
@@ -180,13 +199,13 @@ class WhatsAppHandlerMixin:
                 "is_admin": bool(item.get("is_admin")),
                 "is_me": bool(item.get("is_me")),
             })
-        with app.CHAT_LOCK:
-            participants_map = app.CHAT_STATE.get("group_participants")
+        with self.whatsapp.chat_lock:
+            participants_map = self.whatsapp.chat_state.get("group_participants")
             if not isinstance(participants_map, dict):
                 participants_map = {}
-                app.CHAT_STATE["group_participants"] = participants_map
+                self.whatsapp.chat_state["group_participants"] = participants_map
             participants_map[chat_id] = cleaned
-            app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.json_response({"updated": True, "participants": len(cleaned)})
 
     def handle_group_message_identities_sync(self) -> None:
@@ -215,13 +234,13 @@ class WhatsAppHandlerMixin:
                 "sender_phone": sender_phone,
                 "sender_id": sender_id,
             })
-        updated = app.STORE.update_whatsapp_group_message_identities(chat_id, cleaned)
+        updated = self.whatsapp.store.update_whatsapp_group_message_identities(chat_id, cleaned)
 
         # Apply the same enrichment to the in-memory copy so the open group
         # changes immediately, without requiring a page reload or DB roundtrip.
         by_id = {item["id"]: item for item in cleaned}
-        with app.CHAT_LOCK:
-            messages_map = app.CHAT_STATE.get("messages", {})
+        with self.whatsapp.chat_lock:
+            messages_map = self.whatsapp.chat_state.get("messages", {})
             messages = messages_map.get(chat_id, []) if isinstance(messages_map, dict) else []
             if isinstance(messages, list):
                 for message in messages:
@@ -242,11 +261,11 @@ class WhatsAppHandlerMixin:
                         message["sender_phone"] = patch["sender_phone"]
                     if patch.get("sender_id"):
                         message["sender_id"] = patch["sender_id"]
-                app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+                self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.json_response({"updated": True, "messages": updated})
 
-    @staticmethod
     def _collapse_live_whatsapp_aliases_v26(
+        self,
         live_rows: object,
         authoritative_names: dict[str, str] | None = None,
     ) -> tuple[list[dict[str, object]], int]:
@@ -280,7 +299,7 @@ class WhatsAppHandlerMixin:
             if not raw_id:
                 continue
 
-            canonical_id = app.STORE.canonical_whatsapp_chat_id(raw_id) or raw_id
+            canonical_id = self.whatsapp.store.canonical_whatsapp_chat_id(raw_id) or raw_id
             row = dict(raw_row)
             row["id"] = canonical_id
 
@@ -373,7 +392,7 @@ class WhatsAppHandlerMixin:
             raw_id = valid_chat_id(str(item.get("raw_id", "")))
             cleaned.append({"chat_id": chat_id, "raw_id": raw_id, "phone": phone, "name": normalize_message(str(item.get("name", "")))[:100], "saved": bool(item.get("saved"))})
             if raw_id.endswith("@lid") and chat_id.endswith("@c.us") and raw_id != chat_id:
-                app.STORE.remember_whatsapp_chat_alias(raw_id, chat_id)
+                self.whatsapp.store.remember_whatsapp_chat_alias(raw_id, chat_id)
         authoritative_names: dict[str, str] = {}
         for item in cleaned:
             display_name = whatsapp_display_name(item.get("name", ""))
@@ -381,19 +400,19 @@ class WhatsAppHandlerMixin:
             phone = normalize_phone(str(item.get("phone", "")))
             if display_name and chat_key:
                 authoritative_names[chat_key] = display_name
-                app.STORE.update_whatsapp_contact_display_name(chat_key, display_name, phone)
+                self.whatsapp.store.update_whatsapp_contact_display_name(chat_key, display_name, phone)
             if display_name and phone:
                 authoritative_names[f"{phone.lstrip('+')}@c.us"] = display_name
         collapsed_count_v26 = 0
-        with app.CHAT_LOCK:
-            app.CHAT_STATE["discovered_contacts"] = cleaned
-            live = app.CHAT_STATE.get("chats", [])
+        with self.whatsapp.chat_lock:
+            self.whatsapp.chat_state["discovered_contacts"] = cleaned
+            live = self.whatsapp.chat_state.get("chats", [])
             collapsed_live_v26, collapsed_count_v26 = self._collapse_live_whatsapp_aliases_v26(
                 live,
                 authoritative_names,
             )
-            app.CHAT_STATE["chats"] = collapsed_live_v26
-            app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self.whatsapp.chat_state["chats"] = collapsed_live_v26
+            self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
         if collapsed_count_v26:
             queue_realtime.notify("chat-list")
             print(
@@ -414,31 +433,31 @@ class WhatsAppHandlerMixin:
         if not chat_id:
             self.json_response({"updated": False}, HTTPStatus.BAD_REQUEST)
             return
-        chat_id = app.STORE.canonical_whatsapp_chat_id(chat_id) or chat_id
+        chat_id = self.whatsapp.store.canonical_whatsapp_chat_id(chat_id) or chat_id
         profile = {"chat_id": chat_id, "name": normalize_message(str(payload.get("name", "")))[:100], "phone": normalize_phone(str(payload.get("phone", ""))), "about": normalize_message(str(payload.get("about", "")))[:500], "profile_pic_url": str(payload.get("profile_pic_url", ""))[:2000], "is_business": bool(payload.get("is_business"))}
         display_name = whatsapp_display_name(profile.get("name", ""))
         if display_name:
-            app.STORE.update_whatsapp_contact_display_name(chat_id, display_name, str(profile.get("phone", "")))
-        with app.CHAT_LOCK:
-            profiles = app.CHAT_STATE.get("contact_profiles")
+            self.whatsapp.store.update_whatsapp_contact_display_name(chat_id, display_name, str(profile.get("phone", "")))
+        with self.whatsapp.chat_lock:
+            profiles = self.whatsapp.chat_state.get("contact_profiles")
             if not isinstance(profiles, dict):
                 profiles = {}
-                app.CHAT_STATE["contact_profiles"] = profiles
+                self.whatsapp.chat_state["contact_profiles"] = profiles
             profiles[chat_id] = profile
             if display_name:
-                live = app.CHAT_STATE.get("chats", [])
+                live = self.whatsapp.chat_state.get("chats", [])
                 if isinstance(live, list):
                     for chat in live:
                         if isinstance(chat, dict) and valid_chat_id(str(chat.get("id", ""))) == chat_id:
                             chat["name"] = display_name
-            app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.json_response({"updated": True})
 
     def handle_group_refresh_check(self) -> None:
         payload = self.read_authorized_json()
         if payload is None:
             return
-        self.json_response({"request": app.STORE.get_setting("group_refresh_request", "")})
+        self.json_response({"request": self.whatsapp.store.get_setting("group_refresh_request", "")})
 
     def handle_group_list_sync(self) -> None:
         payload = self.read_authorized_json()
@@ -484,8 +503,8 @@ class WhatsAppHandlerMixin:
             if isinstance(diagnostics.get("errors", []), list)
             else [],
         }
-        app.STORE.set_setting("group_sync_status", json.dumps(status, ensure_ascii=False))
-        app.STORE.replace_whatsapp_groups(cleaned)
+        self.whatsapp.store.set_setting("group_sync_status", json.dumps(status, ensure_ascii=False))
+        self.whatsapp.store.replace_whatsapp_groups(cleaned)
         self.json_response({"updated": True, "groups": len(cleaned)})
 
     def handle_connector_state(self) -> None:
@@ -503,11 +522,11 @@ class WhatsAppHandlerMixin:
         ):
             self.json_response({"error": "invalid_qr"}, HTTPStatus.BAD_REQUEST)
             return
-        with app.CHAT_LOCK:
-            app.CHAT_STATE["connector_status"] = status
-            app.CHAT_STATE["connected"] = status == "ready"
-            app.CHAT_STATE["qr_data_url"] = qr_data_url if status == "qr" else ""
-            app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+        with self.whatsapp.chat_lock:
+            self.whatsapp.chat_state["connector_status"] = status
+            self.whatsapp.chat_state["connected"] = status == "ready"
+            self.whatsapp.chat_state["qr_data_url"] = qr_data_url if status == "qr" else ""
+            self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.json_response({"updated": True})
 
     def handle_contact_policy(self) -> None:
@@ -516,13 +535,13 @@ class WhatsAppHandlerMixin:
             return
         chat_id = valid_chat_id(str(payload.get("chat_id", "")))
         phone = normalize_phone(str(payload.get("phone", "")))
-        canonical_chat_id = app.STORE.canonical_whatsapp_chat_id(chat_id) or chat_id
-        contact = app.STORE.manual_whatsapp_contact(canonical_chat_id, phone)
+        canonical_chat_id = self.whatsapp.store.canonical_whatsapp_chat_id(chat_id) or chat_id
+        contact = self.whatsapp.store.manual_whatsapp_contact(canonical_chat_id, phone)
         # The connector consumes this generation token on the next inbound
         # message and clears only this user's in-memory bot caches.
-        reset_token = app.STORE.get_setting(f"bot_hard_reset_v1:{canonical_chat_id}", "")
+        reset_token = self.whatsapp.store.get_setting(f"bot_hard_reset_v1:{canonical_chat_id}", "")
         if not reset_token and chat_id and chat_id != canonical_chat_id:
-            reset_token = app.STORE.get_setting(f"bot_hard_reset_v1:{chat_id}", "")
+            reset_token = self.whatsapp.store.get_setting(f"bot_hard_reset_v1:{chat_id}", "")
         self.json_response(
             {
                 "manual_contact": bool(contact),
@@ -538,15 +557,15 @@ class WhatsAppHandlerMixin:
             return
         chat_id = valid_chat_id(str(payload.get("chat_id", "")))
         phone = normalize_phone(str(payload.get("phone", "")))
-        language = app.get_contact_language(chat_id, phone)
-        if app.STORE.is_manual_whatsapp_contact(chat_id, phone):
+        language = self.whatsapp.get_contact_language(chat_id, phone)
+        if self.whatsapp.store.is_manual_whatsapp_contact(chat_id, phone):
             self.json_response({"allowed": True, "manual_contact": True, "language": language})
             return
         # Обычным пользователям звонки всегда запрещены. Старое одноразовое
         # разрешение (если осталось от версии с пунктом «Позвонить») просто
         # поглощаем и не используем.
         if chat_id:
-            app.STORE.consume_whatsapp_call_permission(chat_id)
+            self.whatsapp.store.consume_whatsapp_call_permission(chat_id)
         self.json_response({"allowed": False, "manual_contact": False, "language": language})
 
     def handle_chat_messages_sync(self) -> None:
@@ -557,15 +576,15 @@ class WhatsAppHandlerMixin:
         source_chat_id = valid_conversation_id(str(payload.get("source_chat_id", "")))
         if source_chat_id.endswith("@lid") and chat_id.endswith("@c.us") and source_chat_id != chat_id:
             try:
-                app.STORE.remember_whatsapp_chat_alias(source_chat_id, chat_id)
+                self.whatsapp.store.remember_whatsapp_chat_alias(source_chat_id, chat_id)
                 collapsed_count_v26 = 0
-                with app.CHAT_LOCK:
+                with self.whatsapp.chat_lock:
                     collapsed_v26, collapsed_count_v26 = self._collapse_live_whatsapp_aliases_v26(
-                        app.CHAT_STATE.get("chats", [])
+                        self.whatsapp.chat_state.get("chats", [])
                     )
                     if collapsed_count_v26:
-                        app.CHAT_STATE["chats"] = collapsed_v26
-                        app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+                        self.whatsapp.chat_state["chats"] = collapsed_v26
+                        self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
                 if collapsed_count_v26:
                     queue_realtime.notify("chat-list")
                     print(
@@ -576,7 +595,7 @@ class WhatsAppHandlerMixin:
             except Exception as exc:
                 print(f"WhatsApp alias merge warning: {source_chat_id} -> {chat_id}: {exc}", flush=True)
         if chat_id:
-            chat_id = app.STORE.canonical_whatsapp_chat_id(chat_id)
+            chat_id = self.whatsapp.store.canonical_whatsapp_chat_id(chat_id)
         raw_messages = payload.get("messages", [])
         if not chat_id or not isinstance(raw_messages, list):
             self.json_response({"error": "invalid_chat"}, HTTPStatus.BAD_REQUEST)
@@ -597,7 +616,7 @@ class WhatsAppHandlerMixin:
             if is_deleted and message_id:
                 old_media_path = ""
                 try:
-                    stored_message = app.STORE.get_whatsapp_message(chat_id, message_id)
+                    stored_message = self.whatsapp.store.get_whatsapp_message(chat_id, message_id)
                     if stored_message:
                         old_media_path = str(stored_message.get("media_path", "") or "")
                 except sqlite3.Error:
@@ -613,18 +632,18 @@ class WhatsAppHandlerMixin:
             media_path = ""
             media_base64 = str(item.get("media_base64", "") or "")
             if media_base64 and message_id and not is_deleted:
-                media_path = app.save_media_payload(
+                media_path = self.whatsapp.save_media_payload(
                     chat_id, message_id, media_base64, media_mime, media_name
                 )
             if item.get("media_receipt") and not is_deleted:
-                media_path = queue_inbound_media.resolve(app.MEDIA_DIR, chat_id, message_id, item["media_receipt"]) or media_path
+                media_path = queue_inbound_media.resolve(self.whatsapp.media_dir, chat_id, message_id, item["media_receipt"]) or media_path
             # Strongest path for our own UI sends: the connector supplies the
             # exact outbound queue id after WhatsApp has accepted the message.
             # preserve_sent_attachment is idempotent and returns the already
             # preserved /media/outbound-N.bin even after the temporary upload
             # was deleted from the outbound queue.
             if bool(item.get("from_me")) and outbound_message_id > 0 and not media_path and not is_deleted:
-                preserved_by_queue = app.ATTACHMENTS.preserve(outbound_message_id)
+                preserved_by_queue = self.whatsapp.attachments.preserve(outbound_message_id)
                 if preserved_by_queue:
                     media_path = str(preserved_by_queue.get("media_path", ""))
                     media_mime = media_mime or str(preserved_by_queue.get("media_mime", ""))
@@ -634,7 +653,7 @@ class WhatsAppHandlerMixin:
             # outbound queue completed, so our own system shows the same media
             # that is visible in WhatsApp.
             if bool(item.get("from_me")) and message_id and not media_path and not is_deleted:
-                preserved_media = app.preserved_system_outgoing_media(
+                preserved_media = self.whatsapp.preserved_system_outgoing_media(
                     message_id,
                     str(item.get("body", "")),
                     str(item.get("quoted_message_key", "")),
@@ -645,7 +664,7 @@ class WhatsAppHandlerMixin:
                     media_mime = media_mime or str(preserved_media.get("media_mime", ""))
                     media_name = media_name or str(preserved_media.get("media_name", ""))
             if bool(item.get("from_me")) and message_id and not media_path and not is_deleted:
-                recovered_media = app.reconcile_uncertain_system_outgoing_media(
+                recovered_media = self.whatsapp.reconcile_uncertain_system_outgoing_media(
                     chat_id,
                     message_id,
                     timestamp,
@@ -655,8 +674,8 @@ class WhatsAppHandlerMixin:
                 )
                 if not recovered_media:
                     recovered_media = queue_uploads.recover_clipboard_attachment(
-                        app.STORE,
-                        app.ATTACHMENTS,
+                        self.whatsapp.store,
+                        self.whatsapp.attachments,
                         chat_id,
                         message_id,
                         timestamp,
@@ -702,22 +721,22 @@ class WhatsAppHandlerMixin:
         # visible in our history before touching live state or persisting a tombstone.
         matched_deleted_keys: set[str] = set()
         for deleted_message_id, deleted_media_path, deleted_timestamp, deleted_from_me in deleted_payloads:
-            resolved_key, matched_count = app.scrub_deleted_whatsapp_message(
+            resolved_key, matched_count = self.whatsapp.scrub_deleted_whatsapp_message(
                 chat_id, deleted_message_id, deleted_media_path, deleted_timestamp, deleted_from_me
             )
             if matched_count > 0 and resolved_key:
                 matched_deleted_keys.add(resolved_key)
                 for cleaned_item in cleaned:
-                    if bool(cleaned_item.get("deleted")) and app.same_whatsapp_message_identity(
+                    if bool(cleaned_item.get("deleted")) and self.whatsapp.same_whatsapp_message_identity(
                         str(cleaned_item.get("id", "")), deleted_message_id
                     ):
                         cleaned_item["id"] = resolved_key
 
-        with app.CHAT_LOCK:
-            messages_by_chat = app.CHAT_STATE.get("messages")
+        with self.whatsapp.chat_lock:
+            messages_by_chat = self.whatsapp.chat_state.get("messages")
             if not isinstance(messages_by_chat, dict):
                 messages_by_chat = {}
-                app.CHAT_STATE["messages"] = messages_by_chat
+                self.whatsapp.chat_state["messages"] = messages_by_chat
             if payload.get("append"):
                 combined = [
                     *list(messages_by_chat.get(chat_id, [])),
@@ -740,8 +759,8 @@ class WhatsAppHandlerMixin:
             if len(messages_by_chat) > 20:
                 for old_chat_id in list(messages_by_chat)[:-20]:
                     messages_by_chat.pop(old_chat_id, None)
-            app.CHAT_STATE["connected"] = True
-            app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self.whatsapp.chat_state["connected"] = True
+            self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
         # Only live append events are persisted. Historical messages from the
         # linked WhatsApp account are deliberately never imported.
         if payload.get("append"):
@@ -753,11 +772,11 @@ class WhatsAppHandlerMixin:
                 if not bool(item.get("deleted")) or str(item.get("id", "")) not in matched_deleted_keys
             ]
             if persist_items:
-                app.STORE.save_whatsapp_chat_messages(chat_id, persist_items)
+                self.whatsapp.store.save_whatsapp_chat_messages(chat_id, persist_items)
             workflow_items = [item for item in cleaned if not bool(item.get("deleted"))]
             try:
                 if workflow_items:
-                    queue_workflow.auto_link_open_ticket(app.STORE, chat_id, workflow_items)
+                    queue_workflow.auto_link_open_ticket(self.whatsapp.store, chat_id, workflow_items)
             except Exception as exc:
                 print(f"Автопривязка сообщения к заявке пропущена: {exc}", flush=True)
             # Голосовые сохраняются и воспроизводятся как обычные медиа.
@@ -788,9 +807,9 @@ class WhatsAppHandlerMixin:
         if not chat_id or not message_id or ack < 0:
             self.json_response({"error": "invalid_ack"}, HTTPStatus.BAD_REQUEST)
             return
-        updated = app.STORE.update_whatsapp_message_ack(chat_id, message_id, ack)
-        with app.CHAT_LOCK:
-            messages_by_chat = app.CHAT_STATE.get("messages", {})
+        updated = self.whatsapp.store.update_whatsapp_message_ack(chat_id, message_id, ack)
+        with self.whatsapp.chat_lock:
+            messages_by_chat = self.whatsapp.chat_state.get("messages", {})
             if isinstance(messages_by_chat, dict):
                 for messages in messages_by_chat.values():
                     if not isinstance(messages, list):
@@ -798,7 +817,7 @@ class WhatsAppHandlerMixin:
                     for item in messages:
                         if isinstance(item, dict) and item.get("id") == message_id:
                             item["ack"] = max(int(item.get("ack", 0) or 0), ack)
-            app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
         if updated:
             queue_realtime.notify("chat")
         self.json_response({"updated": updated, "ack": ack})
@@ -815,13 +834,13 @@ class WhatsAppHandlerMixin:
         if not chat_id or not message_id or (not from_me and not sender_id):
             self.json_response({"updated": False, "error": "invalid_reaction"}, HTTPStatus.BAD_REQUEST)
             return
-        updated = app.STORE.update_whatsapp_message_reaction(
+        updated = self.whatsapp.store.update_whatsapp_message_reaction(
             chat_id, message_id, sender_id or "__me__", emoji, from_me=from_me
         )
-        message = app.STORE.get_whatsapp_message(chat_id, message_id) if updated else None
-        reactions = app.STORE._reaction_summary((message or {}).get("reactions_json", "{}"))
-        with app.CHAT_LOCK:
-            messages_by_chat = app.CHAT_STATE.get("messages", {})
+        message = self.whatsapp.store.get_whatsapp_message(chat_id, message_id) if updated else None
+        reactions = self.whatsapp.store._reaction_summary((message or {}).get("reactions_json", "{}"))
+        with self.whatsapp.chat_lock:
+            messages_by_chat = self.whatsapp.chat_state.get("messages", {})
             if isinstance(messages_by_chat, dict):
                 live = messages_by_chat.get(chat_id, [])
                 if isinstance(live, list):
@@ -829,7 +848,7 @@ class WhatsAppHandlerMixin:
                         if isinstance(item, dict) and str(item.get("id", "")) == message_id:
                             item["reactions"] = reactions
                             break
-            app.CHAT_STATE["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self.whatsapp.chat_state["updated_at"] = datetime.now(timezone.utc).isoformat()
         if updated:
             queue_realtime.notify("chat")
         self.json_response({"updated": updated, "reactions": reactions})
@@ -840,8 +859,8 @@ class WhatsAppHandlerMixin:
         if not chat_id:
             self.json_response({"messages": [], "has_more": False, "cursor": "", "error": "Не выбран чат"}, HTTPStatus.BAD_REQUEST)
             return
-        page = app.STORE.list_saved_whatsapp_messages_page(chat_id, 50, cursor)
-        messages = app.decorate_chat_messages(chat_id, dedupe_whatsapp_messages(list(page.get("messages", []))))
+        page = self.whatsapp.store.list_saved_whatsapp_messages_page(chat_id, 50, cursor)
+        messages = self.whatsapp.decorate_chat_messages(chat_id, dedupe_whatsapp_messages(list(page.get("messages", []))))
         self.json_response({
             "messages": messages,
             "has_more": bool(page.get("has_more")),
@@ -851,7 +870,7 @@ class WhatsAppHandlerMixin:
     def handle_chat_media(self, query: dict[str, list[str]]) -> None:
         chat_id = valid_conversation_id(query.get("chat_id", [""])[0])
         message_id = normalize_message(query.get("message_id", [""])[0])[:160]
-        message = app.STORE.get_whatsapp_message(chat_id, message_id) if chat_id and message_id else None
+        message = self.whatsapp.store.get_whatsapp_message(chat_id, message_id) if chat_id and message_id else None
         if not message or bool(message.get("deleted")):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -861,7 +880,7 @@ class WhatsAppHandlerMixin:
             return
         try:
             path = Path(media_path).resolve()
-            media_root = app.MEDIA_DIR.resolve()
+            media_root = self.whatsapp.media_dir.resolve()
             if media_root not in path.parents or not path.is_file():
                 raise ValueError
         except (OSError, ValueError):
@@ -893,18 +912,18 @@ class WhatsAppHandlerMixin:
         if not chat_id or not media_base64:
             self.json_response({"queued": False, "error": "Не выбран чат или файл"}, HTTPStatus.BAD_REQUEST)
             return
-        valid_upload, upload_error = queue_reliability.upload_validation(filename, mimetype, len(media_base64), app.MAX_MEDIA_BYTES)
+        valid_upload, upload_error = queue_reliability.upload_validation(filename, mimetype, len(media_base64), self.whatsapp.max_media_bytes)
         if not valid_upload:
             self.json_response({"queued": False, "error": upload_error}, HTTPStatus.BAD_REQUEST)
             return
-        media_path = app.save_outbound_media(media_base64, mimetype, filename)
+        media_path = self.whatsapp.save_outbound_media(media_base64, mimetype, filename)
         if not media_path:
-            self.json_response({"queued": False, "error": queue_performance.friendly_error(f"Не удалось сохранить вложение. Проверьте файл и лимит {app.MAX_MEDIA_BYTES // (1024*1024)} МБ")}, HTTPStatus.BAD_REQUEST)
+            self.json_response({"queued": False, "error": queue_performance.friendly_error(f"Не удалось сохранить вложение. Проверьте файл и лимит {self.whatsapp.max_media_bytes // (1024*1024)} МБ")}, HTTPStatus.BAD_REQUEST)
             return
         mentions = payload.get("mentions", [])
         if not isinstance(mentions, list):
             mentions = []
-        message_id = app.STORE.queue_direct_message(
+        message_id = self.whatsapp.store.queue_direct_message(
             chat_id, body, work_actor(), [str(x) for x in mentions[:100]],
             reply_to_key=reply_to, media_path=media_path, media_mime=mimetype, media_name=filename,
         )
@@ -935,24 +954,24 @@ class WhatsAppHandlerMixin:
         if not chat_id or content_length <= 0:
             self.json_response({"queued": False, "error": "Не выбран чат или файл"}, HTTPStatus.BAD_REQUEST)
             return
-        if content_length > app.MAX_MEDIA_BYTES:
+        if content_length > self.whatsapp.max_media_bytes:
             self.json_response(
-                {"queued": False, "error": f"Файл превышает лимит {app.MAX_MEDIA_BYTES // (1024*1024)} МБ"},
+                {"queued": False, "error": f"Файл превышает лимит {self.whatsapp.max_media_bytes // (1024*1024)} МБ"},
                 HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
             )
             return
         # Existing validation expects the encoded payload size. Keep the same
         # safety check while streaming the actual bytes directly to disk.
         encoded_length = ((content_length + 2) // 3) * 4
-        valid_upload, upload_error = queue_reliability.upload_validation(filename, mimetype, encoded_length, app.MAX_MEDIA_BYTES)
+        valid_upload, upload_error = queue_reliability.upload_validation(filename, mimetype, encoded_length, self.whatsapp.max_media_bytes)
         if not valid_upload:
             self.json_response({"queued": False, "error": upload_error}, HTTPStatus.BAD_REQUEST)
             return
-        media_path = app.save_outbound_media_stream(self, content_length, mimetype, filename)
+        media_path = self.whatsapp.save_outbound_media_stream(self, content_length, mimetype, filename)
         if not media_path:
             self.json_response({"queued": False, "error": "Не удалось сохранить вложение"}, HTTPStatus.BAD_REQUEST)
             return
-        message_id = app.STORE.queue_direct_message(
+        message_id = self.whatsapp.store.queue_direct_message(
             chat_id, body, work_actor(), mentions,
             reply_to_key=reply_to, media_path=media_path, media_mime=mimetype, media_name=filename,
         )
@@ -983,15 +1002,15 @@ class WhatsAppHandlerMixin:
         ids: list[str] = []
         for value in raw_ids[:20]:
             mid = normalize_message(str(value))[:160]
-            if mid and mid not in ids and app.STORE.get_whatsapp_message(source_chat, mid):
+            if mid and mid not in ids and self.whatsapp.store.get_whatsapp_message(source_chat, mid):
                 ids.append(mid)
         queued = []
         action_ids: list[int] = []
         action_message_ids: list[str] = []
         blocked_mentions = 0
         for mid in ids:
-            message = app.STORE.get_whatsapp_message(source_chat, mid) or {}
-            if app.mention_only_message(message):
+            message = self.whatsapp.store.get_whatsapp_message(source_chat, mid) or {}
+            if self.whatsapp.mention_only_message(message):
                 blocked_mentions += 1
                 continue
             payload = json.dumps(
@@ -1004,7 +1023,7 @@ class WhatsAppHandlerMixin:
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
-            action_id = app.STORE.queue_whatsapp_action("forward", source_chat, mid, payload, work_actor())
+            action_id = self.whatsapp.store.queue_whatsapp_action("forward", source_chat, mid, payload, work_actor())
             if action_id:
                 queued.append(action_id)
                 action_ids.append(int(action_id))
@@ -1029,7 +1048,7 @@ class WhatsAppHandlerMixin:
         payload = self.read_authorized_json()
         if payload is None:
             return
-        action = app.STORE.claim_whatsapp_action()
+        action = self.whatsapp.store.claim_whatsapp_action()
         self.json_response({"action": action})
 
     def handle_whatsapp_action_result(self) -> None:
@@ -1044,15 +1063,15 @@ class WhatsAppHandlerMixin:
         if action_id <= 0 or status not in {"sent", "failed"}:
             self.json_response({"updated": False}, HTTPStatus.BAD_REQUEST)
             return
-        action = app.STORE.complete_whatsapp_action(
+        action = self.whatsapp.store.complete_whatsapp_action(
             action_id, status == "sent", str(payload.get("error", ""))[:500]
         )
         if action and status == "sent":
             chat_id = str(action.get("chat_id", ""))
             message_key = str(action.get("message_key", ""))
             action_type = str(action.get("action_type", ""))
-            with app.CHAT_LOCK:
-                messages_by_chat = app.CHAT_STATE.get("messages", {})
+            with self.whatsapp.chat_lock:
+                messages_by_chat = self.whatsapp.chat_state.get("messages", {})
                 if isinstance(messages_by_chat, dict):
                     live = messages_by_chat.get(chat_id, [])
                     if isinstance(live, list):
@@ -1068,8 +1087,8 @@ class WhatsAppHandlerMixin:
                                 item["body"] = str(action.get("body", ""))
                                 item["edited"] = True
                             elif action_type == "react":
-                                stored = app.STORE.get_whatsapp_message(chat_id, message_key) or {}
-                                item["reactions"] = app.STORE._reaction_summary(stored.get("reactions_json", "{}"))
+                                stored = self.whatsapp.store.get_whatsapp_message(chat_id, message_key) or {}
+                                item["reactions"] = self.whatsapp.store._reaction_summary(stored.get("reactions_json", "{}"))
                             break
         if action:
             queue_realtime.notify("chat")
@@ -1083,14 +1102,14 @@ class WhatsAppHandlerMixin:
         payload = self.read_authorized_json()
         if payload is None:
             return
-        with app.CHAT_LOCK:
-            requested = str(app.CHAT_STATE.get("requested_chat_id", ""))
-            requested_group = str(app.CHAT_STATE.get("requested_group_id", ""))
+        with self.whatsapp.chat_lock:
+            requested = str(self.whatsapp.chat_state.get("requested_chat_id", ""))
+            requested_group = str(self.whatsapp.chat_state.get("requested_group_id", ""))
         unresolved_group_message_ids: list[str] = []
         if requested_group.endswith("@g.us"):
             generic = {"", "участник", "участник группы", "пользователь whatsapp", "direct"}
             try:
-                saved = app.STORE.list_saved_whatsapp_messages(requested_group, limit=80)
+                saved = self.whatsapp.store.list_saved_whatsapp_messages(requested_group, limit=80)
                 for item in reversed(saved):
                     if bool(item.get("from_me")):
                         continue
@@ -1110,7 +1129,7 @@ class WhatsAppHandlerMixin:
         quote_chat_id = requested_group if requested_group.endswith("@g.us") else requested
         if quote_chat_id:
             try:
-                for item in reversed(app.STORE.list_saved_whatsapp_messages(quote_chat_id, limit=30)):
+                for item in reversed(self.whatsapp.store.list_saved_whatsapp_messages(quote_chat_id, limit=30)):
                     if bool(item.get("deleted")):
                         continue
                     message_id = str(item.get("id", "") or "").strip()
@@ -1125,8 +1144,8 @@ class WhatsAppHandlerMixin:
         if requested and not requested.endswith("@g.us"):
             presence_ids.append(requested)
         if requested_group.endswith("@g.us"):
-            with app.CHAT_LOCK:
-                participants_map = app.CHAT_STATE.get("group_participants", {})
+            with self.whatsapp.chat_lock:
+                participants_map = self.whatsapp.chat_state.get("group_participants", {})
                 current_participants = list(participants_map.get(requested_group, [])) if isinstance(participants_map, dict) else []
             for participant in current_participants[:16]:
                 if not isinstance(participant, dict) or participant.get("is_me"):
@@ -1135,7 +1154,7 @@ class WhatsAppHandlerMixin:
                 if candidate and not candidate.endswith("@g.us") and candidate not in presence_ids:
                     presence_ids.append(candidate)
         self.json_response({
-            "read_chat_ids": [key for key, at in list(app.READ_MARKED_AT.items()) if time.monotonic() - at < 5],
+            "read_chat_ids": [key for key, at in list(self.whatsapp.read_marked_at.items()) if time.monotonic() - at < 5],
             "requested_chat_id": requested,
             "requested_group_id": requested_group,
             "presence_ids": presence_ids[:16],
