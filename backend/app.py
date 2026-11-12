@@ -191,6 +191,8 @@ def connector_token() -> str:
 WEBHOOK_TOKEN = connector_token()
 DEFAULT_EMPLOYEES = [f"Сотрудник {number}" for number in range(1, 6)]
 ADMIN_USER = os.getenv("QUEUE_ADMIN_USER", "queueadmin").strip().casefold()
+# Off by default: X-Remote-User is believed only when nginx signs users in and overwrites the header.
+TRUST_PROXY_USER = os.getenv("QUEUE_TRUST_PROXY_USER", "0") == "1"
 ADMIN_SESSION_TOKEN = secrets.token_urlsafe(48)
 ADMIN_SESSION_COOKIE = "queue_admin_session"
 ADMIN_SESSION_MAX_AGE = 12 * 60 * 60
@@ -1252,6 +1254,7 @@ HTTP_DEPENDENCIES = queue_http_handler.HttpDependencies(
     render_local_setup=render_local_setup, render_account=render_account, admin_users_data=admin_users_data,
     final_ticket_filter=_final_ticket_filter, update_ticket_status=update_ticket_status,
     set_chat_favorite=set_chat_favorite, create_scheduled_backup=create_scheduled_backup,
+    trust_proxy_user=TRUST_PROXY_USER,
 )
 WHATSAPP_DEPENDENCIES = queue_whatsapp_handlers.WhatsAppDependencies(
     store=STORE, attachments=ATTACHMENTS, chat_lock=CHAT_LOCK, chat_state=CHAT_STATE,
