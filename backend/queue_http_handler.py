@@ -71,6 +71,7 @@ class HttpDependencies:
     update_ticket_status: Callable[..., tuple]
     set_chat_favorite: Callable[[str, bool], tuple[bool, str]]
     create_scheduled_backup: Callable[..., object]
+    trust_proxy_user: bool = False  # QUEUE_TRUST_PROXY_USER=1: nginx signs users in and sets X-Remote-User
 
 
 # Files under static/ that may be served (every page asset is part of the main layout).
@@ -307,10 +308,13 @@ class QueueHTTPHandlerMixin:
         return False
 
     def authenticated_user(self) -> str:
-        # Локальный Windows-режим тоже использует настоящую
-        # авторизацию приложения. Автоматического входа администратором больше нет.
-        # На боевом сервере доверяем имени пользователя только от локального Nginx.
+        # Имя из X-Remote-User принимается только при QUEUE_TRUST_PROXY_USER=1: тогда вход проверяет
+        # nginx на этом сервере и всегда перезаписывает заголовок. Без этой настройки заголовку не
+        # верим: через прокси на том же сервере любой запрос приходит с 127.0.0.1, и адрес не
+        # отличает заголовок nginx от заголовка посетителя.
         # Клиентский Authorization здесь намеренно не разбирается.
+        if not self.deps.trust_proxy_user:
+            return ""
         remote_user = self.headers.get("X-Remote-User", "").strip()
         if self.client_address and self.client_address[0] in {"127.0.0.1", "::1"}:
             if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", remote_user):
