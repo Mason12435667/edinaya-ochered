@@ -7,6 +7,8 @@ from collections.abc import Callable, Iterable
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
+import queue_chat_export
+import queue_retention
 import queue_workflow as qw
 from queue_core import human_bytes, log_suppressed
 from ticketing import TicketStore
@@ -67,8 +69,8 @@ class WorkflowRoutes:
         return {"title": "Недавние чаты", "rows": rows}
 
     def admin_data(self):
-        settings = qw.retention_settings(self.store)
-        stats = qw.media_stats(self.store)
+        settings = queue_retention.retention_settings(self.store)
+        stats = queue_retention.media_stats(self.store)
         required = set(qw.required_close_categories(self.store))
         return {
             "title": "Рабочие настройки", "active": "workflow",
@@ -134,16 +136,16 @@ class WorkflowRoutes:
             fmt = _value(query, "format", "txt").lower()
             try:
                 if fmt == "zip":
-                    _, body = qw.export_zip(self.store, chat_id); _send_bytes(handler, body, "application/zip", "queue-chat.zip")
+                    _, body = queue_chat_export.export_zip(self.store, chat_id); _send_bytes(handler, body, "application/zip", "queue-chat.zip")
                 elif fmt == "pdf":
-                    _, body = qw.export_pdf(self.store, chat_id); _send_bytes(handler, body, "application/pdf", "queue-chat.pdf")
+                    _, body = queue_chat_export.export_pdf(self.store, chat_id); _send_bytes(handler, body, "application/pdf", "queue-chat.pdf")
                 else:
-                    _, body = qw.export_txt(self.store, chat_id); _send_bytes(handler, body, "text/plain; charset=utf-8", "queue-chat.txt")
+                    _, body = queue_chat_export.export_txt(self.store, chat_id); _send_bytes(handler, body, "text/plain; charset=utf-8", "queue-chat.txt")
             except Exception as exc:
                 handler.json_response({"error": str(exc)[:300]}, 500)
         elif path == "/api/workflow-media-stats":
             if not handler.require_admin(): return True
-            handler.json_response({"stats": qw.media_stats(self.store), "retention": qw.retention_settings(self.store)})
+            handler.json_response({"stats": queue_retention.media_stats(self.store), "retention": queue_retention.retention_settings(self.store)})
         else:
             return False
         return True
@@ -245,10 +247,10 @@ class WorkflowRoutes:
             elif path == "/admin/workflow":
                 action = form.get("action", "")
                 if action == "retention":
-                    settings = qw.save_retention_settings(self.store, int(form.get("messages","20") or 20), int(form.get("media","20") or 20), int(form.get("tickets","20") or 20))
+                    settings = queue_retention.save_retention_settings(self.store, int(form.get("messages","20") or 20), int(form.get("media","20") or 20), int(form.get("tickets","20") or 20))
                     notice = f"Сроки сохранены: сообщения {settings['messages']} дн., медиа {settings['media']} дн., заявки {settings['tickets']} дн."
                 elif action == "media_cleanup":
-                    result = qw.manual_media_cleanup(self.store, form.get("kind","all"), int(float(form.get("min_mb","0") or 0) * 1024 * 1024), int(form.get("older_days","0") or 0))
+                    result = queue_retention.manual_media_cleanup(self.store, form.get("kind","all"), int(float(form.get("min_mb","0") or 0) * 1024 * 1024), int(form.get("older_days","0") or 0))
                     notice = f"Очищено файлов: {result['files']}, освобождено: {_human_bytes(result['bytes'])}"
                 elif action == "close_categories":
                     values = [key.split("required_category__",1)[1] for key,value in form.items() if key.startswith("required_category__") and value in {"1","on","true"}]

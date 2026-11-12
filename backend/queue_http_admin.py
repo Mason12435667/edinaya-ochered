@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 import queue_reliability
 import queue_admin_views
-import queue_workflow
+import queue_retention
 from queue_core import display_phone, normalize_message, normalize_phone, valid_chat_id, valid_group_id
 from queue_store_conversations import MENU_CONTEXT
 from queue_work_context import active_employee, assignment_names, work_actor
@@ -322,7 +322,7 @@ class AdminRoutes:
             return
         action = form.get("action", "")
         if action == "cleanup":
-            result = queue_workflow.cleanup_retention(self.deps.store)
+            result = queue_retention.cleanup_retention(self.deps.store)
             notice = f"Очистка завершена: сообщений {result.get('messages',0)}, медиа {result.get('media_rows',0)}, заявок {result.get('tickets',0)}"
         elif action == "retry_failed":
             count = self.deps.store.retry_failed_outbound()

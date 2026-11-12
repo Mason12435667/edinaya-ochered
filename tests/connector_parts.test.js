@@ -16,6 +16,8 @@ const PARTS = {
   calling: 'connector_calls',
   recovering: 'connector_recovery',
   syncing: 'connector_sync',
+  grouping: 'connector_groups',
+  outgoing: 'connector_outgoing',
   whatsappActions: 'connector_actions',
   lifecycle: 'connector_lifecycle',
 };

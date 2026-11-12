@@ -35,40 +35,50 @@ window.QueueConversation = (() => {
 
   function startConversationPage() {
     if (!conversationPage) return;
+    // Части страницы из соседних файлов получают общее через page: элементы, функции и
+    // состояние, которое меняют несколько частей (page.selectedChatId и другие).
+    const page = {
+      avatarLetters, conversationPage, formatChatTime, loadChatState, placeholder, queueAlert,
+      queueMessageAction, selectedChatName, startReply, toggleForward,
+    };
+    Object.assign(
+      page, window.QueueChatHeaderBot(page), window.QueueChatMessageMenu(page), window.QueueChatMessages(page),
+      window.QueueChatComposer(page),
+    );
     const chatList = conversationPage.querySelector("[data-chat-list]");
     const chatSearch = conversationPage.querySelector("[data-chat-search]");
-    const chatMessages = conversationPage.querySelector("[data-chat-messages]");
+    const chatMessages = page.chatMessages = conversationPage.querySelector("[data-chat-messages]");
     const chatTitle = conversationPage.querySelector("[data-chat-title]");
     const contactPresence = conversationPage.querySelector("[data-contact-presence]");
     const chatIdInput = conversationPage.querySelector("[data-chat-id]");
-    const composer = conversationPage.querySelector("[data-chat-composer]");
+    const composer = page.composer = conversationPage.querySelector("[data-chat-composer]");
     const refreshButton = conversationPage.querySelector("[data-chat-refresh]");
     const connection = document.getElementById("whatsapp-connection");
-    let manualModeButton = conversationPage.querySelector("[data-manual-mode-toggle]");
+    page.manualModeButton = conversationPage.querySelector("[data-manual-mode-toggle]");
     let manualModeState = conversationPage.querySelector("[data-manual-mode-state]");
-    let botResetButton = conversationPage.querySelector("[data-bot-reset]");
+    page.botResetButton = conversationPage.querySelector("[data-bot-reset]");
     const profileButton = conversationPage.querySelector("[data-profile-toggle]");
     // This control belongs only to personal WhatsApp dialogs.
     // Never attach it to the Groups sidebar / "Обновить" button.
     const botRestartPersonalPage = location.pathname === "/whatsapp";
-    const botRestartHeaderActions = conversationPage.querySelector(".chat-header-actions");
-    if (!manualModeButton && botRestartPersonalPage) {
-      manualModeButton = document.createElement("button");
-      manualModeButton.type = "button";
-      manualModeButton.className = "button compact secondary";
-      manualModeButton.dataset.manualModeToggle = "1";
+    const botRestartHeaderActions = page.botRestartHeaderActions = conversationPage.querySelector(".chat-header-actions");
+    if (!page.manualModeButton && botRestartPersonalPage) {
+      page.manualModeButton = document.createElement("button");
+      page.manualModeButton.type = "button";
+      page.manualModeButton.className = "button compact secondary";
+      page.manualModeButton.dataset.manualModeToggle = "1";
       if (profileButton && profileButton.parentElement) {
-        profileButton.insertAdjacentElement("afterend", manualModeButton);
+        profileButton.insertAdjacentElement("afterend", page.manualModeButton);
       } else if (botRestartHeaderActions) {
-        botRestartHeaderActions.append(manualModeButton);
+        botRestartHeaderActions.append(page.manualModeButton);
       }
     }
-    if (!botResetButton && botRestartPersonalPage) {
-      botResetButton = document.createElement("button");
-      botResetButton.type = "button";
-      botResetButton.className = "button compact secondary toolbar-overflow-source";
-      botResetButton.dataset.botReset = "1";
-      botResetButton.textContent = "↻ Перезагрузить бота";
+    if (!page.botResetButton && botRestartPersonalPage) {
+      page.botResetButton = document.createElement("button");
+      page.botResetButton.type = "button";
+      page.botResetButton.className = "button compact secondary toolbar-overflow-source";
+      page.botResetButton.dataset.botReset = "1";
+      page.botResetButton.textContent = "↻ Перезагрузить бота";
     }
     if (!manualModeState && botRestartPersonalPage) {
       manualModeState = document.createElement("small");
@@ -78,8 +88,8 @@ window.QueueConversation = (() => {
       const titleBlock = chatTitle?.parentElement;
       if (titleBlock && chatHeader && chatHeader.contains(titleBlock)) {
         titleBlock.append(manualModeState);
-      } else if (manualModeButton?.parentElement) {
-        manualModeButton.parentElement.insertAdjacentElement("afterend", manualModeState);
+      } else if (page.manualModeButton?.parentElement) {
+        page.manualModeButton.parentElement.insertAdjacentElement("afterend", manualModeState);
       }
     }
 
@@ -88,199 +98,18 @@ window.QueueConversation = (() => {
     // - keeps the real v15 controls hidden in their original DOM location;
     // - creates menu proxy buttons which call the REAL control's .click();
     // - removes duplicate old auto-reply rows from the existing "..." menu.
-    let botManualContactV17 = false;
-    let botOverflowPanelV17 = null;
-    let nameAvatarSourceV17 = null;
-
-    const normalizeActionLabelV17 = (value) => String(value || "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLocaleLowerCase("ru-RU");
-
-    const isVisibleV17 = (element) => {
-      if (!element || !element.isConnected) return false;
-      const style = getComputedStyle(element);
-      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || 1) === 0) return false;
-      const box = element.getBoundingClientRect();
-      return box.width > 4 && box.height > 4;
-    };
-
-    function findNameAvatarSourceV17() {
-      if (nameAvatarSourceV17 && nameAvatarSourceV17.isConnected) return nameAvatarSourceV17;
-      const scope = botRestartHeaderActions || document;
-      const found = [...scope.querySelectorAll("button, a, [role='button']")].find((item) => {
-        if (item === manualModeButton || item === botResetButton) return false;
-        if (item.dataset && item.dataset.eoOverflowProxyV19 === "1") return false;
-        const label = normalizeActionLabelV17(item.textContent || item.getAttribute("aria-label") || item.title);
-        return label.includes("имя") && label.includes("аватар");
-      }) || null;
-      if (found) nameAvatarSourceV17 = found;
-      return found;
-    }
-
-    function parkHeaderBotControlsV17() {
-      findNameAvatarSourceV17();
-      // "hidden" is CSP-safe; unlike element.style it does not create an
-      // inline style declaration.
-      for (const button of [manualModeButton, botResetButton, nameAvatarSourceV17]) {
-        if (!button) continue;
-        button.classList.remove("toolbar-overflow-source", "bot-reload-visible");
-        button.hidden = true;
-      }
-    }
-
-    function panelLabelScoreV18(element) {
-      const text = normalizeActionLabelV17(element && element.textContent);
-      if (!text) return 0;
-      const labels = ["теги / заметка", "экспорт", "обращения", "заявка"];
-      return labels.reduce((score, label) => score + (text.includes(label) ? 1 : 0), 0);
-    }
-
-    function findExistingOverflowPanelV17() {
-      const selectors = [
-        "[role='menu']", "menu", "nav", "aside", "section", "details", "div"
-      ].join(",");
-      const candidates = [];
-      for (const node of document.querySelectorAll(selectors)) {
-        if (!isVisibleV17(node)) continue;
-        const score = panelLabelScoreV18(node);
-        if (score < 3) continue;
-        const rect = node.getBoundingClientRect();
-        if (rect.width < 120 || rect.width > 560 || rect.height < 80 || rect.height > 900) continue;
-        candidates.push({node, score, area: rect.width * rect.height});
-      }
-      candidates.sort((a,b) => (b.score - a.score) || (a.area - b.area));
-      return candidates[0]?.node || null;
-    }
-
-    function menuButtonClassV19(panel) {
-      const sample = [...panel.querySelectorAll("button, [role='button'], a")].find((item) =>
-        item !== manualModeButton &&
-        item !== botResetButton &&
-        item !== nameAvatarSourceV17 &&
-        item.dataset?.eoOverflowProxyV19 !== "1"
-      );
-      return sample && sample.className ? String(sample.className) : "button compact";
-    }
-
-    function removeDuplicateBotRowsV19(panel) {
-      const duplicateLabels = new Set([
-        "выключить автоответчик",
-        "включить автоответчик",
-        "отключить автоответы",
-        "включить автоответы",
-        "⏸ отключить автоответы",
-        "▶ включить автоответы",
-        "↻ перезагрузить бота",
-        "перезагрузить бота",
-        "↻ имя / аватар",
-        "имя / аватар",
-      ]);
-      [...panel.querySelectorAll("button, a, [role='button']")].forEach((item) => {
-        if (item.dataset?.eoOverflowProxyV19 === "1") return;
-        const label = normalizeActionLabelV17(item.textContent || item.getAttribute("aria-label") || item.title);
-        if (duplicateLabels.has(label)) item.remove();
-      });
-    }
-
-    function createProxyV19(panel, key, label, source) {
-      if (!panel || !source) return null;
-      let proxy = panel.querySelector(`[data-eo-overflow-proxy-v19="${key}"]`);
-      if (!proxy) {
-        proxy = document.createElement("button");
-        proxy.type = "button";
-        proxy.dataset.eoOverflowProxyV19 = key;
-        proxy.className = menuButtonClassV19(panel);
-        proxy.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-
-          const activeSource =
-            key === "manual" ? manualModeButton :
-            key === "reset" ? botResetButton :
-            findNameAvatarSourceV17();
-
-          if (!activeSource) {
-            window.QueueUI?.toast?.("Действие пока недоступно");
-            return;
-          }
-          if (activeSource.disabled) {
-            window.QueueUI?.toast?.("Сначала выберите пользователя");
-            return;
-          }
-
-          // HTMLElement.click() invokes the already-tested v15 handler even
-          // when the source control itself is hidden.
-          activeSource.click();
-
-          // Close the current overflow popover after the action.
-          const moreButton = [...document.querySelectorAll("button, [role='button'], summary")].find((item) => {
-            const text = normalizeActionLabelV17(item.textContent || item.getAttribute("aria-label") || item.title);
-            return text === "..." || text === "…";
-          });
-          if (moreButton) window.setTimeout(() => moreButton.click(), 0);
-        });
-        panel.append(proxy);
-      }
-      proxy.textContent = label;
-      proxy.disabled = !selectedChatId || Boolean(source.disabled);
-      return proxy;
-    }
-
-    function syncOverflowBotActionsV17() {
-      // Remove old broken v17 proxies and any stale v19 proxies which ended up
-      // outside the currently visible panel.
-      document.querySelectorAll("[data-eo-overflow-proxy-v17]").forEach((item) => item.remove());
-
-      const panel = findExistingOverflowPanelV17();
-      if (!panel) {
-        parkHeaderBotControlsV17();
-        return false;
-      }
-      botOverflowPanelV17 = panel;
-
-      const allowed = Boolean(selectedChatId) &&
-        !String(selectedChatId).endsWith("@g.us") &&
-        !botManualContactV17;
-
-      if (!allowed) {
-        panel.querySelectorAll("[data-eo-overflow-proxy-v19]").forEach((item) => item.remove());
-        parkHeaderBotControlsV17();
-        return true;
-      }
-
-      parkHeaderBotControlsV17();
-      removeDuplicateBotRowsV19(panel);
-
-      createProxyV19(
-        panel,
-        "manual",
-        manualModeActive ? "▶ Включить автоответы" : "⏸ Отключить автоответы",
-        manualModeButton
-      );
-      createProxyV19(panel, "reset", "↻ Перезагрузить бота", botResetButton);
-
-      const avatarAction = findNameAvatarSourceV17();
-      if (avatarAction) createProxyV19(panel, "avatar", "↻ Имя / аватар", avatarAction);
-
-      return true;
-    }
-
-    function scheduleOverflowSyncV17() {
-      [0, 25, 70, 150, 300, 600].forEach((delay) => window.setTimeout(syncOverflowBotActionsV17, delay));
-    }
-
+    page.botManualContactV17 = false;
     if (botRestartPersonalPage) {
       const titleBlock = chatTitle?.parentElement;
       if (manualModeState && titleBlock && manualModeState.parentElement !== titleBlock) titleBlock.append(manualModeState);
-      parkHeaderBotControlsV17();
+      page.parkHeaderBotControlsV17();
 
       document.addEventListener("click", (event) => {
         const target = event.target instanceof Element ? event.target.closest("button, summary, a, [role='button']") : null;
         if (!target) return;
-        const label = normalizeActionLabelV17(target.textContent || target.getAttribute("aria-label") || target.title);
+        const label = page.normalizeActionLabelV17(target.textContent || target.getAttribute("aria-label") || target.title);
         if (label === "..." || label === "…" || label.includes("ещё") || label.includes("дополн")) {
-          scheduleOverflowSyncV17();
+          page.scheduleOverflowSyncV17();
         }
       }, true);
 
@@ -290,8 +119,8 @@ window.QueueConversation = (() => {
         const observerV19 = new MutationObserver(() => {
           window.clearTimeout(observerTimerV19);
           observerTimerV19 = window.setTimeout(() => {
-            const panel = findExistingOverflowPanelV17();
-            if (panel) syncOverflowBotActionsV17();
+            const panel = page.findExistingOverflowPanelV17();
+            if (panel) page.syncOverflowBotActionsV17();
           }, 40);
         });
         observerV19.observe(document.body, {
@@ -307,13 +136,13 @@ window.QueueConversation = (() => {
     const participantsCount = conversationPage.querySelector("[data-participants-count]");
     const groupMuteButton = conversationPage.querySelector("[data-group-mute-toggle]");
     const mentionsInput = conversationPage.querySelector("[data-mentions-input]");
-    const replyInput = conversationPage.querySelector("[data-reply-to]");
+    const replyInput = page.replyInput = conversationPage.querySelector("[data-reply-to]");
     const replyPreview = conversationPage.querySelector("[data-reply-preview]");
     const replySender = conversationPage.querySelector("[data-reply-sender]");
     const replyBody = conversationPage.querySelector("[data-reply-body]");
     const replyCancel = conversationPage.querySelector("[data-reply-cancel]");
-    const mediaInput = conversationPage.querySelector("[data-media-input]");
-    const mediaName = conversationPage.querySelector("[data-media-name]");
+    const mediaInput = page.mediaInput = conversationPage.querySelector("[data-media-input]");
+    const mediaName = page.mediaName = conversationPage.querySelector("[data-media-name]");
     const emojiToggle = conversationPage.querySelector("[data-emoji-toggle]");
     const emojiPicker = conversationPage.querySelector("[data-emoji-picker]");
     let forwardToolbar = conversationPage.querySelector("[data-forward-toolbar]");
@@ -349,32 +178,32 @@ window.QueueConversation = (() => {
     const forwardEndpoint = conversationPage.dataset.forwardEndpoint || "/chat-forward";
     const emptyLabel = conversationPage.dataset.listEmpty || "Личные чаты пока не загружены";
     const selectLabel = conversationPage.dataset.selectTitle || "Выберите пользователя";
-    let selectedChatId = conversationPage.dataset.initialChatId || "";
+    page.selectedChatId = conversationPage.dataset.initialChatId || "";
     let chats = [];
     let lastChatsSignature = "";
     let stateSequence = 0;
     let forwardTargets = [];
     let forwardOptionsSignature = "";
     let forwardBusy = false;
-    let participants = [];
+    page.participants = [];
     let loading = false;
-    let lastMessageSignature = "";
-    let manualModeActive = false;
+    page.lastMessageSignature = "";
+    page.manualModeActive = false;
     let groupMuted = false;
     const PROFILE_OPEN_STORAGE_KEY = "queue-whatsapp-open-profile";
     let profileOpenChatId = "";
     try { profileOpenChatId = sessionStorage.getItem(PROFILE_OPEN_STORAGE_KEY) || ""; } catch (_) {}
-    let profileOpen = Boolean(selectedChatId && profileOpenChatId === selectedChatId);
+    let profileOpen = Boolean(page.selectedChatId && profileOpenChatId === page.selectedChatId);
     let currentProfile = {};
     const selectedMentionIds = new Set();
-    const selectedForForward = new Set();
-    const expandedLongMessages = new Set();
+    const selectedForForward = page.selectedForForward = new Set();
+    const expandedLongMessages = page.expandedLongMessages = new Set();
     let replyToMessage = null;
-    let historyCursor = "";
-    let historyHasMore = false;
-    let olderMessages = [];
-    let latestMessages = [];
-    const reactionValues = ["👍","❤️","😂","😮","😢","🙏","🔥","🎉","✅","👏","🤔","👀","😡","💯","👌","😁","😍","🥳"];
+    page.historyCursor = "";
+    page.historyHasMore = false;
+    page.olderMessages = [];
+    page.latestMessages = [];
+    const reactionValues = page.reactionValues = ["👍","❤️","😂","😮","😢","🙏","🔥","🎉","✅","👏","🤔","👀","😡","💯","👌","😁","😍","🥳"];
     const mentionPicker = document.createElement("div");
     mentionPicker.className = "mention-picker";
     mentionPicker.hidden = true;
@@ -390,300 +219,19 @@ window.QueueConversation = (() => {
     }
 
     function selectedChatName() {
-      const current = chats.find((chat) => chat.id === selectedChatId);
-      return current ? (cleanWhatsAppName(current.name) || chatFallbackName(selectedChatId)) : chatFallbackName(selectedChatId);
+      const current = chats.find((chat) => chat.id === page.selectedChatId);
+      return current ? (cleanWhatsAppName(current.name) || chatFallbackName(page.selectedChatId)) : chatFallbackName(page.selectedChatId);
     }
 
-    // QUEUE_LINKIFY_3_3_79: render http(s), www and plain-domain links as safe clickable anchors.
-    function appendMessageText(container, text, message) {
-      const value = String(text || "");
-      const exactMentions = [];
-      (Array.isArray(message && message.mentions) ? message.mentions : []).forEach((mention) => {
-        if (!mention || typeof mention !== "object") return;
-        const name = String(mention.name || "").trim();
-        if (name) exactMentions.push(`@${name}`);
-      });
-      exactMentions.sort((a, b) => b.length - a.length);
-      const escapedMentions = exactMentions.map((item) => item.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-      const mentionSource = escapedMentions.length
-        ? `(?:${escapedMentions.join("|")}|@[\\p{L}\\p{N}_.+:-]+)`
-        : "(?:@[\\p{L}\\p{N}_.+:-]+)";
-      const urlSource = "(?:(?:https?:\\/\\/|www\\.)[^\\s<>\\\"']+|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?\\.)+[A-Za-z]{2,24}(?:\\/[^\\s<>\\\"']*)?)";
-      let matcher;
-      try { matcher = new RegExp(`${mentionSource}|${urlSource}`, "giu"); }
-      catch (_) { matcher = /@[A-Za-zА-Яа-яЁё0-9_.+:-]+|https?:\/\/[^\s<>"']+|www\.[^\s<>"']+/gi; }
-      let cursor = 0;
-      for (const match of value.matchAll(matcher)) {
-        const index = Number(match.index || 0);
-        if (index > cursor) container.append(document.createTextNode(value.slice(cursor, index)));
-        let token = String(match[0] || "");
-        const isMention = token.startsWith("@");
-        const previousChar = index > 0 ? value[index - 1] : "";
-        const looksLikeBareDomain = !isMention && !/^https?:\/\//i.test(token) && !/^www\./i.test(token);
-        if (!isMention && looksLikeBareDomain && previousChar === "@") {
-          container.append(document.createTextNode(token));
-          cursor = index + token.length;
-          continue;
-        }
-        if (isMention) {
-          const mention = document.createElement("span");
-          mention.className = `chat-inline-mention${message && message.highlight_mention ? " mention-highlighted" : ""}`;
-          mention.textContent = token;
-          container.append(mention);
-          cursor = index + token.length;
-          continue;
-        }
-        let trailing = "";
-        while (token && /[.,!?;:]$/.test(token)) {
-          trailing = token.slice(-1) + trailing;
-          token = token.slice(0, -1);
-        }
-        if (!token) {
-          container.append(document.createTextNode(match[0]));
-          cursor = index + String(match[0]).length;
-          continue;
-        }
-        const link = document.createElement("a");
-        link.className = "chat-inline-link";
-        link.textContent = token;
-        link.href = /^https?:\/\//i.test(token) ? token : `https://${token}`;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.title = "Открыть ссылку";
-        link.addEventListener("click", (event) => event.stopPropagation());
-        container.append(link);
-        if (trailing) container.append(document.createTextNode(trailing));
-        cursor = index + String(match[0]).length;
-      }
-      if (cursor < value.length) container.append(document.createTextNode(value.slice(cursor)));
-    }
-
-    function isMentionOnlyMessage(message) {
-      if (!message || message.deleted) return false;
-      if (message.media_url || message.media_name || message.quoted_message_key) return false;
-      const body = String(message.body || "").trim();
-      if (!body || !body.includes("@")) return false;
-      let rest = body;
-      const tokens = [];
-      (Array.isArray(message.mentions) ? message.mentions : []).forEach((mention) => {
-        if (!mention || typeof mention !== "object") return;
-        [mention.name, mention.id, mention.resolved_id].forEach((raw) => {
-          let value = String(raw || "").trim();
-          if (!value) return;
-          if (value.includes("@") && !value.startsWith("@")) value = value.split("@", 1)[0];
-          value = value.replace(/^@+/, "").trim();
-          if (value) tokens.push(`@${value}`);
-        });
-      });
-      [...new Set(tokens)].sort((a, b) => b.length - a.length).forEach((token) => {
-        const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        rest = rest.replace(new RegExp(escaped, "giu"), "");
-      });
-      try { rest = rest.replace(/@[\p{L}\p{N}_.+:-]+/gu, ""); }
-      catch (_) { rest = rest.replace(/@[A-Za-zА-Яа-яЁё0-9_.+:-]+/g, ""); }
-      return rest.trim() === "";
-    }
-
-    function myReaction(message) {
-      const rows = Array.isArray(message && message.reactions) ? message.reactions : [];
-      const mine = rows.find((item) => item && item.me);
-      return mine ? String(mine.emoji || "") : "";
-    }
-
-    let activeMessageContextMenu = null;
-
-    function closeMessageContextMenu() {
-      if (activeMessageContextMenu && activeMessageContextMenu.isConnected) activeMessageContextMenu.remove();
-      activeMessageContextMenu = null;
-    }
-
-    function closeReactionPickers() {
-      document.querySelectorAll(".message-reaction-picker").forEach((picker) => {
-        const triggerId = picker.dataset.triggerId || "";
-        if (triggerId) document.getElementById(triggerId)?.setAttribute("aria-expanded", "false");
-        picker.remove();
-      });
-    }
-
-    function clampFloatingPanel(panel, left, top, margin = 10) {
-      if (!panel) return;
-      panel.style.right = "auto";
-      panel.style.bottom = "auto";
-      panel.style.left = `${Math.max(margin, Number(left) || margin)}px`;
-      panel.style.top = `${Math.max(margin, Number(top) || margin)}px`;
-      const adjust = () => {
-        if (!panel.isConnected) return;
-        const rect = panel.getBoundingClientRect();
-        let dx = 0, dy = 0;
-        if (rect.left < margin) dx = margin - rect.left;
-        else if (rect.right > window.innerWidth - margin) dx = (window.innerWidth - margin) - rect.right;
-        if (rect.top < margin) dy = margin - rect.top;
-        else if (rect.bottom > window.innerHeight - margin) dy = (window.innerHeight - margin) - rect.bottom;
-        if (!dx && !dy) return;
-        const scaleX = rect.width > 0 && panel.offsetWidth > 0 ? rect.width / panel.offsetWidth : 1;
-        const scaleY = rect.height > 0 && panel.offsetHeight > 0 ? rect.height / panel.offsetHeight : scaleX;
-        const currentLeft = Number.parseFloat(panel.style.left) || 0;
-        const currentTop = Number.parseFloat(panel.style.top) || 0;
-        panel.style.left = `${currentLeft + dx / (scaleX || 1)}px`;
-        panel.style.top = `${currentTop + dy / (scaleY || 1)}px`;
-      };
-      adjust();
-      requestAnimationFrame(adjust);
-    }
-    window.QueueClampFloatingPanel = clampFloatingPanel;
-
-    function openReactionPicker(message, bubble, button, pointer = null) {
-      const anchorRect = button?.getBoundingClientRect ? button.getBoundingClientRect() : bubble?.getBoundingClientRect();
-      closeReactionPickers();
-      closeMessageContextMenu();
-      const picker = document.createElement("div");
-      picker.className = "message-reaction-picker";
-      picker.setAttribute("role", "menu");
-      const triggerId = `reaction-trigger-${String(message?.id || "message").replace(/[^a-zA-Z0-9_-]/g, "-")}-${Date.now()}`;
-      if (button) {
-        button.id = button.id || triggerId;
-        picker.dataset.triggerId = button.id;
-        button.setAttribute("aria-expanded", "true");
-      }
-      const current = myReaction(message);
-      reactionValues.forEach((emoji) => {
-        const option = document.createElement("button");
-        option.type = "button";
-        option.textContent = emoji;
-        option.title = emoji === current ? "Убрать реакцию" : `Реакция ${emoji}`;
-        option.setAttribute("role", "menuitem");
-        if (emoji === current) option.classList.add("selected");
-        option.addEventListener("click", async (event) => {
-          event.stopPropagation();
-          picker.remove();
-          if (button) button.setAttribute("aria-expanded", "false");
-          await queueMessageAction(message, "react", emoji === current ? "" : emoji);
-        });
-        picker.append(option);
-      });
-      document.body.append(picker);
-
-      // Position in the viewport instead of inside the message bubble. This keeps
-      // the picker visible for the first/last message and prevents clipping by
-      // the scrollable chat container.
-      const margin = 10;
-      const pickerRect = picker.getBoundingClientRect();
-      const chatRect = chatMessages?.getBoundingClientRect ? chatMessages.getBoundingClientRect() : null;
-      const safeTop = chatRect ? Math.max(margin, chatRect.top + margin) : margin;
-      const safeBottom = chatRect ? Math.min(window.innerHeight - margin, chatRect.bottom - margin) : window.innerHeight - margin;
-      let left;
-      let top;
-      if (pointer && Number.isFinite(pointer.clientX) && Number.isFinite(pointer.clientY)) {
-        left = pointer.clientX;
-        top = pointer.clientY + 8;
-      } else if (anchorRect) {
-        left = message?.from_me ? anchorRect.right - pickerRect.width : anchorRect.left;
-        const roomAbove = anchorRect.top - safeTop;
-        const roomBelow = safeBottom - anchorRect.bottom;
-        const messageRows = chatMessages ? [...chatMessages.querySelectorAll("[data-message-id]")] : [];
-        const isFirstMessage = Boolean(bubble?.parentElement && messageRows[0] === bubble.parentElement);
-        // The first message should open downward like WhatsApp instead of
-        // covering the chat header or being visually clipped at the top.
-        if (isFirstMessage && roomBelow > 56) top = anchorRect.bottom + 8;
-        else if (roomAbove >= pickerRect.height || roomAbove > roomBelow) top = anchorRect.top - pickerRect.height - 8;
-        else top = anchorRect.bottom + 8;
-      } else {
-        left = margin;
-        top = safeTop;
-      }
-      clampFloatingPanel(picker, left, top, margin);
-      if (chatRect && chatRect.height >= pickerRect.height + margin * 2) {
-        const minTop = Math.max(margin, chatRect.top + margin);
-        const maxTop = Math.min(window.innerHeight - pickerRect.height - margin, chatRect.bottom - pickerRect.height - margin);
-        const currentTop = Number.parseFloat(picker.style.top || String(top));
-        picker.style.top = `${Math.min(Math.max(minTop, currentTop), Math.max(minTop, maxTop))}px`;
-      }
-
-      window.setTimeout(() => {
-        const close = (event) => {
-          if (picker.isConnected && !picker.contains(event.target) && event.target !== button) {
-            picker.remove();
-            if (button) button.setAttribute("aria-expanded", "false");
-          }
-          document.removeEventListener("click", close, true);
-        };
-        document.addEventListener("click", close, true);
-      }, 0);
-    }
-
-    function openMessageContextMenu(event, message, bubble) {
-      if (!message || !message.id || message.deleted) return;
-      event.preventDefault();
-      event.stopPropagation();
-      closeReactionPickers();
-      closeMessageContextMenu();
-
-      const menu = document.createElement("div");
-      menu.className = "message-context-menu";
-      menu.setAttribute("role", "menu");
-      activeMessageContextMenu = menu;
-
-      const addItem = (label, icon, action, danger = false, disabled = false) => {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = `message-context-item${danger ? " danger" : ""}`;
-        item.setAttribute("role", "menuitem");
-        item.disabled = Boolean(disabled);
-        const iconEl = document.createElement("span");
-        iconEl.className = "message-context-icon";
-        iconEl.textContent = icon;
-        const labelEl = document.createElement("span");
-        labelEl.textContent = label;
-        item.append(iconEl, labelEl);
-        item.addEventListener("click", (clickEvent) => {
-          clickEvent.stopPropagation();
-          action(item, clickEvent);
-        });
-        menu.append(item);
-        return item;
-      };
-
-      addItem("Реакция", "☺", (item) => openReactionPicker(message, bubble, item));
-      addItem("Ответить", "↩", () => { closeMessageContextMenu(); startReply(message); });
-      addItem(messageIsBookmarked(selectedChatId, message.id) ? "Убрать из избранного" : "В избранное", "★",
-        () => { closeMessageContextMenu(); toggleMessageBookmark(message).catch((err) => queueAlert(err.message)); });
-      const forwardBlocked = isMentionOnlyMessage(message) && !selectedForForward.has(message.id);
-      const forwardItem = addItem(
-        selectedForForward.has(message.id) ? "Убрать из пересылки" : "Переслать",
-        "↪",
-        () => { closeMessageContextMenu(); toggleForward(message); },
-        false,
-        forwardBlocked,
-      );
-      if (forwardBlocked) forwardItem.title = "Нельзя пересылать сообщение, состоящее только из тега пользователя";
-      if (message.from_me) {
-        const separator = document.createElement("div");
-        separator.className = "message-context-separator";
-        menu.append(separator);
-        addItem("Изменить", "✎", () => { closeMessageContextMenu(); queueMessageAction(message, "edit"); });
-        addItem("Удалить", "⌫", () => { closeMessageContextMenu(); queueMessageAction(message, "delete"); }, true);
-      }
-
-      document.body.append(menu);
-      clampFloatingPanel(menu, event.clientX + 2, event.clientY + 2, 8);
-      menu.querySelector("button")?.focus({preventScroll: true});
-
-      window.setTimeout(() => {
-        const close = (clickEvent) => {
-          if (menu.isConnected && !menu.contains(clickEvent.target)) closeMessageContextMenu();
-          document.removeEventListener("click", close, true);
-        };
-        document.addEventListener("click", close, true);
-      }, 0);
-    }
+    window.QueueClampFloatingPanel = page.clampFloatingPanel;
 
     function selectChat(chatId) {
       if (composer.dataset.sending === "1") return;
       try { sessionStorage.removeItem(`queue-manual-unread:${chatId}`); } catch (_) {}
-      saveDraft();
-      const changed = selectedChatId !== chatId;
-      if (changed && selectedChatId) void window.QueueConversationLock?.releaseIfOwned?.(selectedChatId);
-      selectedChatId = chatId;
+      page.saveDraft();
+      const changed = page.selectedChatId !== chatId;
+      if (changed && page.selectedChatId) void window.QueueConversationLock?.releaseIfOwned?.(page.selectedChatId);
+      page.selectedChatId = chatId;
       if (changed) {
         profileOpen = false;
         profileOpenChatId = "";
@@ -696,14 +244,14 @@ window.QueueConversation = (() => {
         if (replyInput) replyInput.value = "";
         if (replyPreview) replyPreview.hidden = true;
         if (mentionsInput) mentionsInput.value = "";
-        historyCursor = "";
-        historyHasMore = false;
-        olderMessages = [];
-        latestMessages = [];
-        clearAttachment();
-        restoreDraft();
+        page.historyCursor = "";
+        page.historyHasMore = false;
+        page.olderMessages = [];
+        page.latestMessages = [];
+        page.clearAttachment();
+        page.restoreDraft();
       }
-      lastMessageSignature = "";
+      page.lastMessageSignature = "";
       updateForwardToolbar();
       chatIdInput.value = chatId;
       chatTitle.textContent = selectedChatName();
@@ -737,79 +285,10 @@ window.QueueConversation = (() => {
       const value = Number(chat.waiting_since || 0);
       return Number.isFinite(value) && value > 0 ? value : 0;
     }
-    // Saved messages are per logged-in employee and persisted in app_settings.
-    let messageBookmarks = [];
-    const bookmarkKey = (chatId, messageId) => `${String(chatId || '')}\u0001${String(messageId || '')}`;
-    function messageIsBookmarked(chatId, messageId) {
-      return messageBookmarks.some((item) => bookmarkKey(item.chat_id, item.message_id) === bookmarkKey(chatId, messageId));
-    }
-    async function refreshMessageBookmarks(refreshMessages = false) {
-      const response = await fetch('/api/message-bookmarks', {cache: 'no-store'});
-      if (!response.ok) throw new Error('Не удалось загрузить избранные сообщения');
-      const data = await response.json();
-      messageBookmarks = Array.isArray(data.bookmarks) ? data.bookmarks : [];
-      if (refreshMessages && selectedChatId) {
-        lastMessageSignature = '';
-        renderMessages(mergedConversationMessages());
-      }
-      return messageBookmarks;
-    }
-    async function toggleMessageBookmark(message) {
-      if (!message?.id || !selectedChatId) return;
-      const newValue = !messageIsBookmarked(selectedChatId, message.id);
-      const body = new URLSearchParams({
-        chat_id: selectedChatId, message_id: String(message.id), favorite: newValue ? '1' : '0',
-        preview: String(message.body || message.media_name || '[Вложение]').slice(0, 280),
-        sender: String(message.sender || (message.from_me ? 'Вы' : '')).slice(0, 100),
-        chat_name: selectedChatName(), timestamp: String(message.timestamp || 0),
-      });
-      const response = await fetch('/api/message-bookmarks', {
-        method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'}, body,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.updated) throw new Error(data.error || 'Не удалось изменить закладку');
-      messageBookmarks = Array.isArray(data.bookmarks) ? data.bookmarks : [];
-      lastMessageSignature = '';
-      renderMessages(mergedConversationMessages());
-      window.QueueUI?.toast?.(newValue ? 'Сообщение сохранено в избранное' : 'Сообщение удалено из избранного');
-    }
-    async function showMessageBookmarks() {
-      try { await refreshMessageBookmarks(); }
-      catch (error) { window.QueueUI?.toast?.(error.message); return; }
-      const overlay = document.createElement('div');
-      overlay.className = 'queue-bookmarks-overlay';
-      const panel = document.createElement('section');
-      panel.className = 'queue-bookmarks-panel';
-      panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true');
-      panel.setAttribute('aria-label', 'Избранные сообщения');
-      const header = document.createElement('header');
-      const heading = document.createElement('h2'); heading.textContent = `★ Избранные сообщения (${messageBookmarks.length})`;
-      const close = document.createElement('button'); close.type = 'button'; close.className = 'button compact ghost'; close.textContent = 'Закрыть';
-      const onKey = (event) => { if (event.key === 'Escape') dismiss(); };
-      const dismiss = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
-      close.addEventListener('click', dismiss); header.append(heading, close); panel.append(header);
-      const list = document.createElement('div'); list.className = 'queue-bookmarks-list';
-      if (!messageBookmarks.length) {
-        const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = 'Пока нет сохранённых сообщений.'; list.append(empty);
-      }
-      for (const item of messageBookmarks) {
-        const link = document.createElement('a'); link.className = 'queue-bookmark-entry';
-        const isGroup = String(item.chat_id || '').endsWith('@g.us');
-        const query = new URLSearchParams({chat_id: String(item.chat_id), message_id: String(item.message_id)});
-        if (item.timestamp) query.set('before_ts', String(item.timestamp));
-        link.href = (isGroup ? '/groups?' : '/whatsapp?') + query;
-        const name = document.createElement('strong'); name.textContent = String(item.chat_name || item.chat_id || 'Чат');
-        const preview = document.createElement('span'); preview.textContent = `${item.sender ? item.sender + ': ' : ''}${item.preview || '[Сообщение]'}`;
-        link.append(name, preview); list.append(link);
-      }
-      panel.append(list); overlay.append(panel);
-      overlay.addEventListener('click', (event) => { if (event.target === overlay) dismiss(); });
-      document.addEventListener('keydown', onKey); document.body.append(overlay); close.focus();
-    }
     // Bookmarks open through /bookmarks (?bookmarks=1); the sidebar has no button for them.
-    refreshMessageBookmarks(true).catch(() => {});
+    page.refreshMessageBookmarks(true).catch(() => {});
     if (new URLSearchParams(location.search).get('bookmarks') === '1') {
-      showMessageBookmarks();
+      page.showMessageBookmarks();
     }
 
     // QUEUE_FAVORITES_3_3_79
@@ -841,7 +320,7 @@ window.QueueConversation = (() => {
       // Starred chats stay at the top, recent chats follow in timestamp order.
       filtered.sort((left, right) => Number(Boolean(right.favorite)) - Number(Boolean(left.favorite))
         || Number(right.timestamp || 0) - Number(left.timestamp || 0));
-      const chatsSignature = selectedChatId + query + needsReplyOnly + JSON.stringify(filtered);
+      const chatsSignature = page.selectedChatId + query + needsReplyOnly + JSON.stringify(filtered);
       if (lastChatsSignature === chatsSignature) return;
       lastChatsSignature = chatsSignature;
       chatList.replaceChildren();
@@ -852,7 +331,7 @@ window.QueueConversation = (() => {
       filtered.forEach((chat) => {
         const button = document.createElement("button");
         button.type = "button";
-        button.className = `chat-list-item${chat.id === selectedChatId ? " active" : ""}`;
+        button.className = `chat-list-item${chat.id === page.selectedChatId ? " active" : ""}`;
         button.addEventListener("click", () => selectChat(chat.id));
 
         const avatar = document.createElement("span");
@@ -992,20 +471,20 @@ window.QueueConversation = (() => {
       if (selectedForForward.has(message.id)) {
         selectedForForward.delete(message.id);
       } else {
-        if (isMentionOnlyMessage(message)) {
+        if (page.isMentionOnlyMessage(message)) {
           queueAlert("Нельзя пересылать сообщение, состоящее только из тега пользователя");
           return;
         }
         if (selectedForForward.size < 20) selectedForForward.add(message.id);
       }
       updateForwardToolbar();
-      lastMessageSignature = "";
+      page.lastMessageSignature = "";
       loadChatState(true);
     }
 
     async function sendForwardSelection() {
       if (forwardBusy) return;
-      if (!selectedChatId) {
+      if (!page.selectedChatId) {
         queueAlert("Сначала откройте чат с сообщением для пересылки");
         return;
       }
@@ -1025,7 +504,7 @@ window.QueueConversation = (() => {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
-            source_chat_id: selectedChatId,
+            source_chat_id: page.selectedChatId,
             target_chat_id: forwardTarget.value,
             message_ids: [...selectedForForward],
           }),
@@ -1077,7 +556,7 @@ window.QueueConversation = (() => {
     }
 
     async function queueMessageAction(message, action, actionBody = "") {
-      if (!message || !message.id || !selectedChatId) return;
+      if (!message || !message.id || !page.selectedChatId) return;
       let body = action === "react" ? String(actionBody || "") : "";
       if (action === "edit") {
         const editedBody = await queuePrompt("Введите новый текст сообщения", message.body || "", "Изменить сообщение");
@@ -1089,7 +568,7 @@ window.QueueConversation = (() => {
       }
       try {
         const response = await postForm("/chat-action", {
-          chat_id: selectedChatId,
+          chat_id: page.selectedChatId,
           message_id: message.id,
           action,
           message: body,
@@ -1097,446 +576,10 @@ window.QueueConversation = (() => {
         const result = await response.json();
         if (!response.ok || !result.queued || !result.action_id) throw new Error(result.error || "Действие не поставлено в очередь");
         await waitForMessageAction(result.action_id);
-        lastMessageSignature = "";
+        page.lastMessageSignature = "";
         await loadChatState(true);
       } catch (error) {
         queueAlert(error.message || "Не удалось изменить сообщение");
-      }
-    }
-
-    function appendMedia(bubble, message) {
-      if (!message.media_url || message.deleted) return;
-      const type = String(message.type || "");
-      const mime = String(message.media_mime || "");
-      if (type === "image" || mime.startsWith("image/")) {
-        const zoom = document.createElement("button");
-        zoom.type = "button";
-        zoom.className = "chat-media-zoom";
-        zoom.dataset.mediaZoom = message.media_url;
-        zoom.dataset.mediaName = message.media_name || "Фото";
-        zoom.title = "Нажмите, чтобы увеличить фото";
-        const image = document.createElement("img");
-        image.className = "chat-media-image";
-        image.loading = "lazy";
-        image.decoding = "async";
-        if (mime === "image/gif" || String(message.media_name || "").toLowerCase().endsWith(".gif")) zoom.classList.add("is-gif");
-        image.src = message.media_url;
-        image.addEventListener("error", () => {
-          image.hidden = true;
-          zoom.textContent = "Фото недоступно";
-        });
-        image.alt = message.media_name || "Фото";
-        zoom.append(image);
-        bubble.append(zoom);
-      } else if (["audio", "ptt"].includes(type) || mime.startsWith("audio/")) {
-        const audio = document.createElement("button");
-        audio.type = "button"; audio.className = "voice-source-button";
-        audio.textContent = "▶ Голосовое сообщение";
-        const sourceChat = selectedChatId;
-        audio.addEventListener("click", () => window.QueueVoice.play(message, sourceChat));
-        bubble.append(audio);
-      } else if (type === "video" || mime.startsWith("video/")) {
-        const video = document.createElement("video");
-        video.className = "chat-media-video";
-        video.controls = true;
-        video.preload = "metadata";
-        video.src = message.media_url;
-        video.addEventListener("error", () => { video.title = "Видео недоступно или формат не поддерживается браузером"; });
-        video.playsInline = true;
-        video.addEventListener("play", () => {
-          document.querySelectorAll("audio,video").forEach(other => { if (other !== video) other.pause(); });
-        });
-        bubble.append(video);
-      } else {
-        const box = document.createElement("span");
-        box.className = "chat-media-file-box";
-        const link = document.createElement("a");
-        link.className = "chat-media-file";
-        link.href = message.media_url;
-        link.target = "_blank";
-        link.textContent = message.media_name || "Открыть вложение";
-        const download = document.createElement("a");
-        download.className = "chat-media-download";
-        download.href = `${message.media_url}&download=1`;
-        download.textContent = "Скачать";
-        box.append(link, download);
-        bubble.append(box);
-      }
-    }
-
-    function mergedConversationMessages() {
-      const byId = new Map();
-      [...olderMessages, ...latestMessages].forEach((message) => {
-        const key = String(message && message.id || `${message.timestamp}:${message.from_me ? 1 : 0}:${message.body || ""}`);
-        const previous = byId.get(key) || {};
-        byId.set(key, {...previous, ...message, deleted: Boolean(previous.deleted || message.deleted)});
-      });
-      return [...byId.values()].sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
-    }
-
-    let historyLoading = false;
-    async function loadOlderMessages() {
-      if (historyLoading || !selectedChatId || !historyHasMore || !historyCursor) return;
-      historyLoading = true;
-      const historyChat = selectedChatId;
-      const oldHeight = chatMessages.scrollHeight;
-      const oldTop = chatMessages.scrollTop;
-      try {
-        const response = await fetch(`/api/chat-history?chat_id=${encodeURIComponent(selectedChatId)}&cursor=${encodeURIComponent(historyCursor)}`, {cache: "no-store"});
-        if (!response.ok) throw new Error("Не удалось загрузить историю");
-        const result = await response.json();
-        if (historyChat !== selectedChatId) return;
-        const pageMessages = Array.isArray(result.messages) ? result.messages : [];
-        olderMessages = [...pageMessages, ...olderMessages];
-        historyCursor = String(result.cursor || "");
-        historyHasMore = Boolean(result.has_more);
-        lastMessageSignature = "";
-        renderMessages(mergedConversationMessages(), true, oldHeight, oldTop);
-      } catch (error) {
-        queueAlert(error.message || "Не удалось загрузить предыдущие сообщения");
-      } finally { historyLoading = false; }
-    }
-
-    function focusMessageRow(messageId, smooth = true) {
-      const wanted = String(messageId || "");
-      if (!wanted || !chatMessages) return false;
-      const targetRow = [...chatMessages.querySelectorAll("[data-message-id]")].find((row) => row.dataset.messageId === wanted);
-      if (!targetRow) return false;
-      targetRow.classList.remove("search-message-target");
-      void targetRow.offsetWidth;
-      targetRow.classList.add("search-message-target");
-      window.setTimeout(() => targetRow.classList.remove("search-message-target"), 6000);
-      targetRow.scrollIntoView({
-        block: "center",
-        behavior: smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto",
-      });
-      return true;
-    }
-
-
-    function normalizeQuoteText(value) {
-      return String(value || "")
-        .replace(/[.…]+$/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLocaleLowerCase("ru-RU");
-    }
-
-    function normalizedMessageKey(value) {
-      return String(value || "").trim().replace(/\s+/g, "");
-    }
-
-    function messageKeysMatch(left, right) {
-      const a = String(left || "").trim(), b = String(right || "").trim();
-      if (!a || !b) return false;
-      if (a === b) return true;
-      const parse = value => { const m = /^(true|false)_([^_]+)_(.+)$/.exec(value); return m ? [m[1], m[3]] : ["", value]; };
-      const [ad, aid] = parse(a), [bd, bid] = parse(b);
-      return aid === bid && aid.length >= 8 && (!ad || !bd || ad === bd);
-    }
-    function quoteBodiesMatch() { return false; }
-    function findQuotedMessageCandidate(reply, targetId) {
-      const matches = mergedConversationMessages().filter(m => !m.deleted && messageKeysMatch(m.id, targetId));
-      return matches.length === 1 ? matches[0] : null;
-    }
-
-    function renderMessages(messages, preserveScroll = false, oldHeight = 0, oldTop = 0) {
-      // Do not destroy an audio/video player during background polling.
-
-      // Auto-refresh must not throw the employee back to the newest message while
-      // they are reading older history. If the user is already near the bottom,
-      // keep following new messages like WhatsApp does.
-      const anchor = [...chatMessages.querySelectorAll("[data-message-id]")].find(row => row.getBoundingClientRect().bottom > chatMessages.getBoundingClientRect().top);
-      const anchorOffset = anchor ? anchor.getBoundingClientRect().top - chatMessages.getBoundingClientRect().top : 0;
-      const currentTop = chatMessages.scrollTop;
-      const currentHeight = chatMessages.scrollHeight;
-      const currentClientHeight = chatMessages.clientHeight;
-      const wasNearBottom = !new URL(location.href).searchParams.has("message_id") && currentHeight - (currentTop + currentClientHeight) <= 96;
-      const signature = `${historyHasMore ? 1 : 0}:${historyCursor}|` + messages
-        .map((message) => `${message.id}:${message.timestamp}:${message.ack || 0}:${message.edited ? 1 : 0}:${message.deleted ? 1 : 0}:${message.forwarded ? 1 : 0}:${message.sender || ""}:${message.sender_phone || ""}:${message.sender_avatar_url || ""}:${message.body || ""}:${message.media_url || ""}:${message.quoted_message_key || ""}:${message.quoted_sender || ""}:${message.quoted_body || ""}:${message.quote_preview_url || ""}:${message.quote_unavailable ? 1 : 0}:${message.transcript || ""}:${message.highlight_mention ? 1 : 0}:${message.media_name || ""}:${(Array.isArray(message.reactions) ? message.reactions : []).map((reaction) => `${reaction.emoji || ""},${reaction.count || 0},${reaction.me ? 1 : 0}`).join(";")}:${selectedForForward.has(message.id) ? 1 : 0}:${messageIsBookmarked(selectedChatId, message.id) ? 1 : 0}`)
-        .join("|");
-      if (signature === lastMessageSignature) return;
-      lastMessageSignature = signature;
-      const oldRows = new Map([...chatMessages.querySelectorAll("[data-message-id]")].map(row => [row.dataset.messageId, row]));
-      const nodes = [];
-      if (!selectedChatId) {
-        placeholder(chatMessages, "Выберите чат слева, чтобы увидеть последние сообщения");
-        return;
-      }
-      if (!messages.length) {
-        placeholder(chatMessages, "В этом чате нет загруженных сообщений");
-        return;
-      }
-      if (historyHasMore) {
-        const historyBar = document.createElement("div");
-        historyBar.className = "chat-history-more";
-        const historyButton = document.createElement("button");
-        historyButton.type = "button";
-        historyButton.className = "button compact ghost";
-        historyButton.textContent = "Загрузить ещё 50 сообщений";
-        historyButton.addEventListener("click", loadOlderMessages);
-        historyBar.append(historyButton);
-        nodes.push(historyBar);
-      }
-      messages.forEach((message) => {
-        const key = JSON.stringify(message) + selectedForForward.has(message.id) + ':' + messageIsBookmarked(selectedChatId, message.id);
-        const existing = oldRows.get(String(message.id));
-        if (existing && (existing.dataset.renderKey === key || (!message.deleted && [...existing.querySelectorAll("audio,video")].some(media => !media.paused && !media.ended)))) {
-          nodes.push(existing);
-          if (existing.dataset.renderKey !== key) lastMessageSignature = "";
-          return;
-        }
-        const row = document.createElement("div");
-        row.className = `chat-message-row ${message.from_me ? "outgoing" : "incoming"}${selectedForForward.has(message.id) ? " selected-forward" : ""}`;
-        row.dataset.messageId = message.id;
-        row.dataset.renderKey = key;
-        if (message.highlight_mention) row.classList.add("mentioned-message");
-        const bubble = document.createElement("div");
-        bubble.className = "chat-bubble";
-        let messageParticipant = null;
-        if (!message.from_me && selectedChatId.endsWith("@g.us")) {
-          const senderId = String(message.sender_id || "").trim();
-          messageParticipant = participants.find((item) =>
-            (senderId && [item.mention_id, item.resolved_id].map((value) => String(value || "").trim()).includes(senderId))
-          ) || null;
-          const senderAvatar = document.createElement("span");
-          senderAvatar.className = "chat-message-author-avatar";
-          senderAvatar.textContent = avatarLetters(message.sender, senderId);
-          const avatarUrl = String(message.sender_avatar_url || (messageParticipant && messageParticipant.avatar_url) || "").trim();
-          if (avatarUrl) {
-            const img = document.createElement("img");
-            img.src = avatarUrl;
-            img.alt = "";
-            img.loading = "lazy";
-            img.addEventListener("error", () => img.remove());
-            senderAvatar.append(img);
-          }
-          row.append(senderAvatar);
-        }
-        if (!message.deleted && message.id) {
-          row.addEventListener("contextmenu", (event) => openMessageContextMenu(event, message, bubble));
-        }
-        if (!message.from_me && message.sender) {
-          const sender = document.createElement("strong");
-          sender.className = "chat-message-sender";
-          sender.textContent = message.sender;
-          bubble.append(sender);
-          if (selectedChatId.endsWith("@g.us")) {
-            const participant = messageParticipant || participants.find((item) => {
-              const senderId = String(message.sender_id || "").trim();
-              return (senderId && [item.mention_id, item.resolved_id].map((value) => String(value || "").trim()).includes(senderId));
-            });
-            const phoneValue = String(message.sender_phone || (participant && participant.phone) || "").trim();
-            if (phoneValue) {
-              const phoneLine = document.createElement("small");
-              phoneLine.className = "chat-message-sender-phone";
-              phoneLine.textContent = phoneValue;
-              bubble.append(phoneLine);
-            }
-          }
-        }
-        if (message.forwarded && !message.deleted) {
-          const forwarded = document.createElement("small");
-          forwarded.className = "chat-forwarded-label";
-          forwarded.textContent = "Переслано";
-          bubble.append(forwarded);
-        }
-        if (message.quoted_message_key && !message.deleted) {
-          const quote = document.createElement("div");
-          quote.className = "chat-quote";
-          const qSender = document.createElement("strong");
-          qSender.textContent = message.quoted_sender || "Сообщение";
-          const qBody = document.createElement("span");
-          qBody.textContent = message.quoted_body || "Вложение";
-          if (message.quote_preview_url) {
-            const thumb = document.createElement("img");
-            thumb.className = "quote-thumbnail"; thumb.alt = "Фото"; thumb.src = message.quote_preview_url;
-            thumb.loading = "lazy"; thumb.addEventListener("error", () => thumb.remove()); quote.append(thumb);
-          }
-          quote.setAttribute("role", "button"); quote.tabIndex = 0;
-          quote.title = "Перейти к сообщению";
-          const jump = () => {
-            if (message.quote_unavailable) { qBody.textContent = "Сообщение недоступно"; return; }
-            const targetId = String(message.quoted_message_key || "").trim();
-            const quotedBody = String(message.quoted_body || "").trim();
-            const quotedSender = String(message.quoted_sender || "").trim();
-            if (!targetId && !quotedBody) return;
-
-            const candidate = findQuotedMessageCandidate(message, targetId, quotedBody, quotedSender);
-            if (candidate && focusMessageRow(String(candidate.id || ""), true)) {
-              const realId = String(candidate.id || "");
-              conversationPage.dataset.jumpLoaded = realId;
-              conversationPage.dataset.jumpResolved = realId;
-              conversationPage.dataset.jumpScrolled = realId;
-              const cleanUrl = new URL(window.location.href);
-              ["message_id", "quoted_body", "quoted_sender", "before_ts"].forEach((key) => cleanUrl.searchParams.delete(key));
-              window.history.replaceState({}, "", cleanUrl);
-              return;
-            }
-
-            const url = new URL(window.location.href);
-            if (targetId) url.searchParams.set("message_id", targetId); else url.searchParams.delete("message_id");
-            if (quotedBody) url.searchParams.set("quoted_body", quotedBody); else url.searchParams.delete("quoted_body");
-            if (quotedSender) url.searchParams.set("quoted_sender", quotedSender); else url.searchParams.delete("quoted_sender");
-            if (message.timestamp) url.searchParams.set("before_ts", String(message.timestamp)); else url.searchParams.delete("before_ts");
-            window.history.replaceState({}, "", url);
-            delete conversationPage.dataset.jumpLoaded;
-            delete conversationPage.dataset.jumpResolved;
-            delete conversationPage.dataset.jumpScrolled;
-            loadChatState(true);
-          };
-          quote.addEventListener("click", jump);
-          quote.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") {event.preventDefault(); jump();} });
-          quote.append(qSender, qBody);
-          bubble.append(quote);
-        }
-        if (message.deleted) {
-          const deleted = document.createElement("span");
-          deleted.className = "chat-message-deleted";
-          deleted.textContent = "Сообщение удалено";
-          bubble.append(deleted);
-        } else {
-          appendMedia(bubble, message);
-          const newMedia = bubble.querySelector("audio,video");
-          const previousMedia = existing?.querySelector("audio,video");
-          if (newMedia && previousMedia && newMedia.src === previousMedia.src) {
-            newMedia.replaceWith(previousMedia.closest(".queue-player") || previousMedia);
-          }
-          const bodyText = String(message.body || "").trim();
-          const genericMediaLabel = /^\[(?:Фото|Видео|Аудио|Голосовое сообщение|Документ|Вложение)\]$/.test(bodyText);
-          if (bodyText && !(message.media_url && genericMediaLabel)) {
-            const body = document.createElement("span");
-            body.className = "chat-message-body";
-            appendMessageText(body, bodyText, message);
-            // QUEUE_LONG_MESSAGE_3_3_61: keep the full text in DOM, but collapse very large blocks by default.
-            const longMessage = bodyText.length > 1800 || bodyText.split(/\r?\n/).length > 24;
-            const messageKey = String(message.id || `${message.timestamp}:${bodyText.slice(0,80)}`);
-            if (longMessage && !expandedLongMessages.has(messageKey)) body.classList.add("queue-long-message-collapsed");
-            bubble.append(body);
-            if (longMessage) {
-              const toggleLong = document.createElement("button");
-              toggleLong.type = "button";
-              toggleLong.className = "queue-long-message-toggle";
-              const syncLongState = () => {
-                const expanded = expandedLongMessages.has(messageKey);
-                body.classList.toggle("queue-long-message-collapsed", !expanded);
-                toggleLong.textContent = expanded ? "Свернуть" : "Показать полностью";
-              };
-              toggleLong.addEventListener("click", () => {
-                if (expandedLongMessages.has(messageKey)) expandedLongMessages.delete(messageKey);
-                else expandedLongMessages.add(messageKey);
-                syncLongState();
-              });
-              syncLongState();
-              bubble.append(toggleLong);
-            }
-          } else if (!message.media_url && !bodyText) {
-            const body = document.createElement("span");
-            body.textContent = "[Сообщение]";
-            bubble.append(body);
-          }
-        }
-        // Voice transcription is not shown in the chat UI.
-        if (!message.deleted && Array.isArray(message.reactions) && message.reactions.length) {
-          const reactionBar = document.createElement("div");
-          reactionBar.className = "chat-reactions";
-          message.reactions.forEach((reaction) => {
-            if (!reaction || !reaction.emoji || Number(reaction.count || 0) <= 0) return;
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = `chat-reaction-chip${reaction.me ? " mine" : ""}`;
-            chip.textContent = `${reaction.emoji}${Number(reaction.count || 0) > 1 ? ` ${reaction.count}` : ""}`;
-            chip.title = reaction.me ? "Нажмите, чтобы убрать свою реакцию" : `Поставить ${reaction.emoji}`;
-            chip.addEventListener("click", () => queueMessageAction(message, "react", reaction.me ? "" : reaction.emoji));
-            reactionBar.append(chip);
-          });
-          if (reactionBar.childElementCount) bubble.append(reactionBar);
-        }
-        const meta = document.createElement("span");
-        meta.className = "chat-message-meta";
-        if (message.edited && !message.deleted) {
-          const edited = document.createElement("span");
-          edited.textContent = "изменено";
-          meta.append(edited);
-        }
-        if (message.from_me) {
-          const delivery = document.createElement("span");
-          delivery.className = "chat-delivery";
-          const ack = Number(message.ack || 0);
-          delivery.textContent = ack >= 3 ? "Прочитано" : ack >= 2 ? "Доставлено" : ack >= 1 ? "Отправлено" : "Отправляется";
-          meta.append(delivery);
-        }
-        const time = document.createElement("time");
-        time.textContent = formatChatTime(message.timestamp);
-        meta.append(time);
-        bubble.append(meta);
-
-        if (!message.deleted && message.id) {
-          const actions = document.createElement("span");
-          actions.className = "chat-message-actions";
-          const reaction = document.createElement("button");
-          reaction.type = "button";
-          reaction.className = "chat-action-reaction";
-          reaction.textContent = "Реакция";
-          reaction.setAttribute("aria-expanded", "false");
-          reaction.addEventListener("click", (event) => {
-            event.stopPropagation();
-            openReactionPicker(message, bubble, reaction);
-          });
-          const reply = document.createElement("button");
-          reply.type = "button";
-          reply.textContent = "Ответить";
-          reply.addEventListener("click", () => startReply(message));
-          const forward = document.createElement("button");
-          forward.type = "button";
-          forward.textContent = selectedForForward.has(message.id) ? "Выбрано ✓" : "Переслать";
-          const forwardBlocked = isMentionOnlyMessage(message) && !selectedForForward.has(message.id);
-          forward.disabled = forwardBlocked;
-          if (forwardBlocked) forward.title = "Нельзя пересылать сообщение, состоящее только из тега пользователя";
-          forward.addEventListener("click", () => toggleForward(message));
-          const bookmark = document.createElement('button');
-          bookmark.type = 'button'; bookmark.className = 'message-bookmark';
-          bookmark.textContent = messageIsBookmarked(selectedChatId, message.id) ? '★ В избранном' : '☆ Избранное';
-          bookmark.title = bookmark.textContent;
-          bookmark.addEventListener('click', () => toggleMessageBookmark(message).catch((err) => queueAlert(err.message)));
-          actions.append(reaction, reply, bookmark, forward);
-          if (message.from_me) {
-            const edit = document.createElement("button");
-            edit.type = "button";
-            edit.textContent = "Изменить";
-            edit.addEventListener("click", () => queueMessageAction(message, "edit"));
-            const remove = document.createElement("button");
-            remove.type = "button";
-            remove.textContent = "Удалить";
-            remove.addEventListener("click", () => queueMessageAction(message, "delete"));
-            actions.append(edit, remove);
-          }
-          bubble.append(actions);
-        }
-        row.append(bubble);
-        nodes.push(row);
-      });
-      const keep = new Set(nodes);
-      [...chatMessages.children].forEach(node => { if (!keep.has(node)) node.remove(); });
-      nodes.forEach((node, index) => {
-        if (chatMessages.children[index] !== node) chatMessages.insertBefore(node, chatMessages.children[index] || null);
-      });
-      window.QueueUI?.enhance(chatMessages);
-      if (preserveScroll) {
-        // Older history was inserted above the current viewport. Keep the same
-        // visible messages in place instead of moving the reader.
-        chatMessages.scrollTop = Math.max(0, chatMessages.scrollHeight - oldHeight + oldTop);
-      } else if (wasNearBottom) {
-        // The employee was following the latest messages, so continue doing so.
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-      } else {
-        // Background polling may update ack/status, quotes, names or add new
-        // messages. Preserve the user's reading position in both personal chats
-        // and groups instead of jumping to the bottom.
-        const maxTop = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
-        chatMessages.scrollTop = Math.min(currentTop, maxTop);
-        const restoredAnchor = anchor && [...chatMessages.querySelectorAll("[data-message-id]")].find(row => row.dataset.messageId === anchor.dataset.messageId);
-        if (restoredAnchor) chatMessages.scrollTop += restoredAnchor.getBoundingClientRect().top - chatMessages.getBoundingClientRect().top - anchorOffset;
       }
     }
 
@@ -1561,7 +604,7 @@ window.QueueConversation = (() => {
     }
 
     function updateMentionPicker(textarea) {
-      if (!textarea || !selectedChatId.endsWith("@g.us") || !participants.length) {
+      if (!textarea || !page.selectedChatId.endsWith("@g.us") || !page.participants.length) {
         mentionPicker.hidden = true;
         return;
       }
@@ -1574,7 +617,7 @@ window.QueueConversation = (() => {
       }
       const query = String(match[2] || "").toLocaleLowerCase("ru");
       const start = cursor - match[2].length - 1;
-      const visible = participants.filter((participant) => {
+      const visible = page.participants.filter((participant) => {
         const haystack = `${participantLabel(participant)} ${participant.phone || ""}`.toLocaleLowerCase("ru");
         return (!needsReplyOnly || chat.needs_reply) && (!query || haystack.includes(query));
       }).slice(0, 10);
@@ -1602,18 +645,18 @@ window.QueueConversation = (() => {
     }
 
     function renderParticipants(items) {
-      participants = Array.isArray(items) ? items : [];
+      page.participants = Array.isArray(items) ? items : [];
       if (!participantsList) return;
       participantsList.replaceChildren();
-      if (participantsCount) participantsCount.textContent = String(participants.length);
-      if (!participants.length) {
+      if (participantsCount) participantsCount.textContent = String(page.participants.length);
+      if (!page.participants.length) {
         const note = document.createElement("span");
         note.className = "muted";
-        note.textContent = selectedChatId ? "Участники загружаются..." : "Выберите группу";
+        note.textContent = page.selectedChatId ? "Участники загружаются..." : "Выберите группу";
         participantsList.append(note);
         return;
       }
-      participants.forEach((participant) => {
+      page.participants.forEach((participant) => {
         const button = document.createElement("button");
         button.type = "button";
         button.className = `participant-chip${participant.is_me ? " is-me" : ""}`;
@@ -1662,57 +705,57 @@ window.QueueConversation = (() => {
     }
 
     function renderManualMode(mode, manualContact = false) {
-      const groupConversation = location.pathname === "/groups" || String(selectedChatId || "").endsWith("@g.us");
+      const groupConversation = location.pathname === "/groups" || String(page.selectedChatId || "").endsWith("@g.us");
       if (groupConversation) {
-        botManualContactV17 = false;
-        if (manualModeButton) manualModeButton.hidden = true;
-        if (botResetButton) botResetButton.hidden = true;
+        page.botManualContactV17 = false;
+        if (page.manualModeButton) page.manualModeButton.hidden = true;
+        if (page.botResetButton) page.botResetButton.hidden = true;
         if (manualModeState) manualModeState.hidden = true;
-        manualModeActive = false;
-        parkHeaderBotControlsV17();
-        syncOverflowBotActionsV17();
+        page.manualModeActive = false;
+        page.parkHeaderBotControlsV17();
+        page.syncOverflowBotActionsV17();
         return;
       }
-      if (!manualModeButton || !manualModeState) return;
-      manualModeActive = Boolean(mode && typeof mode === "object" && Object.keys(mode).length);
-      botManualContactV17 = Boolean(manualContact);
+      if (!page.manualModeButton || !manualModeState) return;
+      page.manualModeActive = Boolean(mode && typeof mode === "object" && Object.keys(mode).length);
+      page.botManualContactV17 = Boolean(manualContact);
       if (manualContact) {
-        manualModeButton.hidden = true;
-        if (botResetButton) botResetButton.hidden = true;
+        page.manualModeButton.hidden = true;
+        if (page.botResetButton) page.botResetButton.hidden = true;
         manualModeState.hidden = false;
         manualModeState.textContent = "Контакт из админки · автоответы отключены";
         manualModeState.className = "manual-mode-state";
-        parkHeaderBotControlsV17();
-        syncOverflowBotActionsV17();
+        page.parkHeaderBotControlsV17();
+        page.syncOverflowBotActionsV17();
         return;
       }
-      manualModeButton.hidden = false;
-      if (botResetButton) {
-        botResetButton.hidden = false;
-        botResetButton.disabled = !selectedChatId;
-        botResetButton.textContent = "↻ Перезагрузить бота";
-        botResetButton.title = "Очистить текущий сценарий бота только для этого пользователя и начать с главного меню.";
+      page.manualModeButton.hidden = false;
+      if (page.botResetButton) {
+        page.botResetButton.hidden = false;
+        page.botResetButton.disabled = !page.selectedChatId;
+        page.botResetButton.textContent = "↻ Перезагрузить бота";
+        page.botResetButton.title = "Очистить текущий сценарий бота только для этого пользователя и начать с главного меню.";
       }
       manualModeState.hidden = false;
-      manualModeButton.disabled = !selectedChatId;
-      manualModeButton.textContent = manualModeActive ? "▶ Включить автоответы" : "⏸ Отключить автоответы";
-      manualModeButton.title = manualModeActive
+      page.manualModeButton.disabled = !page.selectedChatId;
+      page.manualModeButton.textContent = page.manualModeActive ? "▶ Включить автоответы" : "⏸ Отключить автоответы";
+      page.manualModeButton.title = page.manualModeActive
         ? "Возобновить автоматические ответы для этого пользователя без сброса его текущего сценария."
         : "Остановить автоматические ответы только для этого пользователя. Сообщения продолжат приходить в систему.";
       const actor = String((mode && mode.actor) || "").trim();
-      manualModeState.textContent = !selectedChatId
+      manualModeState.textContent = !page.selectedChatId
         ? ""
-        : manualModeActive
+        : page.manualModeActive
           ? `Автоответы отключены${actor ? ` · ${actor}` : ""}`
           : "Автоответчик работает для обычного пользователя";
-      manualModeState.className = `manual-mode-state${manualModeActive ? " active" : ""}`;
-      parkHeaderBotControlsV17();
-      syncOverflowBotActionsV17();
+      manualModeState.className = `manual-mode-state${page.manualModeActive ? " active" : ""}`;
+      page.parkHeaderBotControlsV17();
+      page.syncOverflowBotActionsV17();
     }
 
     function drawProfileSummary() {
       if (!profileSummary) return;
-      if (!profileOpen || profileOpenChatId !== selectedChatId) {
+      if (!profileOpen || profileOpenChatId !== page.selectedChatId) {
         profileSummary.hidden = true;
         profileSummary.replaceChildren();
         return;
@@ -1736,7 +779,7 @@ window.QueueConversation = (() => {
       details.append(nameLine);
 
       const rawPhone = String(data.phone || "").trim() || (() => {
-        const direct = String(selectedChatId || "").replace(/@(?:c\.us|lid)$/i, "").replace(/\D/g, "");
+        const direct = String(page.selectedChatId || "").replace(/@(?:c\.us|lid)$/i, "").replace(/\D/g, "");
         return direct ? `+${direct}` : "";
       })();
       if (rawPhone) {
@@ -1768,10 +811,10 @@ window.QueueConversation = (() => {
     // QUEUE_GROUP_MUTE_3_3_73
     function renderGroupMute(state) {
       if (!groupMuteButton) return;
-      const isGroup = Boolean(selectedChatId && selectedChatId.endsWith("@g.us"));
+      const isGroup = Boolean(page.selectedChatId && page.selectedChatId.endsWith("@g.us"));
       groupMuteButton.hidden = !isGroup;
       if (!isGroup) return;
-      const selected = chats.find((chat) => String(chat.id || "") === selectedChatId) || {};
+      const selected = chats.find((chat) => String(chat.id || "") === page.selectedChatId) || {};
       groupMuted = Boolean(state && Object.prototype.hasOwnProperty.call(state, "selected_muted") ? state.selected_muted : selected.muted);
       groupMuteButton.textContent = groupMuted ? "🔔 Включить уведомления" : "🔕 Заглушить";
       groupMuteButton.title = groupMuted
@@ -1783,7 +826,7 @@ window.QueueConversation = (() => {
     function renderPresence(presence) {
       if (!contactPresence) return;
       const value = presence && typeof presence === "object" ? presence : {};
-      if (!selectedChatId || selectedChatId.endsWith("@g.us")) {
+      if (!page.selectedChatId || page.selectedChatId.endsWith("@g.us")) {
         contactPresence.hidden = true;
         contactPresence.textContent = "";
         contactPresence.className = "contact-presence";
@@ -1805,32 +848,32 @@ window.QueueConversation = (() => {
     function renderProfile(profile) {
       if (!profileButton || !profileSummary) return;
       currentProfile = profile && typeof profile === "object" ? profile : {};
-      profileButton.disabled = !selectedChatId;
+      profileButton.disabled = !page.selectedChatId;
       // The button stays compact; the opened profile card shows the WhatsApp name and phone number.
       profileButton.textContent = "Профиль";
       drawProfileSummary();
     }
 
     if (profileButton && profileSummary) profileButton.addEventListener("click", () => {
-      if (!selectedChatId) return;
-      if (profileOpen && profileOpenChatId === selectedChatId) {
+      if (!page.selectedChatId) return;
+      if (profileOpen && profileOpenChatId === page.selectedChatId) {
         profileOpen = false;
         profileOpenChatId = "";
         try { sessionStorage.removeItem(PROFILE_OPEN_STORAGE_KEY); } catch (_) {}
       } else {
         profileOpen = true;
-        profileOpenChatId = selectedChatId;
-        try { sessionStorage.setItem(PROFILE_OPEN_STORAGE_KEY, selectedChatId); } catch (_) {}
+        profileOpenChatId = page.selectedChatId;
+        try { sessionStorage.setItem(PROFILE_OPEN_STORAGE_KEY, page.selectedChatId); } catch (_) {}
       }
       drawProfileSummary();
     });
 
     if (groupMuteButton) groupMuteButton.addEventListener("click", async () => {
-      if (!selectedChatId || !selectedChatId.endsWith("@g.us") || groupMuteButton.dataset.busy === "1") return;
+      if (!page.selectedChatId || !page.selectedChatId.endsWith("@g.us") || groupMuteButton.dataset.busy === "1") return;
       groupMuteButton.dataset.busy = "1";
       groupMuteButton.disabled = true;
       try {
-        const body = new URLSearchParams({chat_id: selectedChatId, muted: groupMuted ? "0" : "1"});
+        const body = new URLSearchParams({chat_id: page.selectedChatId, muted: groupMuted ? "0" : "1"});
         const response = await fetch("/group-mute", {
           method: "POST",
           headers: {"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
@@ -1839,7 +882,7 @@ window.QueueConversation = (() => {
         const result = await response.json().catch(() => ({}));
         if (!response.ok || !result.updated) throw new Error("Не удалось изменить режим уведомлений");
         groupMuted = Boolean(result.muted);
-        const row = chats.find((chat) => String(chat.id || "") === selectedChatId);
+        const row = chats.find((chat) => String(chat.id || "") === page.selectedChatId);
         if (row) row.muted = groupMuted;
         renderGroupMute({selected_muted: groupMuted});
         renderChats();
@@ -1856,37 +899,37 @@ window.QueueConversation = (() => {
       if (loading && !force) return;
       loading = true;
       const sequence = ++stateSequence;
-      const requestedChat = selectedChatId;
+      const requestedChat = page.selectedChatId;
       try {
         let manualUnread = false;
-        try { manualUnread = sessionStorage.getItem(`queue-manual-unread:${selectedChatId}`) === "1"; } catch (_) {}
+        try { manualUnread = sessionStorage.getItem(`queue-manual-unread:${page.selectedChatId}`) === "1"; } catch (_) {}
         const isReading = !manualUnread && !document.hidden && document.hasFocus() && chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 96;
-        const suffix = selectedChatId ? `?chat_id=${encodeURIComponent(selectedChatId)}&read=${isReading ? 1 : 0}` : "";
+        const suffix = page.selectedChatId ? `?chat_id=${encodeURIComponent(page.selectedChatId)}&read=${isReading ? 1 : 0}` : "";
         const response = await fetch(`${stateEndpoint}${suffix}`, {cache: "no-store"});
         if (!response.ok) throw new Error("Нет связи с программой");
         const state = await response.json();
-        if (sequence !== stateSequence || requestedChat !== selectedChatId) return;
+        if (sequence !== stateSequence || requestedChat !== page.selectedChatId) return;
         // Let access controls consume only the state snapshot accepted by this poll.
         window.dispatchEvent(new CustomEvent("queue-chat-state-accepted", {detail: state}));
         chats = Array.isArray(state.chats) ? state.chats : [];
         forwardTargets = Array.isArray(state.forward_targets) ? state.forward_targets : chats;
-        if (!selectedChatId && state.selected_chat_id) selectedChatId = state.selected_chat_id;
+        if (!page.selectedChatId && state.selected_chat_id) page.selectedChatId = state.selected_chat_id;
         try {
           const storedProfileChatId = sessionStorage.getItem(PROFILE_OPEN_STORAGE_KEY) || "";
-          if (storedProfileChatId && storedProfileChatId === selectedChatId) {
+          if (storedProfileChatId && storedProfileChatId === page.selectedChatId) {
             profileOpen = true;
             profileOpenChatId = storedProfileChatId;
           }
         } catch (_) {}
-        chatIdInput.value = selectedChatId;
-        chatTitle.textContent = selectedChatId ? selectedChatName() : selectLabel;
+        chatIdInput.value = page.selectedChatId;
+        chatTitle.textContent = page.selectedChatId ? selectedChatName() : selectLabel;
         renderPresence(state.presence || (state.profile && state.profile.presence) || {});
         renderGroupMute(state);
         connection.textContent = state.connected ? "WhatsApp подключён" : "QR-коннектор не подключён";
         connection.className = `connection-badge ${state.connected ? "online" : "offline"}`;
         renderChats();
         updateForwardToolbar();
-        latestMessages = Array.isArray(state.messages) ? state.messages : [];
+        page.latestMessages = Array.isArray(state.messages) ? state.messages : [];
         const jumpParams = new URLSearchParams(window.location.search);
         const jumpId = jumpParams.get("message_id") || "";
         const jumpBody = jumpParams.get("quoted_body") || "";
@@ -1895,7 +938,7 @@ window.QueueConversation = (() => {
         const jumpKey = jumpId || (jumpBody ? `body:${jumpBody}:${jumpBeforeTs}` : "");
         let resolvedJumpId = jumpId;
         if (jumpKey && conversationPage.dataset.jumpLoaded !== jumpKey) {
-          const targetQuery = new URLSearchParams({chat_id:selectedChatId});
+          const targetQuery = new URLSearchParams({chat_id:page.selectedChatId});
           if (jumpId) targetQuery.set("message_id", jumpId);
           if (jumpBody) targetQuery.set("quoted_body", jumpBody);
           if (jumpSender) targetQuery.set("quoted_sender", jumpSender);
@@ -1904,20 +947,20 @@ window.QueueConversation = (() => {
           conversationPage.dataset.jumpLoaded = jumpKey;
           if (target.ok) {
             const windowData = await target.json();
-            if (sequence !== stateSequence || requestedChat !== selectedChatId) return;
-            olderMessages = windowData.messages || [];
-            historyCursor = windowData.cursor || "";
-            historyHasMore = Boolean(windowData.has_more);
+            if (sequence !== stateSequence || requestedChat !== page.selectedChatId) return;
+            page.olderMessages = windowData.messages || [];
+            page.historyCursor = windowData.cursor || "";
+            page.historyHasMore = Boolean(windowData.has_more);
             resolvedJumpId = String(windowData.target_id || jumpId || "");
             conversationPage.dataset.jumpResolved = resolvedJumpId;
           } else {
-            const reply = mergedConversationMessages().find((item) => {
+            const reply = page.mergedConversationMessages().find((item) => {
               if (!item) return false;
-              const sameQuoteId = jumpId && messageKeysMatch(item.quoted_message_key || "", jumpId);
-              const sameQuoteBody = jumpBody && quoteBodiesMatch(item.quoted_body || "", jumpBody);
+              const sameQuoteId = jumpId && page.messageKeysMatch(item.quoted_message_key || "", jumpId);
+              const sameQuoteBody = jumpBody && page.quoteBodiesMatch(item.quoted_body || "", jumpBody);
               return Boolean(sameQuoteId || sameQuoteBody);
             }) || null;
-            const fallback = findQuotedMessageCandidate(reply || {timestamp:Number(jumpBeforeTs || 0)}, jumpId, jumpBody, jumpSender);
+            const fallback = page.findQuotedMessageCandidate(reply || {timestamp:Number(jumpBeforeTs || 0)}, jumpId, jumpBody, jumpSender);
             if (fallback) {
               resolvedJumpId = String(fallback.id || "");
               conversationPage.dataset.jumpResolved = resolvedJumpId;
@@ -1928,15 +971,15 @@ window.QueueConversation = (() => {
         } else if (jumpKey) {
           resolvedJumpId = conversationPage.dataset.jumpResolved || jumpId;
         }
-        if (!olderMessages.length) {
-          historyCursor = String(state.history_cursor || "");
-          historyHasMore = Boolean(state.history_has_more);
+        if (!page.olderMessages.length) {
+          page.historyCursor = String(state.history_cursor || "");
+          page.historyHasMore = Boolean(state.history_has_more);
         }
         renderParticipants(state.participants || []);
-        renderMessages(mergedConversationMessages());
+        page.renderMessages(page.mergedConversationMessages());
         const jumpScrollId = resolvedJumpId || jumpId;
         if (jumpScrollId && conversationPage.dataset.jumpScrolled !== jumpScrollId) {
-          if (focusMessageRow(jumpScrollId, true)) {
+          if (page.focusMessageRow(jumpScrollId, true)) {
             conversationPage.dataset.jumpScrolled = jumpScrollId;
             const cleanUrl = new URL(window.location.href);
             cleanUrl.searchParams.delete("message_id");
@@ -1956,16 +999,16 @@ window.QueueConversation = (() => {
       }
     }
 
-    if (manualModeButton) {
-      manualModeButton.addEventListener("click", async () => {
-        if (!selectedChatId || manualModeButton.dataset.busy === "1") return;
-        manualModeButton.dataset.busy = "1";
-        manualModeButton.disabled = true;
-        const action = manualModeActive ? "enable" : "disable";
-        manualModeButton.textContent = manualModeActive ? "Включаю..." : "Отключаю...";
+    if (page.manualModeButton) {
+      page.manualModeButton.addEventListener("click", async () => {
+        if (!page.selectedChatId || page.manualModeButton.dataset.busy === "1") return;
+        page.manualModeButton.dataset.busy = "1";
+        page.manualModeButton.disabled = true;
+        const action = page.manualModeActive ? "enable" : "disable";
+        page.manualModeButton.textContent = page.manualModeActive ? "Включаю..." : "Отключаю...";
         try {
           const response = await postForm("/chat-mode", {
-            chat_id: selectedChatId,
+            chat_id: page.selectedChatId,
             action,
           });
           const result = await response.json().catch(() => ({}));
@@ -1976,24 +1019,24 @@ window.QueueConversation = (() => {
           queueAlert(error.message || "Не удалось изменить автоответы");
           await loadChatState(true);
         } finally {
-          manualModeButton.dataset.busy = "0";
-          manualModeButton.disabled = !selectedChatId;
-          parkHeaderBotControlsV17();
-          syncOverflowBotActionsV17();
+          page.manualModeButton.dataset.busy = "0";
+          page.manualModeButton.disabled = !page.selectedChatId;
+          page.parkHeaderBotControlsV17();
+          page.syncOverflowBotActionsV17();
         }
       });
     }
 
-    if (botResetButton) {
-      botResetButton.addEventListener("click", async () => {
-        if (!selectedChatId || botResetButton.dataset.busy === "1") return;
-        botResetButton.dataset.busy = "1";
-        botResetButton.disabled = true;
-        const oldText = botResetButton.textContent;
-        botResetButton.textContent = "Перезапуск...";
+    if (page.botResetButton) {
+      page.botResetButton.addEventListener("click", async () => {
+        if (!page.selectedChatId || page.botResetButton.dataset.busy === "1") return;
+        page.botResetButton.dataset.busy = "1";
+        page.botResetButton.disabled = true;
+        const oldText = page.botResetButton.textContent;
+        page.botResetButton.textContent = "Перезапуск...";
         try {
           const response = await postForm("/chat-mode", {
-            chat_id: selectedChatId,
+            chat_id: page.selectedChatId,
             action: "reset",
           });
           const result = await response.json().catch(() => ({}));
@@ -2004,11 +1047,11 @@ window.QueueConversation = (() => {
         } catch (error) {
           queueAlert(error.message || "Не удалось перезапустить бота");
         } finally {
-          botResetButton.dataset.busy = "0";
-          botResetButton.disabled = !selectedChatId;
-          if (botResetButton.textContent === "Перезапуск...") botResetButton.textContent = oldText || "↻ Перезагрузить бота";
-          parkHeaderBotControlsV17();
-          syncOverflowBotActionsV17();
+          page.botResetButton.dataset.busy = "0";
+          page.botResetButton.disabled = !page.selectedChatId;
+          if (page.botResetButton.textContent === "Перезапуск...") page.botResetButton.textContent = oldText || "↻ Перезагрузить бота";
+          page.parkHeaderBotControlsV17();
+          page.syncOverflowBotActionsV17();
         }
       });
     }
@@ -2020,7 +1063,7 @@ window.QueueConversation = (() => {
       renderChats();
     });
     refreshButton.addEventListener("click", () => loadChatState(true));
-    const composerTextarea = composer.querySelector("textarea[name='message']");
+    const composerTextarea = page.composerTextarea = composer.querySelector("textarea[name='message']");
     if (composerTextarea) {
       composerTextarea.addEventListener("input", () => updateMentionPicker(composerTextarea));
       composerTextarea.addEventListener("click", () => updateMentionPicker(composerTextarea));
@@ -2029,7 +1072,7 @@ window.QueueConversation = (() => {
       });
     }
     if (replyCancel) replyCancel.addEventListener("click", clearReply);
-    if (forwardCancel) forwardCancel.addEventListener("click", () => { selectedForForward.clear(); updateForwardToolbar(); lastMessageSignature = ""; loadChatState(true); });
+    if (forwardCancel) forwardCancel.addEventListener("click", () => { selectedForForward.clear(); updateForwardToolbar(); page.lastMessageSignature = ""; loadChatState(true); });
     if (forwardTarget) forwardTarget.addEventListener("change", () => {
       if (forwardSend) forwardSend.disabled = forwardBusy || !forwardTarget.value || forwardSend.dataset.lockDisabled === "1";
     });
@@ -2062,12 +1105,12 @@ window.QueueConversation = (() => {
     if (emojiToggle && emojiPicker) emojiToggle.addEventListener("click", () => { emojiPicker.hidden = !emojiPicker.hidden; });
     let uploadController = null;
     let uploadId = "";
-    const attachmentRemove = document.createElement("button");
+    const attachmentRemove = page.attachmentRemove = document.createElement("button");
     attachmentRemove.type = "button";
     attachmentRemove.className = "attachment-remove";
     attachmentRemove.textContent = "× Убрать файл";
     attachmentRemove.hidden = true;
-    const attachmentBar = document.createElement("div");
+    const attachmentBar = page.attachmentBar = document.createElement("div");
     attachmentBar.className = "attachment-bar";
     attachmentBar.hidden = true;
     if (mediaName) { mediaName.before(attachmentBar); attachmentBar.append(mediaName, attachmentRemove); }
@@ -2078,133 +1121,38 @@ window.QueueConversation = (() => {
       const tools = composer.querySelector(".composer-tools");
       if (tools) field.append(tools);
     }
-    const composeStatus = document.createElement("div");
+    const composeStatus = page.composeStatus = document.createElement("div");
     composeStatus.className = "compose-status";
     composeStatus.setAttribute("role", "status");
     composer.append(composeStatus);
-    function clearAttachment() {
-      if (mediaInput) mediaInput.value = "";
-      if (mediaName) mediaName.textContent = "";
-      attachmentRemove.hidden = true;
-      attachmentBar.hidden = true;
-    }
     attachmentRemove.addEventListener("click", () => {
       if (uploadController) uploadController.abort();
-      clearAttachment();
+      page.clearAttachment();
     });
-    function showAttachment() {
-      const file = mediaInput?.files?.[0];
-      if (file && (file.size > 512 * 1024 * 1024 || file.size === 0)) {
-        composeStatus.textContent = "Выберите непустой файл размером до 512 МБ";
-        clearAttachment();
-        return;
-      }
-      if (mediaName) mediaName.textContent = file ? `${file.name} · ${(file.size / 1048576).toFixed(1)} МБ` : "";
-      attachmentRemove.hidden = !file;
-      attachmentBar.hidden = !file;
-    }
-    mediaInput?.addEventListener("change", showAttachment);
-    // QUEUE_CLIPBOARD_PASTE_3_3_62: Win+Shift+S / clipboard image paste into the current chat.
-    const queueBuildClipboardFileName = (mimeType) => {
-      const now = new Date();
-      const pad = (value) => String(value).padStart(2, "0");
-      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-      const extMap = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"};
-      const ext = extMap[mimeType || ""] || "";
-      return `clipboard-${stamp}${ext}`;
-    };
-    const queueSetComposerFile = (file) => {
-      if (!file || !mediaInput) return false;
-      try {
-        const transfer = new DataTransfer();
-        transfer.items.add(file);
-        mediaInput.files = transfer.files;
-      } catch (_) {
-        return false;
-      }
-      showAttachment();
-      return true;
-    };
-    const queueTakeClipboardFile = (event) => {
-      const clipboardItems = Array.from(event.clipboardData?.items || []);
-      for (const item of clipboardItems) {
-        if (item.kind !== "file") continue;
-        const blob = item.getAsFile();
-        if (!blob) continue;
-        const mimeType = blob.type || item.type || "application/octet-stream";
-        const originalName = typeof blob.name === "string" ? blob.name.trim() : "";
-        // Win+Shift+S usually appears as generic image.png. Always wrap images
-        // into a unique clipboard-* file so this send can be matched reliably.
-        if (/^image\//.test(mimeType)) {
-          try {
-            return new File([blob], queueBuildClipboardFileName(mimeType), { type: mimeType, lastModified: Date.now() });
-          } catch (_) {
-            return blob;
-          }
-        }
-        if (originalName) return blob;
-        try {
-          return new File([blob], queueBuildClipboardFileName(mimeType), { type: mimeType, lastModified: Date.now() });
-        } catch (_) {
-          return blob;
-        }
-      }
-      return null;
-    };
-    const queueHandleClipboardPaste = (event) => {
-      const file = queueTakeClipboardFile(event);
-      if (!file) return;
-      if (composer.dataset.sending === "1") {
-        composeStatus.textContent = "Дождитесь завершения текущей отправки";
-        return;
-      }
-      if (!selectedChatId) {
-        composeStatus.textContent = "Сначала выберите чат или группу";
-        return;
-      }
-      event.preventDefault();
-      const ok = queueSetComposerFile(file);
-      composeStatus.textContent = ok
-        ? (/^image\//.test(file.type || "") ? "Скриншот из буфера прикреплён. Нажмите «Отправить»" : "Файл из буфера прикреплён. Нажмите «Отправить»")
-        : "Не удалось прикрепить файл из буфера";
-      composerTextarea?.focus();
-    };
-    composerTextarea?.addEventListener("paste", queueHandleClipboardPaste);
+    mediaInput?.addEventListener("change", page.showAttachment);
+    composerTextarea?.addEventListener("paste", page.queueHandleClipboardPaste);
     // QUEUE_DRAG_DROP_3_3_61: drag a file from Explorer/Desktop directly into the open chat.
     let queueDragDepth = 0;
     const queueDropZone = conversationPage;
-    const queueHasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
-    const queueSetDroppedFile = (file) => {
-      if (!file || !mediaInput) return false;
-      try {
-        const transfer = new DataTransfer();
-        transfer.items.add(file);
-        mediaInput.files = transfer.files;
-      } catch (_) {
-        return false;
-      }
-      showAttachment();
-      return true;
-    };
     queueDropZone?.addEventListener("dragenter", (event) => {
-      if (!queueHasFiles(event)) return;
+      if (!page.queueHasFiles(event)) return;
       event.preventDefault();
       queueDragDepth += 1;
       queueDropZone.classList.add("queue-file-drag-active");
     });
     queueDropZone?.addEventListener("dragover", (event) => {
-      if (!queueHasFiles(event)) return;
+      if (!page.queueHasFiles(event)) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
       queueDropZone.classList.add("queue-file-drag-active");
     });
     queueDropZone?.addEventListener("dragleave", (event) => {
-      if (!queueHasFiles(event)) return;
+      if (!page.queueHasFiles(event)) return;
       queueDragDepth = Math.max(0, queueDragDepth - 1);
       if (!queueDragDepth) queueDropZone.classList.remove("queue-file-drag-active");
     });
     queueDropZone?.addEventListener("drop", (event) => {
-      if (!queueHasFiles(event)) return;
+      if (!page.queueHasFiles(event)) return;
       event.preventDefault();
       queueDragDepth = 0;
       queueDropZone.classList.remove("queue-file-drag-active");
@@ -2212,30 +1160,18 @@ window.QueueConversation = (() => {
         composeStatus.textContent = "Дождитесь завершения текущей отправки";
         return;
       }
-      if (!selectedChatId) {
+      if (!page.selectedChatId) {
         composeStatus.textContent = "Сначала выберите чат или группу";
         return;
       }
       const files = Array.from(event.dataTransfer?.files || []);
       if (!files.length) return;
       if (files.length > 1) composeStatus.textContent = "Будет прикреплён первый файл. Остальные можно отправить следующим сообщением";
-      if (queueSetComposerFile(files[0]) && files.length === 1) composeStatus.textContent = "Файл прикреплён. Нажмите «Отправить»";
+      if (page.queueSetComposerFile(files[0]) && files.length === 1) composeStatus.textContent = "Файл прикреплён. Нажмите «Отправить»";
       composerTextarea?.focus();
     });
-    const draftKey = () => "queue-draft:" + selectedChatId;
-    function saveDraft() {
-      if (!selectedChatId || !composerTextarea) return;
-      try {
-        if (composerTextarea.value) localStorage.setItem(draftKey(), composerTextarea.value);
-        else localStorage.removeItem(draftKey());
-      } catch (_) {}
-    }
-    function restoreDraft() {
-      if (!composerTextarea) return;
-      try { composerTextarea.value = localStorage.getItem(draftKey()) || ""; } catch (_) {}
-    }
-    restoreDraft();
-    composerTextarea?.addEventListener("input", saveDraft);
+    page.restoreDraft();
+    composerTextarea?.addEventListener("input", page.saveDraft);
     composerTextarea?.addEventListener("keydown", event => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing && mentionPicker.hidden) {
         event.preventDefault();
@@ -2244,48 +1180,27 @@ window.QueueConversation = (() => {
     });
     composerTextarea?.setAttribute("title", "Enter: отправить. Shift + Enter: новая строка");
 
-    async function uploadRequest(route, body, signal, raw = false) {
-      const response = await fetch(route, {
-        method: "POST", signal,
-        headers: {"Content-Type": raw ? "application/octet-stream" : "application/json",
-          "X-CSRF-Token": document.querySelector('meta[name="queue-csrf"]')?.content || ""},
-        body: raw ? body : JSON.stringify(body),
-      });
-      let result;
-      try { result = await response.json(); } catch (_) { throw new Error("Сервер не принял загрузку. Проверьте соединение"); }
-      if (!response.ok) throw new Error(result.error || "Ошибка загрузки файла");
-      return result;
-    }
-    const requestKey = () => "queue-send-intent:" + selectedChatId;
-    function sendIntent(text, file) {
-      const signature=JSON.stringify([text,replyInput?.value || "",file ? [file.name,file.size,file.lastModified] : null]);
-      let prior; try { prior=JSON.parse(localStorage.getItem(requestKey()) || "null"); } catch (_) {}
-      if (prior && prior.signature === signature) return prior.id;
-      const id=crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random().toString(36).slice(2);
-      try { localStorage.setItem(requestKey(),JSON.stringify({signature,id})); } catch (_) {}
-      return id;
-    }
     composer.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (composer.dataset.sending === "1") return;
       const textarea = composer.querySelector("textarea[name='message']");
       const button = composer.querySelector("button[type='submit']");
       const file = mediaInput?.files?.[0];
-      if (!selectedChatId || (!textarea.value.trim() && !file)) return;
-      if (file && file.size > 512 * 1024 * 1024) { showAttachment(); return; }
+      if (!page.selectedChatId || (!textarea.value.trim() && !file)) return;
+      if (file && file.size > 512 * 1024 * 1024) { page.showAttachment(); return; }
       composer.dataset.sending = "1";
       button.disabled = true; textarea.disabled = true;
       if (mediaInput) mediaInput.disabled = true;
       composeStatus.textContent = file ? "Подготовка файла…" : "Отправка…";
       let completed = false;
-      const requestId=sendIntent(textarea.value,file);
+      const requestId=page.sendIntent(textarea.value,file);
       try {
         let result;
         if (file) {
           uploadController = new AbortController();
           const signal = uploadController.signal;
-          const started = await uploadRequest("/upload/start", {
-            chat_id: selectedChatId, message: textarea.value, request_id: requestId,
+          const started = await page.uploadRequest("/upload/start", {
+            chat_id: page.selectedChatId, message: textarea.value, request_id: requestId,
             reply_to: replyInput?.value || "", mimetype: file.type,
             filename: file.name, size: file.size, mentions: [...selectedMentionIds],
           }, signal);
@@ -2293,38 +1208,38 @@ window.QueueConversation = (() => {
           attachmentRemove.textContent = "× Отменить загрузку";
           for (let offset = 0; offset < file.size; offset += started.chunk_size) {
             const end = Math.min(file.size, offset + started.chunk_size);
-            await uploadRequest(`/upload/chunk?id=${encodeURIComponent(uploadId)}&offset=${offset}`, file.slice(offset,end), signal, true);
+            await page.uploadRequest(`/upload/chunk?id=${encodeURIComponent(uploadId)}&offset=${offset}`, file.slice(offset,end), signal, true);
             composeStatus.textContent = `Загрузка файла: ${Math.round(end/file.size*100)}%`;
           }
           // The commit is atomic. Cancellation is no longer offered once queued.
           attachmentRemove.hidden = true;
-          result = await uploadRequest("/upload/finish", {upload_id:uploadId});
+          result = await page.uploadRequest("/upload/finish", {upload_id:uploadId});
           completed = Boolean(result.queued);
         } else {
           const response = await postForm(sendEndpoint, {
-            chat_id: selectedChatId, message: textarea.value, request_id: requestId,
+            chat_id: page.selectedChatId, message: textarea.value, request_id: requestId,
             mentions: mentionsInput?.value || "", reply_to: replyInput?.value || "",
           });
           result = await response.json();
           if (!response.ok) throw new Error(result.error || "Не удалось отправить сообщение");
         }
         if (!result.queued) throw new Error(result.error || "Сообщение не поставлено в очередь");
-        try { localStorage.removeItem(requestKey()); } catch (_) {}
-        textarea.value = ""; saveDraft(); clearReply();
+        try { localStorage.removeItem(page.requestKey()); } catch (_) {}
+        textarea.value = ""; page.saveDraft(); clearReply();
         selectedMentionIds.clear();
         if (mentionsInput) mentionsInput.value = "";
-        clearAttachment();
+        page.clearAttachment();
         if (emojiPicker) emojiPicker.hidden = true;
         composeStatus.textContent = "Отправляется…";
         void loadChatState(true);
         window.setTimeout(() => { composeStatus.textContent = ""; }, 1800);
       } catch (error) {
         composeStatus.textContent = error.name === "AbortError" ? "Загрузка отменена" : (error.message || "Не удалось отправить сообщение");
-        if (uploadId && !completed) uploadRequest("/upload/cancel", {upload_id:uploadId}).catch(() => {});
+        if (uploadId && !completed) page.uploadRequest("/upload/cancel", {upload_id:uploadId}).catch(() => {});
       } finally {
         uploadController = null; uploadId = "";
         attachmentRemove.textContent = "× Убрать файл";
-        showAttachment();
+        page.showAttachment();
         button.disabled = false; textarea.disabled = false;
         if (mediaInput) mediaInput.disabled = false;
         composer.dataset.sending = "0";
@@ -2332,7 +1247,7 @@ window.QueueConversation = (() => {
       }
     });
 
-    if (selectedChatId) chatIdInput.value = selectedChatId;
+    if (page.selectedChatId) chatIdInput.value = page.selectedChatId;
     // Realtime-first, slow polling only as a safety net.
     let chatPollTimer = null;
     const scheduleChatPoll = () => {
@@ -2347,7 +1262,7 @@ window.QueueConversation = (() => {
     });
     window.addEventListener("queue-open-message", () => {
       const wanted=new URL(location.href).searchParams.get("chat_id");
-      if(wanted && wanted!==selectedChatId){if(selectedChatId) void window.QueueConversationLock?.releaseIfOwned?.(selectedChatId); saveDraft(); selectedChatId=wanted; olderMessages=[];latestMessages=[];historyCursor="";historyHasMore=false;restoreDraft();}
+      if(wanted && wanted!==page.selectedChatId){if(page.selectedChatId) void window.QueueConversationLock?.releaseIfOwned?.(page.selectedChatId); page.saveDraft(); page.selectedChatId=wanted; page.olderMessages=[];page.latestMessages=[];page.historyCursor="";page.historyHasMore=false;page.restoreDraft();}
       delete conversationPage.dataset.jumpLoaded;delete conversationPage.dataset.jumpScrolled;
       loadChatState(true);
     });

@@ -20,7 +20,7 @@ const {
 const sending = require('./connector_send');
 const downloading = require('./connector_media');
 
-const syncing = require('./connector_sync');
+const outgoing = require('./connector_outgoing');
 
 // Keep old WhatsApp list/button row ids compatible with the v3 numbering. If a
 // user taps an old list message after the update, removed topics are folded into
@@ -835,7 +835,7 @@ client.on('message_create', async (message) => {
       }
       return;
     }
-    syncing.scheduleOutgoingMediaProbe(message, rawChatId);
+    outgoing.scheduleOutgoingMediaProbe(message, rawChatId);
 
     if (rawChatId.endsWith('@g.us')) {
       const text = String(messageText(message) || '').trim();
