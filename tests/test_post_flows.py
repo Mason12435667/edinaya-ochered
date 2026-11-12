@@ -12,7 +12,7 @@ from pathlib import Path
 
 import queue_productivity
 import queue_reliability
-import queue_workflow
+import queue_retention
 
 from tests import support
 from tests.support import WhatsAppUser, admin_cookie, get, post_form
@@ -101,17 +101,17 @@ class AccessTests(FlowTestCase):
                     self.assertTrue(response.location.startswith("/?notice="), response.location)
 
     def test_form_without_csrf_token_changes_nothing(self):
-        before = queue_workflow.retention_settings(app.STORE)
+        before = queue_retention.retention_settings(app.STORE)
         post_form("/admin/workflow", {"action": "retention", "messages": 7, "media": 7, "tickets": 7}, self.admin, csrf=False)
-        self.assertEqual(queue_workflow.retention_settings(app.STORE), before)
+        self.assertEqual(queue_retention.retention_settings(app.STORE), before)
 
     def test_employee_cannot_use_admin_forms(self):
         cookie = employee_cookie()
-        before = queue_workflow.retention_settings(app.STORE)
+        before = queue_retention.retention_settings(app.STORE)
         for path in self.ADMIN_ONLY:
             with self.subTest(path=path):
                 self.assertEqual(self.send(path, {"action": "retention", "messages": 1}, cookie).status, 403)
-        self.assertEqual(queue_workflow.retention_settings(app.STORE), before)
+        self.assertEqual(queue_retention.retention_settings(app.STORE), before)
 
 
 class WorkflowTests(FlowTestCase):
@@ -162,11 +162,11 @@ class WorkflowTests(FlowTestCase):
         self.assertEqual(app.STORE.get_ticket(response.json()["ticket_id"])["title"], "Отдельный вопрос")
 
     def test_retention_settings_are_saved(self):
-        before = queue_workflow.retention_settings(app.STORE)
-        self.addCleanup(queue_workflow.save_retention_settings, app.STORE, before["messages"], before["media"], before["tickets"])
+        before = queue_retention.retention_settings(app.STORE)
+        self.addCleanup(queue_retention.save_retention_settings, app.STORE, before["messages"], before["media"], before["tickets"])
         response = self.send("/admin/workflow", {"action": "retention", "messages": 41, "media": 42, "tickets": 43})
         self.assertTrue(response.location.startswith("/admin/workflow?notice="), response.location)
-        self.assertEqual(queue_workflow.retention_settings(app.STORE), {"messages": 41, "media": 42, "tickets": 43})
+        self.assertEqual(queue_retention.retention_settings(app.STORE), {"messages": 41, "media": 42, "tickets": 43})
 
 
 class ReliabilityTests(FlowTestCase):

@@ -17,6 +17,7 @@ const {
 const sending = require('./connector_send');
 const calling = require('./connector_calls');
 const syncing = require('./connector_sync');
+const grouping = require('./connector_groups');
 
 let outboundTimer = null;
 let heartbeatTimer = null;
@@ -217,7 +218,7 @@ async function activateConnector(source = 'ready') {
   }, STARTUP_LIVE_ONLY_MS + 15000);
   setTimeout(() => {
     if (backgroundWorkAllowed()) {
-      syncing.syncGroups().catch((error) => {
+      grouping.syncGroups().catch((error) => {
         noteBrowserPressure(error, 'initial groups');
         console.warn('Первичная синхронизация групп пока недоступна:', error.message || error);
       });
@@ -241,7 +242,7 @@ async function activateConnector(source = 'ready') {
   }
   if (!groupSyncTimer) {
     groupSyncTimer = setInterval(() => {
-      syncing.syncGroups().catch((error) => {
+      grouping.syncGroups().catch((error) => {
         // A local API/socket failure must never become an unhandled rejection
         // that kills the whole Node connector.
         console.warn('Фоновая синхронизация групп временно недоступна:', error.message || error);
