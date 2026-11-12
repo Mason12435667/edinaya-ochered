@@ -12,7 +12,12 @@ const DIR = path.join(__dirname, '..', 'connector');
 const PARTS = {
   sending: 'connector_send',
   receiving: 'connector_receive',
+  downloading: 'connector_media',
+  calling: 'connector_calls',
+  recovering: 'connector_recovery',
   syncing: 'connector_sync',
+  grouping: 'connector_groups',
+  outgoing: 'connector_outgoing',
   whatsappActions: 'connector_actions',
   lifecycle: 'connector_lifecycle',
 };
@@ -54,8 +59,10 @@ test('every WhatsApp event has exactly one handler', () => {
 
 test('references between the parts point at existing functions', () => {
   for (const file of FILES) {
-    for (const [, alias, name] of sourceOf(file).matchAll(/(?<![\w.])(sending|receiving|syncing|whatsappActions|lifecycle)\.(\w+)/g)) {
+    const source = sourceOf(file);
+    for (const [, alias, name] of source.matchAll(new RegExp(`(?<![\\w.])(${Object.keys(PARTS).join('|')})\\.(\\w+)`, 'g'))) {
       assert.equal(typeof parts[alias][name], 'function', `${file}: ${alias}.${name}`);
+      assert.match(source, new RegExp(`const ${alias} = require\\('\\./${PARTS[alias]}'\\)`), `${file}: ${alias} is not required`);
     }
   }
 });
